@@ -1,0 +1,10 @@
+name = "cswap/aiken-ebecca"
+version = "0.1.0"
+compiler = "v1.1.19"
+plutus = "v3"
+license = "Apache-2.0"
+
+[[dependencies]]
+name = "aiken-lang/stdlib"
+version = "v2.2.0"
+source = "github"

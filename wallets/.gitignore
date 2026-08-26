@@ -1,0 +1,5 @@
+# Demo wallet recovery phrases, signing keys, public keys, and addresses are local-only.
+# Never add their contents to version control.
+*
+!.gitignore
+!README.md

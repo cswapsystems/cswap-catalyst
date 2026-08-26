@@ -1,0 +1,22 @@
+
+1. One-shot Minter with Bulk Mint Support
+2. FT Minter
+3. Vault
+
+VaultDatum
+- NFT
+- FT Policy Id
+- FT Asset Name
+- Fractions
+
+Fractionalize Transaction
+- Deposit NFT token
+- Mint FT token
+
+Combine Transaction
+- Burn FT tokens
+- Get NFT token
+
+Known Exploits
+User can mint more FT tokens and deposit only a fraction of it to the vault.
+We need to enforce the minting of the FT tokens to be deposited to the vault and the datum must have the exact no. of fractions

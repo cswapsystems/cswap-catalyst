@@ -1,0 +1,154 @@
+RWA METADATA ARCHITECTURE
+=========================
+
+Purpose
+-------
+Keep the Cardano asset easily discoverable in wallets and explorers while
+putting the complete RWA record in a durable off-chain document. Do not store
+private, personally identifying, or commercially confidential information in
+Cardano transaction metadata or public IPFS.
+
+Recommended split
+-----------------
+1. CIP-25 (transaction metadata label 721)
+   Store the small public identity record in the mint transaction:
+   - name
+   - image
+   - mediaType
+   - short description
+   - a `files` entry for the public RWA manifest
+   - optionally, the application-specific `rwaManifest` URI
+
+   This is the compatibility layer for wallets, explorers, and token indexers.
+   Every Cardano metadata text/bytestring value is limited to 64 UTF-8 bytes.
+   CIP-25 image and description values may therefore be represented as arrays
+   of 64-byte text chunks. The UI does this for long image URIs and
+   descriptions.
+
+2. Public IPFS manifest
+   Pin one JSON file for each version of the public RWA record. The IPFS CID
+   is content-addressed, so changing the file produces a new CID. Suggested
+   path: ipfs://<CID>/rwa-manifest.json
+
+   Suggested manifest structure:
+
+   {
+     "schema": "cswap.rwa-manifest/v1",
+     "asset": {
+       "assetId": "NLS-001",
+       "class": "solar-infrastructure",
+       "issuer": "Example Issuer Ltd.",
+       "jurisdiction": "PH"
+     },
+     "attestations": [
+       {
+         "type": "valuation",
+         "issuedAt": "2026-08-26",
+         "document": {
+           "uri": "ipfs://<CID>/valuation.pdf",
+           "sha256": "<hash>"
+         }
+       }
+     ],
+     "disclosure": {
+       "uri": "ipfs://<CID>/disclosure.pdf",
+       "sha256": "<hash>"
+     }
+   }
+
+   Public documents may be stored on IPFS or Arweave. Store each source URI
+   and a content hash in the manifest when an independent verification step is
+   needed.
+
+3. Private document store
+   KYC, personal data, confidential contracts, and unencrypted reports must
+   remain in an access-controlled system. Encrypt data before external storage
+   where appropriate. Do not publish these files, their plaintext, or
+   predictable hashes of sensitive low-entropy information to Cardano/IPFS.
+
+CIP-25 mint record example
+--------------------------
+{
+  "721": {
+    "<policyId>": {
+      "<tokenName>": {
+        "name": "Northline Solar Project",
+        "image": "ipfs://<image-CID>/cover.png",
+        "mediaType": "image/png",
+        "description": "Short public RWA description.",
+        "files": [
+          {
+            "name": "RWA disclosure manifest",
+            "mediaType": "application/json",
+            "src": "ipfs://<manifest-CID>/rwa-manifest.json"
+          }
+        ],
+        "rwaManifest": "ipfs://<manifest-CID>/rwa-manifest.json"
+      }
+    },
+    "version": "1.0"
+  }
+}
+
+CIP-86 updates
+--------------
+CIP-86 enables an authorized party to update selected token metadata fields
+without minting or burning another token. It does NOT require a change to the
+current one-shot minter validator because the validator does not inspect
+transaction metadata.
+
+At original mint, attach a label-86 oracle assignment. For the current demo,
+the admin wallet may be both main and update address:
+
+{
+  "86": {
+    "assign_metadata_oracle": {
+      "<policyId>": {
+        "main_address": "<adminAddress>",
+        "update_address": "<adminAddress>"
+      }
+    }
+  }
+}
+
+Later, the configured update wallet signs an ordinary transaction with a
+simple metadata update, for example to move to a new immutable IPFS manifest:
+
+{
+  "86": {
+    "simple_metadata_update": {
+      "<policyId>": {
+        "<tokenName>": {
+          "rwaManifest": "ipfs://<new-manifest-CID>/rwa-manifest.json"
+        }
+      }
+    }
+  }
+}
+
+Implementation notes
+--------------------
+- The browser must never receive an IPFS pinning credential. Add a server
+  upload route backed by a provider such as Pinata once a server-only provider
+  JWT/API token is configured.
+- The route should validate the manifest schema and size before pinning, then
+  return only the resulting CID to the browser.
+- The mint transaction should include both label 721 (CIP-25) and the initial
+  label-86 oracle assignment.
+- The update page should require the connected Eternl address to match the
+  configured CIP-86 update address before constructing an update transaction.
+- CIP-86 remains proposed. Preserve a complete, useful CIP-25 baseline for
+  wallet and explorer compatibility; CIP-86-aware clients can resolve newer
+  manifest pointers.
+- CIP-68 is the alternative for future assets when metadata must be readable
+  by Plutus validators or governed directly on-chain. It requires a new
+  reference-NFT/user-token issuance architecture and cannot be retrofitted to
+  existing one-shot assets.
+
+References
+----------
+- CIP-25: https://cips.cardano.org/cip/CIP-0025
+- CIP-86: https://cips.cardano.org/cip/CIP-86
+- CIP-68: https://cips.cardano.org/cip/cip-68
+- Cardano transaction metadata constraints:
+  https://developers.cardano.org/docs/get-started/infrastructure/cardano-cli/basic-operations/simple-transactions/

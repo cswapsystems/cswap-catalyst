@@ -32,6 +32,16 @@ yarn-error.log*
 
 # env files (can opt-in for committing if needed)
 .env*
+!.env.example
+
+# Local Cardano credentials. Public addresses belong in .env.local; recovery
+# phrases and signing keys must never be committed.
+*.skey
+*.mnemonic
+seed.mnemonic
+
+# Aiken dependency/build cache. Keep contract source, locks, and plutus.json.
+/contracts/**/build/
 
 # vercel
 .vercel
