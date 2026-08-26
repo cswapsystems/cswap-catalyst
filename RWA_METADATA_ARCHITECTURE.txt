@@ -128,9 +128,10 @@ simple metadata update, for example to move to a new immutable IPFS manifest:
 
 Implementation notes
 --------------------
-- The browser must never receive an IPFS pinning credential. Add a server
-  upload route backed by a provider such as Pinata once a server-only provider
-  JWT/API token is configured.
+- The browser must never receive an IPFS pinning credential. Blockfrost IPFS
+  uses a distinct server-only `BLOCKFROST_IPFS_PROJECT_ID`; it is not the
+  Cardano Preprod `BLOCKFROST_PROJECT_ID`. Add an authenticated server upload
+  route only after this value is configured.
 - The route should validate the manifest schema and size before pinning, then
   return only the resulting CID to the browser.
 - The mint transaction should include both label 721 (CIP-25) and the initial

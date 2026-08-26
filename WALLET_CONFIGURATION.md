@@ -15,6 +15,20 @@ and vault are deployed.
 Set `NEXT_PUBLIC_CARDANO_NETWORK` to `preprod` or `mainnet`. The page forms a
 Cexplorer link appropriate to that network.
 
+## Blockfrost server configuration
+
+Add separate server-only project IDs to `.env.local`. Never expose either
+value with a `NEXT_PUBLIC_` prefix:
+
+```bash
+BLOCKFROST_PROJECT_ID=<Cardano Preprod project ID>
+BLOCKFROST_IPFS_PROJECT_ID=<Blockfrost IPFS project ID>
+```
+
+The IPFS project ID is distinct from the Cardano Preprod project ID. It will
+be used only by an authenticated server upload route when IPFS manifest
+pinning is enabled.
+
 ## Admin wallet safety
 
 For production, create the admin wallet recovery phrase in a hardware wallet or
