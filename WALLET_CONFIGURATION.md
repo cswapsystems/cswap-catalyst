@@ -26,8 +26,13 @@ BLOCKFROST_IPFS_PROJECT_ID=<Blockfrost IPFS project ID>
 ```
 
 The IPFS project ID is distinct from the Cardano Preprod project ID. It will
-be used only by an authenticated server upload route when IPFS manifest
-pinning is enabled.
+be used only by the server-side IPFS upload route; it is never sent to the
+browser. The Mint RWA form pins three selected files up to 5 MB each: a PNG,
+JPEG, or WebP image; a PDF proof-of-authenticity document; and a JSON metadata
+object. It embeds the resulting `ipfs://` URIs in CIP-25 metadata. Before
+exposing the application publicly, protect this upload route with your
+application's issuer authentication and rate limits so untrusted users cannot
+consume your IPFS quota.
 
 ## Admin wallet safety
 

@@ -132,8 +132,11 @@ Implementation notes
   uses a distinct server-only `BLOCKFROST_IPFS_PROJECT_ID`; it is not the
   Cardano Preprod `BLOCKFROST_PROJECT_ID`. Add an authenticated server upload
   route only after this value is configured.
-- The route should validate the manifest schema and size before pinning, then
-  return only the resulting CID to the browser.
+- The upload route validates PNG, JPEG, and WebP image signatures, a PDF proof
+  document, and a JSON-object metadata file before pinning. The image becomes
+  the CIP-25 `image` URI; the proof and JSON metadata document become named
+  entries in CIP-25's `files` array. Add issuer authentication and rate limits
+  before public deployment.
 - The mint transaction should include both label 721 (CIP-25) and the initial
   label-86 oracle assignment.
 - The update page should require the connected Eternl address to match the
