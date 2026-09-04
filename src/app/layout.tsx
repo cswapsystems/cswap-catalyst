@@ -1,5 +1,6 @@
 import type { Metadata } from "next";
 import "./globals.css";
+import { WalletProvider } from "./_components/wallet-context";
 
 export const metadata: Metadata = {
   title: "CSWAP Systems | Real-world assets",
@@ -9,7 +10,7 @@ export const metadata: Metadata = {
 export default function RootLayout({ children }: LayoutProps<"/">) {
   return (
     <html lang="en" className="h-full antialiased">
-      <body className="min-h-full flex flex-col">{children}</body>
+      <body className="min-h-full flex flex-col"><WalletProvider>{children}</WalletProvider></body>
     </html>
   );
 }

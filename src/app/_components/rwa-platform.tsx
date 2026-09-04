@@ -4,6 +4,7 @@ import Link from "next/link";
 import { useEffect, useState } from "react";
 import EternlWalletButton from "./eternl-wallet";
 import Cip25MintForm from "./cip25-mint-form";
+import OnchainFractionalizeForm from "./fractionalize-form";
 
 type Page = "mint" | "fractionalize" | "liquidate" | "list" | "wallets";
 
@@ -25,8 +26,11 @@ const pageDetails: Record<Page, { eyebrow: string; title: string; description: s
 
 function Arrow() { return <span aria-hidden="true" className="button-arrow">↗</span>; }
 
-function Field({ label, placeholder, hint, select }: { label: string; placeholder: string; hint?: string; select?: boolean }) {
-  return <label className="field"><span className="field-label">{label}</span><span className="field-input-wrap">{select ? <select defaultValue=""><option value="" disabled>{placeholder}</option><option>Seaport Warehouse 04</option><option>Northline Solar Project</option><option>Maison Alder - Unit 3B</option></select> : <input placeholder={placeholder} />}{select && <span className="select-chevron">⌄</span>}</span>{hint && <span className="field-hint">{hint}</span>}</label>;
+type SelectOption = { value: string; label: string };
+
+function Field({ label, placeholder, hint, select, options, disabled, value, onChange, readOnly }: { label: string; placeholder: string; hint?: string; select?: boolean; options?: SelectOption[]; disabled?: boolean; value?: string; onChange?: (value: string) => void; readOnly?: boolean }) {
+  const selectOptions = options || [{ value: "warehouse", label: "Seaport Warehouse 04" }, { value: "solar", label: "Northline Solar Project" }, { value: "maison", label: "Maison Alder - Unit 3B" }];
+  return <label className="field"><span className="field-label">{label}</span><span className="field-input-wrap">{select ? <select value={value} defaultValue={value === undefined ? "" : undefined} onChange={value === undefined ? undefined : (event) => onChange?.(event.target.value)} disabled={disabled}><option value="" disabled>{placeholder}</option>{selectOptions.map((option) => <option value={option.value} key={option.value}>{option.label}</option>)}</select> : <input placeholder={placeholder} value={value} onChange={(event) => onChange?.(event.target.value)} readOnly={readOnly} disabled={disabled} />}{select && <span className="select-chevron">⌄</span>}</span>{hint && <span className="field-hint">{hint}</span>}</label>;
 }
 
 function MintForm() {
@@ -34,8 +38,7 @@ function MintForm() {
 }
 
 function FractionalizeForm() {
-  const [mode, setMode] = useState<"split" | "combine">("split");
-  return <section className="work-card form-card"><div className="section-heading"><div><span className="section-kicker">01 / Position setup</span><h2>{mode === "split" ? "Create fractional ownership" : "Combine your fractional units"}</h2></div><span className="step-badge">1 of 2</span></div><div className="segmented-control"><button className={mode === "split" ? "selected" : ""} onClick={() => setMode("split")}>Fractionalize</button><button className={mode === "combine" ? "selected" : ""} onClick={() => setMode("combine")}>Combine</button></div><div className="field-grid"><Field label="Select RWA asset" placeholder="Choose an asset" select /><Field label={mode === "split" ? "Number of fractions" : "Units to combine"} placeholder={mode === "split" ? "e.g. 1,000" : "e.g. 250"} /><Field label="Token you receive" placeholder={mode === "split" ? "Created automatically" : "Original RWA token"} /><Field label="Recipient wallet" placeholder="Paste wallet address" /></div><div className="calculation-card"><span>{mode === "split" ? "Illustrative allocation" : "Resulting position"}</span><strong>{mode === "split" ? "1 RWA token → 1,000 ownership units" : "250 units → 25% of RWA token"}</strong><p>Network fees and final ratio are confirmed in the next step.</p></div><div className="form-footer"><p><span className="status-dot" /> Assets remain in audited custody.</p><button type="button" className="primary-button">Review {mode === "split" ? "fractions" : "combination"} <Arrow /></button></div></section>;
+  return <OnchainFractionalizeForm />;
 }
 
 function LiquidateForm() {
@@ -80,7 +83,7 @@ function WalletDirectory() {
     }
   }
 
-  useEffect(() => { void refreshBalances(); }, []);
+  useEffect(() => { const timer = window.setTimeout(() => { void refreshBalances(); }, 0); return () => window.clearTimeout(timer); }, []);
 
   function formatAda(lovelace: string | undefined) {
     if (!lovelace) return "—";
@@ -106,5 +109,5 @@ function SidePanel({ page }: { page: Page }) {
 export default function RwaPlatform({ page }: { page: Page }) {
   const detail = pageDetails[page];
   const form = page === "mint" ? <MintForm /> : page === "fractionalize" ? <FractionalizeForm /> : page === "liquidate" ? <LiquidateForm /> : <ListForm />;
-  return <div className="platform-shell"><header className="topbar"><Link href="/" className="brand"><span className="brand-mark"><i /><i /><i /></span><span>CSWAP Systems</span></Link><nav aria-label="Main navigation">{navItems.map((item) => <Link href={item.href} key={item.href} className={page === item.page ? "active" : ""}>{item.label}</Link>)}</nav><EternlWalletButton /></header><main className="page-main"><section className="hero"><div><span className="eyebrow"><span className="eyebrow-icon">{navItems.find((item) => item.page === page)?.icon}</span>{detail.eyebrow}</span><h1>{detail.title}</h1><p>{detail.description}</p></div>{page !== "wallets" && <div className="portfolio-pill"><span>Portfolio value</span><strong>$48,240.80</strong><small>+ 4.8% this month</small></div>}</section>{page === "wallets" ? <WalletDirectory /> : <div className="workspace">{form}<SidePanel page={page} /></div>}</main><footer><span>© 2025 CSWAP Systems</span><span>Built for real-world assets <b>•</b> Secured on-chain</span><div><a href="#">Terms</a><a href="#">Support</a></div></footer></div>;
+  return <div className="platform-shell"><header className="topbar"><Link href="/" className="brand"><span className="brand-mark"><i /><i /><i /></span><span>CSWAP Systems</span></Link><nav aria-label="Main navigation">{navItems.map((item) => <Link href={item.href} key={item.href} className={page === item.page ? "active" : ""}>{item.label}</Link>)}</nav><Link href="/history" className="history-shortcut">History</Link><EternlWalletButton /></header><main className="page-main"><section className="hero"><div><span className="eyebrow"><span className="eyebrow-icon">{navItems.find((item) => item.page === page)?.icon}</span>{detail.eyebrow}</span><h1>{detail.title}</h1><p>{detail.description}</p></div>{page !== "wallets" && <div className="portfolio-pill"><span>Portfolio value</span><strong>$48,240.80</strong><small>+ 4.8% this month</small></div>}</section>{page === "wallets" ? <WalletDirectory /> : <div className="workspace">{form}<SidePanel page={page} /></div>}</main><footer><span>© 2025 CSWAP Systems</span><span>Built for real-world assets <b>•</b> Secured on-chain</span><div><a href="#">Terms</a><a href="#">Support</a></div></footer></div>;
 }

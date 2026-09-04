@@ -1,6 +1,7 @@
 "use client";
 
 import { FormEvent, RefObject, useRef, useState } from "react";
+import { useWallet } from "./wallet-context";
 
 type FormState = { name: string; tokenName: string; description: string };
 type UploadKind = "image" | "proof" | "metadata";
@@ -53,6 +54,7 @@ function FilePicker({ label, file, accept, help, inputRef, disabled, onSelect }:
 }
 
 export default function Cip25MintForm() {
+  const { registerAddress } = useWallet();
   const [form, setForm] = useState(initialState);
   const [image, setImage] = useState<File | null>(null);
   const [proof, setProof] = useState<File | null>(null);
@@ -111,6 +113,7 @@ export default function Cip25MintForm() {
       const lucid = await Lucid(new Blockfrost("/api/blockfrost", ""), "Preprod");
       lucid.selectWallet.fromAPI(api);
       const address = await lucid.wallet().address();
+      registerAddress(address);
       const seed = (await lucid.utxosAt(address))
         .filter((utxo) => Object.keys(utxo.assets).every((unit) => unit === "lovelace") && utxo.assets.lovelace > BigInt(5_000_000))
         .sort((a, b) => (a.assets.lovelace > b.assets.lovelace ? -1 : 1))[0];
