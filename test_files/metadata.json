@@ -1,0 +1,17 @@
+{
+  "asset_id": "RWA-CONDO-2026-0001",
+  "asset_type": "Condominium Property",
+  "property_name": "Harborview Residences",
+  "unit_number": "18A",
+  "address": "123 Roxas Boulevard, Pasay City, Metro Manila, Philippines",
+  "floor_area_sqm": "78.50",
+  "bedrooms": "2",
+  "bathrooms": "2",
+  "parking_spaces": "1",
+  "year_built": "2021",
+  "ownership_status": "Freehold",
+  "occupancy_status": "Vacant",
+  "valuation_currency": "PHP",
+  "estimated_value": "12500000",
+  "metadata_purpose": "Real-estate asset identification"
+}
