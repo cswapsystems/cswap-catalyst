@@ -7,13 +7,13 @@ import Cip25MintForm from "./cip25-mint-form";
 import OnchainFractionalizeForm from "./fractionalize-form";
 import MarketplaceWorkbench from "./marketplace-workbench";
 
-type Page = "mint" | "fractionalize" | "liquidate" | "list" | "wallets";
+type Page = "mint" | "fractionalize" | "liquidate" | "marketplace" | "wallets";
 
 const navItems: { href: string; label: string; page: Page; icon: string }[] = [
   { href: "/mint", label: "Mint RWA", page: "mint", icon: "◇" },
   { href: "/fractionalize", label: "Fractionalize", page: "fractionalize", icon: "◒" },
   { href: "/liquidate", label: "Liquidate", page: "liquidate", icon: "↘" },
-  { href: "/list", label: "List", page: "list", icon: "□" },
+  { href: "/marketplace", label: "Marketplace", page: "marketplace", icon: "□" },
   { href: "/wallets", label: "Wallets", page: "wallets", icon: "⌘" },
 ];
 
@@ -21,7 +21,7 @@ const pageDetails: Record<Page, { eyebrow: string; title: string; description: s
   mint: { eyebrow: "Asset origination", title: "Mint real-world value", description: "Create a verifiable on-chain representation of an off-chain asset." },
   fractionalize: { eyebrow: "Portfolio tooling", title: "Make ownership flexible", description: "Split an RWA into transferable units or reassemble units you hold." },
   liquidate: { eyebrow: "Redemption desk", title: "Exit with confidence", description: "Redeem eligible RWA tokens against the reserve and settle the position." },
-  list: { eyebrow: "Secondary market", title: "Put your asset to work", description: "Offer verified RWA tokens to a curated marketplace of participants." },
+  marketplace: { eyebrow: "Secondary market", title: "Buy and sell RWA tokens", description: "Trade verified real-world asset tokens through transparent on-chain escrow." },
   wallets: { eyebrow: "Operational directory", title: "Wallets & custody", description: "Inspect the public addresses that support each part of the RWA lifecycle." },
 };
 
@@ -39,7 +39,7 @@ function LiquidateForm() {
   return <section className="work-card form-card"><div className="section-heading"><div><span className="section-kicker">01 / Redemption request</span><h2>Choose a position to liquidate</h2></div><span className="step-badge">1 of 2</span></div><div className="asset-choice selected-choice"><div className="asset-monogram amber">SH</div><div><strong>Seaport Warehouse 04</strong><p>Commercial property · 42.5 RWA available</p></div><span className="asset-value">$12,750.00</span><span className="choice-check">✓</span></div><div className="asset-choice"><div className="asset-monogram moss">NS</div><div><strong>Northline Solar Project</strong><p>Renewable energy · 18.0 RWA available</p></div><span className="asset-value">$7,920.00</span></div><div className="liquidation-summary"><div><span>Requested amount</span><strong>42.5 RWA</strong></div><div><span>Estimated settlement</span><strong>$12,686.25</strong></div><div><span>Settlement window</span><strong>1–2 business days</strong></div></div><div className="form-footer"><p><span className="status-dot" /> Redemption eligibility verified.</p><button type="button" className="primary-button">Request liquidation <Arrow /></button></div></section>;
 }
 
-function ListForm() {
+function MarketplaceForm() {
   return <MarketplaceWorkbench />;
 }
 
@@ -97,11 +97,11 @@ function SidePanel({ page }: { page: Page }) {
   const content = page === "mint" ? ["Verified asset registry", "Independent valuation", "Proof-of-reserve record"] : page === "fractionalize" ? ["Flexible ownership sizes", "Transferable fractional units", "Full audit trail"] : page === "liquidate" ? ["Reserve-backed settlement", "Transparent pricing", "Dedicated support desk"] : ["Verified counter-parties", "Secure escrow settlement", "Real-time listing status"];
   const title = page === "mint" ? "Assets, made accessible." : page === "fractionalize" ? "Own what matters, your way." : page === "liquidate" ? "Liquidity, without the unknown." : "Discover the value you hold.";
   const icon = page === "mint" ? "RWA" : page === "fractionalize" ? "÷" : page === "liquidate" ? "$" : "↗";
-  return <aside className="side-panel"><span className="panel-eyebrow">{page === "liquidate" ? "Settlement confidence" : page === "list" ? "Built for exchange" : "How it works"}</span><div className="panel-orbit"><i /><i /><b>{icon}</b></div><h3>{title}</h3><p className="panel-copy">Every action creates an auditable record, giving participants a clearer view of real-world value.</p><div className="benefit-list">{content.map((item, index) => <div key={item}><span>0{index + 1}</span>{item}</div>)}</div></aside>;
+  return <aside className="side-panel"><span className="panel-eyebrow">{page === "liquidate" ? "Settlement confidence" : page === "marketplace" ? "Built for exchange" : "How it works"}</span><div className="panel-orbit"><i /><i /><b>{icon}</b></div><h3>{title}</h3><p className="panel-copy">Every action creates an auditable record, giving participants a clearer view of real-world value.</p><div className="benefit-list">{content.map((item, index) => <div key={item}><span>0{index + 1}</span>{item}</div>)}</div></aside>;
 }
 
 export default function RwaPlatform({ page }: { page: Page }) {
   const detail = pageDetails[page];
-  const form = page === "mint" ? <MintForm /> : page === "fractionalize" ? <FractionalizeForm /> : page === "liquidate" ? <LiquidateForm /> : <ListForm />;
+  const form = page === "mint" ? <MintForm /> : page === "fractionalize" ? <FractionalizeForm /> : page === "liquidate" ? <LiquidateForm /> : <MarketplaceForm />;
   return <div className="platform-shell"><header className="topbar"><Link href="/" className="brand"><span className="brand-mark"><i /><i /><i /></span><span>CSWAP Systems</span></Link><nav aria-label="Main navigation">{navItems.map((item) => <Link href={item.href} key={item.href} className={page === item.page ? "active" : ""}>{item.label}</Link>)}</nav><Link href="/history" className="history-shortcut">History</Link><EternlWalletButton /></header><main className="page-main"><section className="hero"><div><span className="eyebrow"><span className="eyebrow-icon">{navItems.find((item) => item.page === page)?.icon}</span>{detail.eyebrow}</span><h1>{detail.title}</h1><p>{detail.description}</p></div>{page !== "wallets" && <div className="portfolio-pill"><span>Portfolio value</span><strong>$48,240.80</strong><small>+ 4.8% this month</small></div>}</section>{page === "wallets" ? <WalletDirectory /> : <div className="workspace">{form}<SidePanel page={page} /></div>}</main><footer><span>© 2025 CSWAP Systems</span><span>Built for real-world assets <b>•</b> Secured on-chain</span><div><a href="#">Terms</a><a href="#">Support</a></div></footer></div>;
 }
