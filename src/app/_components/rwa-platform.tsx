@@ -5,6 +5,7 @@ import { useEffect, useState } from "react";
 import EternlWalletButton from "./eternl-wallet";
 import Cip25MintForm from "./cip25-mint-form";
 import OnchainFractionalizeForm from "./fractionalize-form";
+import MarketplaceWorkbench from "./marketplace-workbench";
 
 type Page = "mint" | "fractionalize" | "liquidate" | "list" | "wallets";
 
@@ -26,13 +27,6 @@ const pageDetails: Record<Page, { eyebrow: string; title: string; description: s
 
 function Arrow() { return <span aria-hidden="true" className="button-arrow">↗</span>; }
 
-type SelectOption = { value: string; label: string };
-
-function Field({ label, placeholder, hint, select, options, disabled, value, onChange, readOnly }: { label: string; placeholder: string; hint?: string; select?: boolean; options?: SelectOption[]; disabled?: boolean; value?: string; onChange?: (value: string) => void; readOnly?: boolean }) {
-  const selectOptions = options || [{ value: "warehouse", label: "Seaport Warehouse 04" }, { value: "solar", label: "Northline Solar Project" }, { value: "maison", label: "Maison Alder - Unit 3B" }];
-  return <label className="field"><span className="field-label">{label}</span><span className="field-input-wrap">{select ? <select value={value} defaultValue={value === undefined ? "" : undefined} onChange={value === undefined ? undefined : (event) => onChange?.(event.target.value)} disabled={disabled}><option value="" disabled>{placeholder}</option>{selectOptions.map((option) => <option value={option.value} key={option.value}>{option.label}</option>)}</select> : <input placeholder={placeholder} value={value} onChange={(event) => onChange?.(event.target.value)} readOnly={readOnly} disabled={disabled} />}{select && <span className="select-chevron">⌄</span>}</span>{hint && <span className="field-hint">{hint}</span>}</label>;
-}
-
 function MintForm() {
   return <Cip25MintForm />;
 }
@@ -46,7 +40,7 @@ function LiquidateForm() {
 }
 
 function ListForm() {
-  return <section className="work-card form-card"><div className="section-heading"><div><span className="section-kicker">01 / Listing details</span><h2>Set up your offer</h2></div><span className="step-badge">1 of 2</span></div><div className="field-grid"><Field label="Select token to list" placeholder="Choose an available position" select /><Field label="Amount to list" placeholder="0.00 RWA" /><Field label="Price per token" placeholder="$ 0.00" /><Field label="Listing duration" placeholder="Select duration" select /></div><div className="market-note"><span className="market-icon">↗</span><div><strong>Marketplace reach</strong><p>Your listing will be visible to verified marketplace participants after approval.</p></div></div><div className="form-footer"><p><span className="status-dot" /> 1.5% fee applies when the listing settles.</p><button type="button" className="primary-button">Review listing <Arrow /></button></div></section>;
+  return <MarketplaceWorkbench />;
 }
 
 const walletRoles = [

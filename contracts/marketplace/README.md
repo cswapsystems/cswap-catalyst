@@ -95,6 +95,20 @@ LP token minting policy.
 
 The policy allows LP minting or burning only when a pool input containing the configured `vault_token` participates in the transaction. The pool validator then checks the exact LP mint or burn amount for liquidity actions.
 
+### `validators/p2p_listing.ak`
+
+Fixed-price orderbook validator for one asset class and any positive quantity.
+
+- `Buy`: consumes the listing only when the configured proceeds address receives the demanded payment and the buyer receives the listed asset.
+- `Cancel`: requires the listing management key and returns the escrowed asset and ADA to the proceeds address.
+- `Update`: requires the listing management key and recreates the listing at the same script address with updated quantity, price, price asset, or proceeds address.
+- Listing UTxOs must contain exactly the listed asset quantity plus locked ADA; unrelated native assets are rejected.
+- The validator is parameterized by the registry script address and requires an active exact `AssetConfig` for fills. The registry reference must contain the matching registry identity NFT and datum identity.
+
+### `validators/p2p_listing_simple.ak`
+
+Registry-free fixed-price orderbook variant. It keeps the same exact escrow, buy, cancel, and update behavior, but has no registry datum, registry NFT, registry reference input, or asset allowlist. The requested payment asset is accepted directly from the listing datum.
+
 ## Pricing Model
 
 Quotes use integer ratios:
@@ -203,3 +217,26 @@ npm run test:full-scenarios
 ```
 
 The smoke test runs `aiken build`, checks that all expected validators are present in `plutus.json`, and verifies that the JavaScript encoders can serialize registry, oracle, and pool datums.
+
+
+### Registry-free shared quote pool
+
+The registry-free path uses p2p_listing_simple for direct listings and the
+parameterized quote_pool validator for one shared pool per quote asset (for
+example one ADA pool and one USDC pool, not one pool per RWA policy).
+
+SimpleListingDatum.settlement is either Direct or QuotePool { pool_token }.
+The pool contract supports LP add/remove, batcher acquisition of a direct
+listing, and public inventory sale. Each action spends and recreates the pool
+UTxO with exact value accounting. Pool inventory sale adds the quote payment
+and the listing's returned ADA buffer to the pool continuation. The pool keeps
+its quote asset, pool NFT, LP token, admin, batcher, reserve, and pause state
+bound across trade actions; closing burns the pool NFT and cannot leave a
+pool-token continuation.
+
+The application presents direct listings and pool inventory in one marketplace
+screen. The client-side builder parameterizes quote_pool with the configured
+orderbook address before preparing a pool inventory buy. Set
+NEXT_PUBLIC_SIMPLE_ORDERBOOK_ADDRESS after deploying the registry-free
+orderbook; pool addresses/tokens are read from the inventory listing and pool
+UTxO datum.

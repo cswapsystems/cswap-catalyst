@@ -1,17 +1,13 @@
 use aiken/collection/list
-use aiken/crypto.{VerificationKeyHash}
 use cardano/assets
 use cardano/address.{Address}
 use cardano/transaction.{InlineDatum, Input, Output, OutputReference, Transaction, find_input}
-use ebecca/types.{
-  AssetConfig, AssetClass, ListingDatum, PolicyConfig, RegistryDatum, ada,
-  asset_config_for, has_one, policy_config_for, quantity_of,
-}
+use ebecca/types.{AssetClass, QuotePoolDatum, SimpleListingDatum, ada, has_one, quantity_of}
 
-pub type ListingRedeemer {
+pub type SimpleListingRedeemer {
   Buy { buyer: Address }
   Cancel
-  Update { next: ListingDatum }
+  Update { next: SimpleListingDatum }
 }
 
 fn paid_at_least(
@@ -28,14 +24,18 @@ fn paid_at_least(
   )
 }
 
-fn listing_value(rwa: AssetClass, quantity: Int, locked_lovelace: Int) -> assets.Value {
+fn listing_value(
+  rwa: AssetClass,
+  quantity: Int,
+  locked_lovelace: Int,
+) -> assets.Value {
   assets.from_lovelace(locked_lovelace)
     |> assets.add(rwa.policy_id, rwa.asset_name, quantity)
 }
 
 fn listing_escrow_is_exact(
   input_value: assets.Value,
-  listing: ListingDatum,
+  listing: SimpleListingDatum,
   locked_lovelace: Int,
 ) -> Bool {
   and {
@@ -57,65 +57,7 @@ fn seller_receives_quantity(
   }
 }
 
-fn registry_from_reference(
-  reference_inputs: List<Input>,
-  registry_token: AssetClass,
-  registry_address: Address,
-) -> Option<RegistryDatum> {
-  list.find_map(
-    reference_inputs,
-    fn(input) {
-      if and {
-        input.output.address == registry_address,
-        input.output.value |> has_one(registry_token),
-      } {
-        when input.output.datum is {
-          InlineDatum(data) -> {
-            expect registry: RegistryDatum = data
-            if registry.registry_token == registry_token {
-              Some(registry)
-            } else {
-              None
-            }
-          }
-          _ -> None
-        }
-      } else {
-        None
-      }
-    },
-  )
-}
-
-fn asset_config_allows_sell(config: Option<AssetConfig>) -> Bool {
-  when config is {
-    Some(asset_config) -> and {
-      asset_config.active,
-      !asset_config.frozen,
-      !asset_config.defaulted,
-      !asset_config.redeemed,
-      asset_config.sell_enabled,
-    }
-    // Orderbook fills require an exact asset configuration. A policy-level
-    // registration alone must not silently admit unrelated asset names.
-    None -> False
-  }
-}
-
-fn asset_config_allows_buy(config: Option<AssetConfig>) -> Bool {
-  when config is {
-    Some(asset_config) -> and {
-      asset_config.active,
-      !asset_config.frozen,
-      !asset_config.defaulted,
-      !asset_config.redeemed,
-      asset_config.buy_enabled,
-    }
-    None -> False
-  }
-}
-
-fn listing_is_valid(listing: ListingDatum) -> Bool {
+fn listing_is_valid(listing: SimpleListingDatum) -> Bool {
   and {
     listing.quantity > 0,
     listing.price > 0,
@@ -127,7 +69,7 @@ fn listing_is_valid(listing: ListingDatum) -> Bool {
 fn output_is_listing(
   output: Output,
   address: Address,
-  listing: ListingDatum,
+  listing: SimpleListingDatum,
   locked_lovelace: Int,
 ) -> Bool {
   and {
@@ -139,7 +81,7 @@ fn output_is_listing(
     ),
     when output.datum is {
       InlineDatum(data) -> {
-        expect output_listing: ListingDatum = data
+        expect output_listing: SimpleListingDatum = data
         output_listing == listing
       }
       _ -> False
@@ -150,7 +92,7 @@ fn output_is_listing(
 fn find_listing_output(
   outputs: List<Output>,
   address: Address,
-  listing: ListingDatum,
+  listing: SimpleListingDatum,
   locked_lovelace: Int,
 ) -> Option<Output> {
   list.find(
@@ -161,26 +103,9 @@ fn find_listing_output(
   )
 }
 
-fn registry_allows_fill(registry: RegistryDatum, listing: ListingDatum) -> Bool {
-  expect Some(policy): Option<PolicyConfig> =
-    policy_config_for(listing.rwa.policy_id, registry.policies)
-
-  let asset_config = asset_config_for(listing.rwa, registry.asset_configs)
-
-  and {
-    !registry.paused,
-    policy.active,
-    policy.sell_enabled,
-    policy.buy_enabled,
-    asset_config_allows_sell(asset_config),
-    asset_config_allows_buy(asset_config),
-    list.has(registry.quote_assets, listing.price_asset),
-  }
-}
-
 fn seller_is_paid(
   outputs: List<Output>,
-  listing: ListingDatum,
+  listing: SimpleListingDatum,
   locked_lovelace: Int,
 ) -> Bool {
   if listing.price_asset == ada() {
@@ -198,10 +123,45 @@ fn seller_is_paid(
   }
 }
 
-validator p2p_listing(registry_address: Address) {
+fn pool_sale_is_atomic(
+  tx: Transaction,
+  listing: SimpleListingDatum,
+) -> Bool {
+  when listing.settlement is {
+    Direct -> True
+    QuotePool { pool_token } ->
+      and {
+        list.any(
+          tx.inputs,
+          fn(input: Input) {
+            input.output.address == listing.seller
+              && (input.output.value |> has_one(pool_token))
+          },
+        ),
+        list.any(
+          tx.outputs,
+          fn(output) {
+            and {
+              output.address == listing.seller,
+              output.value |> has_one(pool_token),
+              when output.datum is {
+                InlineDatum(data) -> {
+                  expect pool: QuotePoolDatum = data
+                  pool.pool_token == pool_token
+                }
+                _ -> False
+              },
+            }
+          },
+        ),
+      }
+  }
+}
+
+validator p2p_listing_simple {
   spend(
-    datum: Option<ListingDatum>,
-    redeemer: ListingRedeemer,
+    datum: Option<SimpleListingDatum>,
+    redeemer: SimpleListingRedeemer,
     own_ref: OutputReference,
     tx: Transaction,
   ) {
@@ -210,31 +170,23 @@ validator p2p_listing(registry_address: Address) {
 
     when redeemer is {
       Buy { buyer } -> {
-        expect Some(registry) =
-          registry_from_reference(
-            tx.reference_inputs,
-            listing.registry_token,
-            registry_address,
-          )
-
         let locked_lovelace = own_input.output.value |> quantity_of(ada())
 
         and {
           listing_is_valid(listing),
-          registry_allows_fill(registry, listing),
           listing_escrow_is_exact(own_input.output.value, listing, locked_lovelace),
           seller_is_paid(tx.outputs, listing, locked_lovelace),
+          pool_sale_is_atomic(tx, listing),
           paid_at_least(tx.outputs, buyer, listing.rwa, listing.quantity),
         }
       }
 
       Cancel -> {
-        let seller_key: VerificationKeyHash = listing.seller_key
         let locked_lovelace = own_input.output.value |> quantity_of(ada())
 
         and {
           listing_escrow_is_exact(own_input.output.value, listing, locked_lovelace),
-          list.has(tx.extra_signatories, seller_key),
+          list.has(tx.extra_signatories, listing.seller_key),
           seller_receives_quantity(
             tx.outputs,
             listing.seller,
@@ -246,7 +198,6 @@ validator p2p_listing(registry_address: Address) {
       }
 
       Update { next } -> {
-        let seller_key: VerificationKeyHash = listing.seller_key
         let locked_lovelace = own_input.output.value |> quantity_of(ada())
         let released_quantity = listing.quantity - next.quantity
         expect Some(next_output) =
@@ -260,9 +211,9 @@ validator p2p_listing(registry_address: Address) {
         and {
           listing_is_valid(next),
           listing_escrow_is_exact(own_input.output.value, listing, locked_lovelace),
-          list.has(tx.extra_signatories, seller_key),
-          next.registry_token == listing.registry_token,
+          list.has(tx.extra_signatories, listing.seller_key),
           next.rwa == listing.rwa,
+          next.settlement == listing.settlement,
           next.seller_key == listing.seller_key,
           next_output.value == listing_value(
             next.rwa,
@@ -297,7 +248,7 @@ const test_extra_asset: AssetClass =
     asset_name: "EXTRA",
   }
 
-test listing_value_rejects_unlisted_assets() {
+test simple_listing_value_rejects_unlisted_assets() {
   let expected = listing_value(test_rwa, 3, 2_000_000)
   let with_extra =
     expected
@@ -311,12 +262,5 @@ test listing_value_rejects_unlisted_assets() {
     assets.quantity_of(expected, test_rwa.policy_id, test_rwa.asset_name) == 3,
     assets.quantity_of(expected, test_extra_asset.policy_id, test_extra_asset.asset_name) == 0,
     with_extra == expected == False,
-  }
-}
-
-test unconfigured_assets_are_not_fillable() {
-  and {
-    asset_config_allows_sell(None) == False,
-    asset_config_allows_buy(None) == False,
   }
 }

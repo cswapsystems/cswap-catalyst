@@ -137,6 +137,35 @@ pub type ListingDatum {
   price: Int,
 }
 
+// Registry-free orderbook listings can either pay the seller directly or be
+// inventory owned by a shared quote pool. The pool token binds inventory sales
+// to the intended pool without adding a registry dependency.
+pub type ListingSettlement {
+  Direct
+  QuotePool { pool_token: AssetClass }
+}
+
+pub type SimpleListingDatum {
+  seller: Address,
+  seller_key: VerificationKeyHash,
+  settlement: ListingSettlement,
+  rwa: AssetClass,
+  quantity: Int,
+  price_asset: AssetClass,
+  price: Int,
+}
+
+pub type QuotePoolDatum {
+  admin: VerificationKeyHash,
+  batcher: VerificationKeyHash,
+  pool_token: AssetClass,
+  lp_token: AssetClass,
+  quote_asset: AssetClass,
+  total_lp_supply: Int,
+  min_cash_reserve: Int,
+  paused: Bool,
+}
+
 pub type VaultDatum {
   admin: ByteArray,
   vault_token: AssetClass,
