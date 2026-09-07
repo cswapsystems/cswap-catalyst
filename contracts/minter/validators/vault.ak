@@ -22,6 +22,9 @@ pub type VaultDatum {
 
   // Total supply of fractions that must be burned to withdraw the NFT
   total_fractions: Int,
+
+  // Seed UTxO used to parameterize the fraction minting policy
+  seed: OutputReference,
 }
 
 // Actions: withdraw burns all fractions; update adjusts total_fractions only.
@@ -79,6 +82,7 @@ fn update_is_valid(self: Transaction, d: VaultDatum, input: Input, new_total: In
           && new_datum.ft_policy == d.ft_policy
           && new_datum.ft_name == d.ft_name
           && new_datum.total_fractions == new_total
+          && new_datum.seed == d.seed
       }
       None -> False
     }
@@ -165,6 +169,7 @@ fn datum(total: Int) -> VaultDatum {
     ft_policy,
     ft_name,
     total_fractions: total,
+    seed: vault_ref,
   }
 }
 

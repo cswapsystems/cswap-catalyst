@@ -8,14 +8,17 @@ VaultDatum
 - FT Policy Id
 - FT Asset Name
 - Fractions
+- Original fractionalization seed UTxO (required to reconstruct the parameterized FT policy for Combine)
 
 Fractionalize Transaction
 - Deposit NFT token
 - Mint FT token
 
 Combine Transaction
-- Burn FT tokens
-- Get NFT token
+- Locate the vault by the fraction policy/name
+- Burn the exact vault fraction supply
+- Spend the vault with `Withdraw`
+- Get the original NFT token back
 
 Known Exploits
 User can mint more FT tokens and deposit only a fraction of it to the vault.

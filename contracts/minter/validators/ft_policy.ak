@@ -13,6 +13,7 @@ pub type VaultDatum {
   ft_policy: PolicyId,
   ft_name: AssetName,
   total_fractions: Int,
+  seed: OutputReference,
 }
 
 // One-shot mint for the full fraction supply; later burns are allowed.
@@ -32,6 +33,7 @@ fn has_matching_vault_output(
   vault_script: ScriptHash,
   ft_name: AssetName,
   total_fractions: Int,
+  seed: OutputReference,
 ) -> Bool {
   list.any(tx.outputs, fn(o) {
     when o.datum is {
@@ -40,6 +42,7 @@ fn has_matching_vault_output(
         d.ft_policy == policy_id
           && d.ft_name == ft_name
           && d.total_fractions == total_fractions
+          && d.seed == seed
           && assets.quantity_of(o.value, d.nft_policy, d.nft_name) == 1
           && when o.address.payment_credential is {
             address.Script(script_hash) -> script_hash == vault_script
@@ -64,6 +67,7 @@ validator ft_oneshot(seed: OutputReference, vault_script: ScriptHash) {
             vault_script,
             ft_name,
             total_fractions,
+            seed,
           )
 
       // Any negative mint for the FT is treated as a burn.
@@ -119,7 +123,10 @@ fn dummy_script_address() -> address.Address {
   }
 }
 
-fn mk_vault_datum(total_fractions: Int) -> VaultDatum {
+fn mk_vault_datum_with_seed(
+  total_fractions: Int,
+  seed: OutputReference,
+) -> VaultDatum {
   VaultDatum {
     admin,
     nft_policy,
@@ -127,16 +134,28 @@ fn mk_vault_datum(total_fractions: Int) -> VaultDatum {
     ft_policy: policy_id,
     ft_name,
     total_fractions,
+    seed,
+  }
+}
+
+fn mk_vault_datum(total_fractions: Int) -> VaultDatum {
+  mk_vault_datum_with_seed(total_fractions, seed_ref)
+}
+
+fn vault_output_with_seed(
+  total_fractions: Int,
+  seed: OutputReference,
+) -> Output {
+  Output {
+    address: dummy_script_address(),
+    value: assets.from_lovelace(2_000_000) |> assets.add(nft_policy, nft_name, 1),
+    datum: InlineDatum(mk_vault_datum_with_seed(total_fractions, seed)),
+    reference_script: None,
   }
 }
 
 fn vault_output(total_fractions: Int) -> Output {
-  Output {
-    address: dummy_script_address(),
-    value: assets.from_lovelace(2_000_000) |> assets.add(nft_policy, nft_name, 1),
-    datum: InlineDatum(mk_vault_datum(total_fractions)),
-    reference_script: None,
-  }
+  vault_output_with_seed(total_fractions, seed_ref)
 }
 
 fn mk_input(oref: OutputReference) -> Input {
@@ -176,6 +195,29 @@ test mint_ok() {
 test mint_fails_without_seed_returns_false() {
   let mint_value = from_asset(policy_id, ft_name, 1_000)
   let tx = mk_tx([], [vault_output(1_000)], mint_value)
+
+  ft_oneshot.mint(
+    seed_ref,
+    vault_script_hash,
+    Mint { total_fractions: 1_000, ft_name },
+    policy_id,
+    tx,
+  )
+    == False
+}
+
+test mint_fails_seed_mismatch_returns_false() {
+  let wrong_seed =
+    OutputReference {
+      transaction_id: #"0202020202020202020202020202020202020202020202020202020202020202",
+      output_index: 0,
+    }
+  let mint_value = from_asset(policy_id, ft_name, 1_000)
+  let tx = mk_tx(
+    [mk_input(seed_ref)],
+    [vault_output_with_seed(1_000, wrong_seed)],
+    mint_value,
+  )
 
   ft_oneshot.mint(
     seed_ref,
