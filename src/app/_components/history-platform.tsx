@@ -105,7 +105,7 @@ async function loadHistory(address: string): Promise<HistoryTransaction[]> {
   return history.filter((transaction): transaction is HistoryTransaction => transaction !== null);
 }
 
-const navItems = [["/mint", "Mint RWA"], ["/fractionalize", "Fractionalize"], ["/liquidate", "Liquidate"], ["/marketplace", "Marketplace"], ["/assets", "Asset browser"], ["/wallets", "Wallets"]];
+const navItems = [["/mint", "Mint RWA"], ["/fractionalize", "Fractionalize"], ["/liquidate", "Liquidate"], ["/marketplace", "Marketplace"], ["/reserves", "Reserves"], ["/assets", "Asset browser"], ["/wallets", "Wallets"]];
 const actionIcons: Record<ActionType, string> = { Mint: "◇", Fractionalize: "◒", Combine: "↙", List: "□", Buy: "↗" };
 
 function HistoryBoard() {

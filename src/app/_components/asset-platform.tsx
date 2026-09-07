@@ -67,7 +67,7 @@ const navItems = [
   ["/mint", "Mint RWA"],
   ["/fractionalize", "Fractionalize"],
   ["/liquidate", "Liquidate"],
-  ["/marketplace", "Marketplace"],
+  ["/marketplace", "Marketplace"], ["/reserves", "Reserves"],
   ["/assets", "Asset browser"],
   ["/wallets", "Wallets"],
 ];
