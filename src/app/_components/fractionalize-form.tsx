@@ -4,7 +4,7 @@ import { useEffect, useState } from "react";
 import { useWallet } from "./wallet-context";
 
 type WalletUtxo = { amount?: Array<{ unit?: string; quantity?: string }> };
-type WalletAsset = { unit: string; quantity: string; name: string };
+type WalletAsset = { unit: string; quantity: string; name: string; fractionUnit?: string; requiredFractions?: string };
 type Blueprint = { ftCompiledCode?: string; vaultCompiledCode?: string };
 
 function decodeAssetName(unit: string) {
@@ -35,7 +35,8 @@ async function loadWalletAssets(address: string): Promise<WalletAsset[]> {
 }
 
 function assetLabel(asset: WalletAsset) {
-  return asset.name + " · " + asset.unit.slice(0, 14) + "…" + asset.unit.slice(-8) + " · " + new Intl.NumberFormat("en-US").format(Number(asset.quantity));
+  const locked = asset.requiredFractions ? " · requires " + asset.requiredFractions + " fractions" : "";
+  return asset.name + " · " + asset.unit.slice(0, 14) + "…" + asset.unit.slice(-8) + " · " + new Intl.NumberFormat("en-US").format(Number(asset.quantity)) + locked;
 }
 
 function utf8TokenName(name: string) {
@@ -72,6 +73,31 @@ function decodeVaultDatum(value: unknown): VaultSnapshot {
   };
 }
 
+async function loadVaultAssets(lucid: import("@lucid-evolution/lucid").LucidEvolution): Promise<WalletAsset[]> {
+  const response = await fetch("/api/fractionalize-blueprint", { cache: "no-store" });
+  const blueprint = await response.json() as Blueprint & { error?: string };
+  if (!response.ok || !blueprint.vaultCompiledCode) throw new Error(blueprint.error || "Unable to load the vault validator.");
+  const { Data, validatorToAddress } = await import("@lucid-evolution/lucid");
+  const vaultAddress = validatorToAddress("Preprod", { type: "PlutusV3", script: blueprint.vaultCompiledCode });
+  const assets: WalletAsset[] = [];
+  for (const utxo of await lucid.utxosAt(vaultAddress)) {
+    if (!utxo.datum) continue;
+    try {
+      const datum = decodeVaultDatum(Data.from(utxo.datum));
+      assets.push({
+        unit: datum.nftUnit,
+        quantity: "1",
+        name: decodeAssetName(datum.nftUnit),
+        fractionUnit: datum.ftPolicy + datum.ftName,
+        requiredFractions: datum.totalFractions.toString(),
+      });
+    } catch {
+      // Ignore unrelated or legacy vault outputs.
+    }
+  }
+  return assets.sort((a, b) => a.unit.localeCompare(b.unit));
+}
+
 function Field({ label, placeholder, hint, value, onChange, readOnly, select, options, disabled }: { label: string; placeholder: string; hint?: string; value?: string; onChange?: (value: string) => void; readOnly?: boolean; select?: boolean; options?: Array<{ value: string; label: string }>; disabled?: boolean }) {
   return <label className="field"><span className="field-label">{label}</span><span className="field-input-wrap">{select ? <select value={value || ""} onChange={(event) => onChange?.(event.target.value)} disabled={disabled}><option value="" disabled>{placeholder}</option>{options?.map((option) => <option value={option.value} key={option.value}>{option.label}</option>)}</select> : <input placeholder={placeholder} value={value} onChange={(event) => onChange?.(event.target.value)} readOnly={readOnly} disabled={disabled} />}{select && <span className="select-chevron">⌄</span>}</span>{hint && <span className="field-hint">{hint}</span>}</label>;
 }
@@ -79,7 +105,7 @@ function Field({ label, placeholder, hint, value, onChange, readOnly, select, op
 function Arrow() { return <span aria-hidden="true" className="button-arrow">↗</span>; }
 
 export default function FractionalizeForm() {
-  const { address } = useWallet();
+  const { address, lucid } = useWallet();
   const [mode, setMode] = useState<"split" | "combine">("split");
   const [assets, setAssets] = useState<WalletAsset[]>([]);
   const [assetStatus, setAssetStatus] = useState<"idle" | "loading" | "ready" | "error">("idle");
@@ -91,12 +117,27 @@ export default function FractionalizeForm() {
   const selectedAsset = assets.find((asset) => asset.unit === selectedUnit);
 
   useEffect(() => {
-    if (!address) return;
+    if (!address || (mode === "combine" && !lucid)) {
+      const timer = window.setTimeout(() => {
+        setAssets([]);
+        setAssetStatus("idle");
+      }, 0);
+      return () => window.clearTimeout(timer);
+    }
     let cancelled = false;
     queueMicrotask(() => { if (!cancelled) setAssetStatus("loading"); });
-    void loadWalletAssets(address).then((walletAssets) => { if (!cancelled) { setAssets(walletAssets); setAssetStatus("ready"); } }).catch(() => { if (!cancelled) { setAssets([]); setAssetStatus("error"); } });
+    const load = mode === "combine" ? loadVaultAssets(lucid as import("@lucid-evolution/lucid").LucidEvolution) : loadWalletAssets(address);
+    void load.then((availableAssets) => { if (!cancelled) { setAssets(availableAssets); setAssetStatus("ready"); } }).catch(() => { if (!cancelled) { setAssets([]); setAssetStatus("error"); } });
     return () => { cancelled = true; };
-  }, [address]);
+  }, [address, lucid, mode]);
+
+  function changeMode(nextMode: "split" | "combine") {
+    setMode(nextMode);
+    setSelectedUnit("");
+    setFractionCount("");
+    setMessage(null);
+    setError(null);
+  }
 
   async function reviewFractions() {
     setMessage(null);
@@ -131,7 +172,7 @@ export default function FractionalizeForm() {
           if (!utxo.datum) continue;
           try {
             const datum = decodeVaultDatum(Data.from(utxo.datum));
-            if (datum.ftPolicy + datum.ftName === selectedUnit) {
+            if (datum.nftUnit === selectedUnit) {
               match = { utxo, datum };
               break;
             }
@@ -139,12 +180,16 @@ export default function FractionalizeForm() {
             // Ignore unrelated or legacy vault outputs.
           }
         }
-        if (!match) throw new Error("No matching vault was found for this fraction token.");
+        if (!match) throw new Error("No matching vault was found for this original asset.");
 
         const { utxo: vaultUtxo, datum } = match;
         const requestedTotal = BigInt(fractionCount);
         if (requestedTotal !== datum.totalFractions) throw new Error("Combine requires the full fraction supply: " + datum.totalFractions.toString() + ".");
-        if (BigInt(selectedAsset.quantity) < datum.totalFractions) throw new Error("This wallet does not hold all fractions required to reclaim the original asset.");
+        const walletFractionQuantity = (await lucid.utxosAt(walletAddress)).reduce(
+          (total, utxo) => total + (utxo.assets[datum.ftPolicy + datum.ftName] || BigInt(0)),
+          BigInt(0),
+        );
+        if (walletFractionQuantity < datum.totalFractions) throw new Error("This wallet does not hold all fractions required to reclaim the original asset.");
 
         const fractionPolicy = { type: "PlutusV3" as const, script: applyParamsToScript(blueprint.ftCompiledCode, [datum.seed as import("@lucid-evolution/lucid").Data, vaultScriptHash]) };
         const derivedPolicyId = mintingPolicyToId(fractionPolicy);
@@ -195,7 +240,8 @@ export default function FractionalizeForm() {
   }
 
   const assetOptions = assets.map((asset) => ({ value: asset.unit, label: assetLabel(asset) }));
-  const assetPlaceholder = !address ? "Connect Eternl first" : assetStatus === "loading" ? "Loading wallet assets…" : assets.length ? "Choose an asset" : "No native assets found";
+  const assetPlaceholder = !address ? "Connect Eternl first" : mode === "combine" && !lucid ? "Connect Eternl first" : assetStatus === "loading" ? "Loading vault assets…" : assets.length ? mode === "combine" ? "Choose a locked asset" : "Choose an asset" : mode === "combine" ? "No assets locked in vaults" : "No native assets found";
+  const assetHint = mode === "combine" ? "Assets are read from the active vaults." : "Assets are read from the connected wallet.";
   const tokenToReceive = selectedAsset ? selectedAsset.name + " fractions" : "";
-  return <section className="work-card form-card"><div className="section-heading"><div><span className="section-kicker">01 / Position setup</span><h2>{mode === "split" ? "Create fractional ownership" : "Combine your fractional units"}</h2></div><span className="step-badge">1 of 2</span></div><div className="segmented-control"><button type="button" className={mode === "split" ? "selected" : ""} onClick={() => setMode("split")}>Fractionalize</button><button type="button" className={mode === "combine" ? "selected" : ""} onClick={() => setMode("combine")}>Combine</button></div><div className="field-grid"><Field label="Select RWA asset" placeholder={assetPlaceholder} hint="Assets are read from the connected wallet." select options={assetOptions} value={selectedUnit} onChange={(value) => { setSelectedUnit(value); setMessage(null); setError(null); }} disabled={!address || assetStatus === "loading" || assets.length === 0} /><Field label={mode === "split" ? "Number of fractions" : "Units to combine"} placeholder={mode === "split" ? "e.g. 1,000" : "e.g. 250"} value={fractionCount} onChange={(value) => { setFractionCount(value); setMessage(null); setError(null); }} /><Field label="Token you receive" placeholder="Created automatically" value={mode === "split" ? tokenToReceive : "Original RWA token"} hint="A new fungible token representing fractional ownership." readOnly /><Field label="Recipient wallet" placeholder="Connect Eternl first" value={address} hint="Fractions are sent to the connected wallet." readOnly /></div>{selectedAsset && <div className="asset-selection-note"><span>Selected asset name (UTF-8)</span><strong>{selectedAsset.name}</strong><code>{selectedAsset.unit}</code></div>}{error && <p className="form-message error-message" role="alert">{error}</p>}{message && <p className="form-message success-message" role="status">{message}</p>}<div className="calculation-card"><span>{mode === "split" ? "Fractionalization preview" : "Combination preview"}</span><strong>{selectedAsset ? selectedAsset.name + " → " + fractionCount + " ownership units" : "Select an asset and enter a fraction amount"}</strong><p>{mode === "split" ? "The NFT will be locked in the vault and the newly minted fraction token will be sent to the connected wallet." : "The full fraction supply will be burned and the original NFT will be returned to the connected wallet."}</p></div><div className="form-footer"><p><span className="status-dot" /> {submitting ? "Awaiting Eternl signature…" : "Ready for review and signing."}</p><button type="button" className="primary-button" onClick={() => void reviewFractions()} disabled={submitting}>{submitting ? "Building transaction…" : mode === "split" ? "Review & fractionalize" : "Review & combine"} <Arrow /></button></div></section>;
+  return <section className="work-card form-card"><div className="section-heading"><div><span className="section-kicker">01 / Position setup</span><h2>{mode === "split" ? "Create fractional ownership" : "Combine your fractional units"}</h2></div><span className="step-badge">1 of 2</span></div><div className="segmented-control"><button type="button" className={mode === "split" ? "selected" : ""} onClick={() => changeMode("split")}>Fractionalize</button><button type="button" className={mode === "combine" ? "selected" : ""} onClick={() => changeMode("combine")}>Combine</button></div><div className="field-grid"><Field label="Select RWA asset" placeholder={assetPlaceholder} hint={assetHint} select options={assetOptions} value={selectedUnit} onChange={(value) => { setSelectedUnit(value); setMessage(null); setError(null); }} disabled={!address || assetStatus === "loading" || assets.length === 0} /><Field label={mode === "split" ? "Number of fractions" : "Units to combine"} placeholder={mode === "split" ? "e.g. 1,000" : "e.g. 250"} value={fractionCount} onChange={(value) => { setFractionCount(value); setMessage(null); setError(null); }} /><Field label="Token you receive" placeholder="Created automatically" value={mode === "split" ? tokenToReceive : "Original RWA token"} hint="A new fungible token representing fractional ownership." readOnly /><Field label="Recipient wallet" placeholder="Connect Eternl first" value={address} hint="Fractions are sent to the connected wallet." readOnly /></div>{selectedAsset && <div className="asset-selection-note"><span>Selected asset name (UTF-8)</span><strong>{selectedAsset.name}</strong><code>{selectedAsset.unit}</code></div>}{error && <p className="form-message error-message" role="alert">{error}</p>}{message && <p className="form-message success-message" role="status">{message}</p>}<div className="calculation-card"><span>{mode === "split" ? "Fractionalization preview" : "Combination preview"}</span><strong>{selectedAsset ? selectedAsset.name + " → " + fractionCount + " ownership units" : "Select an asset and enter a fraction amount"}</strong><p>{mode === "split" ? "The NFT will be locked in the vault and the newly minted fraction token will be sent to the connected wallet." : "The full fraction supply will be burned and the original NFT will be returned to the connected wallet."}</p></div><div className="form-footer"><p><span className="status-dot" /> {submitting ? "Awaiting Eternl signature…" : "Ready for review and signing."}</p><button type="button" className="primary-button" onClick={() => void reviewFractions()} disabled={submitting}>{submitting ? "Building transaction…" : mode === "split" ? "Review & fractionalize" : "Review & combine"} <Arrow /></button></div></section>;
 }
