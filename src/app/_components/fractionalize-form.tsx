@@ -191,13 +191,14 @@ export default function FractionalizeForm() {
         );
         if (walletFractionQuantity < datum.totalFractions) throw new Error("This wallet does not hold all fractions required to reclaim the original asset.");
 
+        const fractionUnit = datum.ftPolicy + datum.ftName;
         const fractionPolicy = { type: "PlutusV3" as const, script: applyParamsToScript(blueprint.ftCompiledCode, [datum.seed as import("@lucid-evolution/lucid").Data, vaultScriptHash]) };
         const derivedPolicyId = mintingPolicyToId(fractionPolicy);
         if (derivedPolicyId !== datum.ftPolicy) throw new Error("The vault seed does not reconstruct its fraction policy.");
 
         const tx = await lucid.newTx()
           .collectFrom([vaultUtxo], Data.to(new Constr(0, [])))
-          .mintAssets({ [selectedUnit]: -datum.totalFractions }, Data.to(new Constr(1, [datum.ftName])))
+          .mintAssets({ [fractionUnit]: -datum.totalFractions }, Data.to(new Constr(1, [datum.ftName])))
           .attach.SpendingValidator(vaultValidator)
           .attach.MintingPolicy(fractionPolicy)
           .pay.ToAddress(walletAddress, { [datum.nftUnit]: BigInt(1) })
