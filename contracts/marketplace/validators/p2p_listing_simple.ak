@@ -2,7 +2,7 @@ use aiken/collection/list
 use cardano/assets
 use cardano/address.{Address}
 use cardano/transaction.{InlineDatum, Input, Output, OutputReference, Transaction, find_input}
-use ebecca/types.{AssetClass, QuotePoolDatum, SimpleListingDatum, ada, has_one, quantity_of}
+use ebecca/types.{AssetClass, Direct, QuotePool, QuotePoolDatum, SimpleListingDatum, ada, has_one, quantity_of}
 
 pub type SimpleListingRedeemer {
   Buy { buyer: Address }
@@ -33,6 +33,25 @@ fn listing_value(
     |> assets.add(rwa.policy_id, rwa.asset_name, quantity)
 }
 
+fn listing_escrow_value(
+  listing: SimpleListingDatum,
+  locked_lovelace: Int,
+) -> assets.Value {
+  let value =
+    listing_value(listing.rwa, listing.quantity, locked_lovelace)
+
+  when listing.settlement is {
+    Direct -> value
+    QuotePool { inventory_token, pool_token: _ } ->
+      value
+        |> assets.add(
+          inventory_token.policy_id,
+          inventory_token.asset_name,
+          1,
+        )
+  }
+}
+
 fn listing_escrow_is_exact(
   input_value: assets.Value,
   listing: SimpleListingDatum,
@@ -40,7 +59,7 @@ fn listing_escrow_is_exact(
 ) -> Bool {
   and {
     locked_lovelace > 0,
-    input_value == listing_value(listing.rwa, listing.quantity, locked_lovelace),
+    input_value == listing_escrow_value(listing, locked_lovelace),
   }
 }
 
@@ -74,11 +93,7 @@ fn output_is_listing(
 ) -> Bool {
   and {
     output.address == address,
-    output.value == listing_value(
-      listing.rwa,
-      listing.quantity,
-      locked_lovelace,
-    ),
+    output.value == listing_escrow_value(listing, locked_lovelace),
     when output.datum is {
       InlineDatum(data) -> {
         expect output_listing: SimpleListingDatum = data
@@ -123,13 +138,20 @@ fn seller_is_paid(
   }
 }
 
+fn is_direct_listing(listing: SimpleListingDatum) -> Bool {
+  when listing.settlement is {
+    Direct -> True
+    QuotePool { pool_token: _, inventory_token: _ } -> False
+  }
+}
+
 fn pool_sale_is_atomic(
   tx: Transaction,
   listing: SimpleListingDatum,
 ) -> Bool {
   when listing.settlement is {
     Direct -> True
-    QuotePool { pool_token } ->
+    QuotePool { pool_token, inventory_token: _ } ->
       and {
         list.any(
           tx.inputs,
@@ -185,6 +207,7 @@ validator p2p_listing_simple {
         let locked_lovelace = own_input.output.value |> quantity_of(ada())
 
         and {
+          is_direct_listing(listing),
           listing_escrow_is_exact(own_input.output.value, listing, locked_lovelace),
           list.has(tx.extra_signatories, listing.seller_key),
           seller_receives_quantity(
@@ -209,17 +232,14 @@ validator p2p_listing_simple {
           )
 
         and {
+          is_direct_listing(listing),
           listing_is_valid(next),
           listing_escrow_is_exact(own_input.output.value, listing, locked_lovelace),
           list.has(tx.extra_signatories, listing.seller_key),
           next.rwa == listing.rwa,
           next.settlement == listing.settlement,
           next.seller_key == listing.seller_key,
-          next_output.value == listing_value(
-            next.rwa,
-            next.quantity,
-            locked_lovelace,
-          ),
+          next_output.value == listing_escrow_value(next, locked_lovelace),
           seller_receives_quantity(
             tx.outputs,
             listing.seller,

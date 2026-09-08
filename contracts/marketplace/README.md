@@ -223,16 +223,29 @@ The smoke test runs `aiken build`, checks that all expected validators are prese
 
 The registry-free path uses p2p_listing_simple for direct listings and the
 parameterized quote_pool validator for one shared pool per quote asset (for
-example one ADA pool and one USDC pool, not one pool per RWA policy).
+example one ADA pool and one USDC pool, not one pool per RWA policy or
+fractionalized asset).
 
-SimpleListingDatum.settlement is either Direct or QuotePool { pool_token }.
-The pool contract supports LP add/remove, batcher acquisition of a direct
-listing, and public inventory sale. Each action spends and recreates the pool
-UTxO with exact value accounting. Pool inventory sale adds the quote payment
-and the listing's returned ADA buffer to the pool continuation. The pool keeps
-its quote asset, pool NFT, LP token, admin, batcher, reserve, and pause state
-bound across trade actions; closing burns the pool NFT and cannot leave a
-pool-token continuation.
+This is an oracle/RFQ settlement pool, not a constant-product AMM. A seller
+lists an exact asset unit and its minimum quote amount. An allow-listed
+batcher may acquire that listing using pool funds, then recreate the asset as
+pool-owned inventory with the externally determined ask price. Any buyer can
+consume that inventory listing; the quote payment and its ADA buffer return to
+the same pool. The exact asset unit and price remain in the orderbook datum,
+so the pool can trade many fractionalized assets without a separate
+PolicyId/quote pool.
+
+SimpleListingDatum.settlement is either Direct or QuotePool { pool_token,
+inventory_token }. The one-unit inventory_token receipt is minted by the
+parameterized inventory policy when the batcher acquires a listing and is
+burned when that inventory is sold. The pool datum's inventory_value is the sum
+of the prices of all open
+pool-owned inventory listings, marked at their ask prices. Pool acquisition
+increments it and inventory sale decrements it. LP add/remove and pool close
+are rejected while it is non-zero, preventing liquidity providers from
+ignoring outstanding pool inventory. Pool-owned listings cannot be cancelled
+or edited through the generic orderbook path; they must be sold so the pool
+accounting changes atomically.
 
 The application presents direct listings and pool inventory in one marketplace
 screen. The client-side builder parameterizes quote_pool with the configured

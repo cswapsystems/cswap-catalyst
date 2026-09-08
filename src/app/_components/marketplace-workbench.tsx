@@ -7,7 +7,7 @@ type Mode = "all" | "price" | "instant";
 type AssetClass = { policyId: string; assetName: string };
 type Constr = { index: number; fields: unknown[] };
 type FormState = { policyId: string; assetName: string; quantity: string; pricePolicyId: string; priceAssetName: string; price: string; proceeds: string };
-type Listing = { id: string; utxo: import("@lucid-evolution/lucid").UTxO; seller: string; sellerKey: string; managed: boolean; settlement: "direct" | "pool"; poolToken?: AssetClass; rwa: AssetClass; quantity: bigint; priceAsset: AssetClass; price: bigint; lockedLovelace: bigint };
+type Listing = { id: string; utxo: import("@lucid-evolution/lucid").UTxO; seller: string; sellerKey: string; managed: boolean; settlement: "direct" | "pool"; poolToken?: AssetClass; inventoryToken?: AssetClass; rwa: AssetClass; quantity: bigint; priceAsset: AssetClass; price: bigint; lockedLovelace: bigint };
 
 const initialForm: FormState = { policyId: "", assetName: "", quantity: "1", pricePolicyId: "", priceAssetName: "", price: "", proceeds: "" };
 
@@ -53,6 +53,7 @@ function decodeListing(utxo: import("@lucid-evolution/lucid").UTxO, tools: { Dat
     managed: false,
     settlement: settlement.index === 1 ? "pool" : "direct",
     poolToken: settlement.index === 1 ? getAsset(settlement.fields[0], "pool") : undefined,
+    inventoryToken: settlement.index === 1 ? getAsset(settlement.fields[1], "inventory receipt") : undefined,
     rwa: getAsset(root.fields[3], "listed"),
     quantity: root.fields[4] as bigint,
     priceAsset: getAsset(root.fields[5], "price"),
@@ -173,16 +174,34 @@ export default function MarketplaceWorkbench() {
         const poolUtxo = await lucid.utxoByUnit(unit(listing.poolToken));
         if (!poolUtxo.datum) throw new Error("The quote pool has no inline datum.");
         const poolRoot = getConstr(tools.Data.from(poolUtxo.datum), "quote pool");
-        if (poolRoot.fields.length !== 8) throw new Error("Malformed quote pool datum.");
-        const quoteAsset = getAsset(poolRoot.fields[4], "pool quote");
+        if (poolRoot.fields.length !== 10 || typeof poolRoot.fields[9] !== "bigint") throw new Error("Malformed quote pool datum.");
+        const quoteAsset = getAsset(poolRoot.fields[5], "pool quote");
+        const inventoryToken = getAsset(poolRoot.fields[4], "inventory receipt");
+        if (!listing.inventoryToken || !sameAsset(listing.inventoryToken, inventoryToken)) throw new Error("Pool inventory receipt does not match the pool.");
         if (!sameAsset(quoteAsset, listing.priceAsset)) throw new Error("Pool quote asset does not match listing.");
         let nextAssets = withAsset({ ...poolUtxo.assets }, quoteAsset, listing.price);
         if (quoteAsset.policyId) nextAssets = withAsset(nextAssets, { policyId: "", assetName: "" }, listing.lockedLovelace);
-        const nextDatum = tools.Data.from(poolUtxo.datum);
+        const nextInventoryValue = poolRoot.fields[9] as bigint - listing.price;
+        if (nextInventoryValue < BigInt(0)) throw new Error("Pool inventory accounting is below this listing price.");
+        const nextDatum = new tools.Constr(0, [
+          poolRoot.fields[0],
+          poolRoot.fields[1],
+          poolRoot.fields[2],
+          poolRoot.fields[3],
+          poolRoot.fields[4],
+          poolRoot.fields[5],
+          poolRoot.fields[6],
+          poolRoot.fields[7],
+          poolRoot.fields[8],
+          nextInventoryValue,
+        ]);
         const poolRedeemer = new tools.Constr(3, [listing.price, buyer, nextDatum]);
         const poolCode = await loadScript("quote_pool.quote_pool.spend");
+        const receiptCode = await loadScript("inventory_policy.inventory_policy.mint");
         const poolScript = { type: "PlutusV3" as const, script: tools.applyParamsToScript(poolCode.script, [addressData(tools.Data, tools.AddressSchema, tools.getAddressDetails, orderbookAddress) as import("@lucid-evolution/lucid").Data]) };
-        tx = tx.collectFrom([poolUtxo], tools.Data.to(poolRedeemer as import("@lucid-evolution/lucid").Data)).attach.SpendingValidator(poolScript).pay.ToContract(poolUtxo.address, { kind: "inline", value: tools.Data.to(nextDatum as import("@lucid-evolution/lucid").Data) }, nextAssets);
+        const receiptPolicy = { type: "PlutusV3" as const, script: tools.applyParamsToScript(receiptCode.script, [assetData(tools.Constr, listing.poolToken) as import("@lucid-evolution/lucid").Data, inventoryToken.assetName as import("@lucid-evolution/lucid").Data, poolRoot.fields[1] as import("@lucid-evolution/lucid").Data]) };
+        if (tools.mintingPolicyToId(receiptPolicy) !== inventoryToken.policyId) throw new Error("Pool inventory receipt policy does not match the pool datum.");
+        tx = tx.collectFrom([poolUtxo], tools.Data.to(poolRedeemer as import("@lucid-evolution/lucid").Data)).mintAssets({ [unit(inventoryToken)]: -BigInt(1) }, tools.Data.to(new tools.Constr(1, []) as import("@lucid-evolution/lucid").Data)).attach.SpendingValidator(poolScript).attach.MintingPolicy(receiptPolicy).pay.ToContract(poolUtxo.address, { kind: "inline", value: tools.Data.to(nextDatum as import("@lucid-evolution/lucid").Data) }, nextAssets);
       }
       const hash = await (await (await tx.complete()).sign.withWallet().complete()).submit();
       setMessage({ kind: "success", text: "Buy submitted: " + hash }); await refresh();

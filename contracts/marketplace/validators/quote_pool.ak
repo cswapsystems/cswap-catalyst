@@ -139,8 +139,20 @@ fn listing_value(
   listing: SimpleListingDatum,
   locked_lovelace: Int,
 ) -> assets.Value {
-  assets.from_lovelace(locked_lovelace)
-    |> assets.add(listing.rwa.policy_id, listing.rwa.asset_name, listing.quantity)
+  let value =
+    assets.from_lovelace(locked_lovelace)
+      |> assets.add(listing.rwa.policy_id, listing.rwa.asset_name, listing.quantity)
+
+  when listing.settlement is {
+    Direct -> value
+    QuotePool { inventory_token, pool_token: _ } ->
+      value
+        |> assets.add(
+          inventory_token.policy_id,
+          inventory_token.asset_name,
+          1,
+        )
+  }
 }
 
 fn listing_is_valid(listing: SimpleListingDatum) -> Bool {
@@ -181,6 +193,7 @@ fn same_config(current: QuotePoolDatum, next: QuotePoolDatum) -> Bool {
     next.batcher == current.batcher,
     next.pool_token == current.pool_token,
     next.lp_token == current.lp_token,
+    next.inventory_token == current.inventory_token,
     next.quote_asset == current.quote_asset,
     next.min_cash_reserve == current.min_cash_reserve,
     next.paused == current.paused,
@@ -195,14 +208,22 @@ fn pool_continuation(
   find_pool_output(outputs, address, pool)
 }
 
+fn no_open_inventory(pool: QuotePoolDatum, next: QuotePoolDatum) -> Bool {
+  and {
+    pool.inventory_value == 0,
+    next.inventory_value == 0,
+  }
+}
+
 fn inventory_listing_is_bound(
   listing: SimpleListingDatum,
   pool: QuotePoolDatum,
   pool_address: Address,
 ) -> Bool {
   when listing.settlement is {
-    QuotePool { pool_token } -> and {
+    QuotePool { pool_token, inventory_token } -> and {
       pool_token == pool.pool_token,
+      inventory_token == pool.inventory_token,
       listing.seller == pool_address,
       listing.seller_key == pool.batcher,
       listing.price_asset == pool.quote_asset,
@@ -275,6 +296,7 @@ validator quote_pool(orderbook_address: Address) {
           amount > 0,
           pool.quote_asset != ada() || amount > 0,
           pool.total_lp_supply == 0 || pool_cash(own_input.output, pool) > 0,
+          no_open_inventory(pool, next),
           same_config(pool, next),
           next.total_lp_supply == pool.total_lp_supply + lp_minted,
           lp_minted == expected_mint,
@@ -301,6 +323,7 @@ validator quote_pool(orderbook_address: Address) {
           !pool.paused,
           pool.total_lp_supply > 0,
           lp_burned > 0,
+          no_open_inventory(pool, next),
           withdrawable >= 0,
           amount == expected_amount,
           amount > 0,
@@ -338,12 +361,14 @@ validator quote_pool(orderbook_address: Address) {
           amount > 0,
           listing_input.output.value == listing_value(listing, locked_lovelace),
           inventory_listing_is_bound(inventory, pool, pool_address),
+          minted(tx, pool.inventory_token) == 1,
           inventory.rwa == listing.rwa,
           inventory.quantity == listing.quantity,
           inventory.price > 0,
           inventory_lovelace > 0,
           inventory_output.value == listing_value(inventory, inventory_lovelace),
           next.total_lp_supply == pool.total_lp_supply,
+          next.inventory_value == pool.inventory_value + inventory.price,
           same_config(pool, next),
           pool_can_pay(own_input.output, pool, amount, locked_lovelace),
           next_output.value == pool_payment(
@@ -366,10 +391,13 @@ validator quote_pool(orderbook_address: Address) {
           !pool.paused,
           listing_is_valid(listing),
           inventory_listing_is_bound(listing, pool, pool_address),
+          minted(tx, pool.inventory_token) == -1,
           paid_at_least(tx.outputs, buyer, listing.rwa, listing.quantity),
           amount == listing.price,
           amount > 0,
           next.total_lp_supply == pool.total_lp_supply,
+          pool.inventory_value >= amount,
+          next.inventory_value == pool.inventory_value - amount,
           same_config(pool, next),
           next_output.value == pool_payment(
             own_input.output.value,
@@ -389,8 +417,10 @@ validator quote_pool(orderbook_address: Address) {
           signed(tx, pool.admin),
           next.pool_token == pool.pool_token,
           next.lp_token == pool.lp_token,
+          next.inventory_token == pool.inventory_token,
           next.quote_asset == pool.quote_asset,
           next.total_lp_supply == pool.total_lp_supply,
+          next.inventory_value == pool.inventory_value,
           next.min_cash_reserve >= 0,
           next_output.value == own_input.output.value,
           next_output.address == pool_address,
@@ -401,6 +431,7 @@ validator quote_pool(orderbook_address: Address) {
         and {
           has_pool_token,
           signed(tx, pool.admin),
+          pool.inventory_value == 0,
           minted(tx, pool.pool_token) == -1,
           has_no_pool_continuation(tx.outputs, pool_address, pool.pool_token),
         }
@@ -430,10 +461,12 @@ test pool_payment_adds_quote_asset() {
     batcher: #"bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
     pool_token: test_pool_token,
     lp_token: test_pool_token,
+    inventory_token: test_pool_token,
     quote_asset: test_quote,
     total_lp_supply: 10,
     min_cash_reserve: 0,
     paused: False,
+    inventory_value: 0,
   }
 
   quantity_of(pool_payment(value, pool, 500, 1_000_000), test_quote) == 500
