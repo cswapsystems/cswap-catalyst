@@ -4,10 +4,12 @@ import { FormEvent, useCallback, useEffect, useMemo, useState } from "react";
 import { useWallet } from "./wallet-context";
 
 type Mode = "all" | "price" | "instant";
+type MarketplaceView = "all" | "p2p" | "pool" | "fractions";
 type AssetClass = { policyId: string; assetName: string };
 type Constr = { index: number; fields: unknown[] };
+type FractionInfo = { fraction: AssetClass; original: AssetClass; totalFractions: bigint };
 type FormState = { policyId: string; assetName: string; quantity: string; pricePolicyId: string; priceAssetName: string; price: string; proceeds: string };
-type Listing = { id: string; utxo: import("@lucid-evolution/lucid").UTxO; seller: string; sellerKey: string; managed: boolean; settlement: "direct" | "pool"; poolToken?: AssetClass; inventoryToken?: AssetClass; rwa: AssetClass; quantity: bigint; priceAsset: AssetClass; price: bigint; lockedLovelace: bigint };
+type Listing = { id: string; utxo: import("@lucid-evolution/lucid").UTxO; seller: string; sellerKey: string; managed: boolean; settlement: "direct" | "pool"; poolToken?: AssetClass; inventoryToken?: AssetClass; fraction?: FractionInfo; rwa: AssetClass; quantity: bigint; priceAsset: AssetClass; price: bigint; lockedLovelace: bigint };
 
 const initialForm: FormState = { policyId: "", assetName: "", quantity: "1", pricePolicyId: "", priceAssetName: "", price: "", proceeds: "" };
 
@@ -78,6 +80,38 @@ function addressData(Data: typeof import("@lucid-evolution/lucid").Data, Address
 }
 function unit(asset: AssetClass): string { return asset.policyId + asset.assetName; }
 function sameAsset(a: AssetClass, b: AssetClass): boolean { return a.policyId === b.policyId && a.assetName === b.assetName; }
+function assetNameText(assetName: string): string {
+  if (!assetName) return "Unnamed asset";
+  try {
+    const bytes = Uint8Array.from(assetName.match(/.{2}/g) ?? [], (byte) => Number.parseInt(byte, 16));
+    const text = new TextDecoder("utf-8", { fatal: true }).decode(bytes);
+    return text || "Unnamed asset";
+  } catch {
+    return "Binary asset";
+  }
+}
+async function loadFractionIndex(lucid: import("@lucid-evolution/lucid").LucidEvolution): Promise<Map<string, FractionInfo>> {
+  const response = await fetch("/api/fractionalize-blueprint", { cache: "no-store" });
+  const blueprint = await response.json() as { vaultCompiledCode?: string; error?: string };
+  if (!response.ok || !blueprint.vaultCompiledCode) throw new Error(blueprint.error ?? "Fractionalization validator unavailable.");
+  const tools = await import("@lucid-evolution/lucid");
+  const network = process.env.NEXT_PUBLIC_CARDANO_NETWORK === "mainnet" ? "Mainnet" as const : "Preprod" as const;
+  const vaultAddress = tools.validatorToAddress(network, { type: "PlutusV3", script: blueprint.vaultCompiledCode });
+  const index = new Map<string, FractionInfo>();
+  for (const utxo of await lucid.utxosAt(vaultAddress)) {
+    if (!utxo.datum) continue;
+    try {
+      const root = getConstr(tools.Data.from(utxo.datum), "vault");
+      if (root.index !== 0 || root.fields.length !== 7 || typeof root.fields[1] !== "string" || typeof root.fields[2] !== "string" || typeof root.fields[3] !== "string" || typeof root.fields[4] !== "string" || typeof root.fields[5] !== "bigint") continue;
+      const original = { policyId: root.fields[1], assetName: root.fields[2] };
+      const fraction = { policyId: root.fields[3], assetName: root.fields[4] };
+      index.set(unit(fraction), { fraction, original, totalFractions: root.fields[5] });
+    } catch {
+      // Ignore unrelated or legacy vault outputs.
+    }
+  }
+  return index;
+}
 function withAsset(assets: import("@lucid-evolution/lucid").Assets, asset: AssetClass, amount: bigint): import("@lucid-evolution/lucid").Assets {
   const key = asset.policyId ? unit(asset) : "lovelace";
   return { ...assets, [key]: (assets[key] ?? BigInt(0)) + amount };
@@ -108,6 +142,7 @@ export default function MarketplaceWorkbench() {
   const { address, lucid } = useWallet();
   const [form, setForm] = useState<FormState>(initialForm);
   const [mode, setMode] = useState<Mode>("price");
+  const [view, setView] = useState<MarketplaceView>("all");
   const [listings, setListings] = useState<Listing[]>([]);
   const [editing, setEditing] = useState<Listing | null>(null);
   const [editQuantity, setEditQuantity] = useState("");
@@ -123,6 +158,8 @@ export default function MarketplaceWorkbench() {
     setLoading(true);
     try {
       const tools = await import("@lucid-evolution/lucid");
+      let fractions = new Map<string, FractionInfo>();
+      try { fractions = await loadFractionIndex(lucid); } catch { /* Fraction metadata is optional for generic listings. */ }
       const found: Listing[] = [];
       for (const utxo of await lucid.utxosAt(orderbookAddress)) {
         if (!utxo.datum) continue;
@@ -130,7 +167,7 @@ export default function MarketplaceWorkbench() {
           const listing = decodeListing(utxo, tools);
           const details = address ? tools.getAddressDetails(address) : undefined;
           const managed = details?.paymentCredential?.type === "Key" && details.paymentCredential.hash === listing.sellerKey;
-          found.push({ ...listing, managed });
+          found.push({ ...listing, managed, fraction: fractions.get(unit(listing.rwa)) });
         } catch { /* skip unrelated script UTxOs */ }
       }
       setListings(found); setLoaded(true);
@@ -140,7 +177,10 @@ export default function MarketplaceWorkbench() {
   }, [address, lucid, orderbookAddress]);
 
   useEffect(() => { const timer = window.setTimeout(() => { void refresh(); }, 0); return () => window.clearTimeout(timer); }, [refresh]);
-  const visible = useMemo(() => listings.filter((listing) => mode === "all" || (mode === "instant" ? listing.settlement === "pool" : listing.settlement === "direct")), [listings, mode]);
+  const visible = useMemo(() => listings
+    .filter((listing) => view === "all" || (view === "p2p" && listing.settlement === "direct") || (view === "pool" && listing.settlement === "pool") || (view === "fractions" && Boolean(listing.fraction))), [listings, view]);
+  const p2pListings = useMemo(() => visible.filter((listing) => listing.settlement === "direct"), [visible]);
+  const poolListings = useMemo(() => visible.filter((listing) => listing.settlement === "pool"), [visible]);
   const update = (key: keyof FormState, value: string) => { setForm((current) => ({ ...current, [key]: value })); setMessage(null); };
 
   async function createListing(event: FormEvent<HTMLFormElement>) {
@@ -241,5 +281,69 @@ export default function MarketplaceWorkbench() {
     finally { setLoading(false); }
   }
 
-  return <div className="marketplace-workbench"><section className="marketplace-card"><div className="section-heading"><div><span className="section-kicker">Orderbook / shared settlement</span><h2>Offer an asset with one clear settlement path</h2></div><span className="step-badge">{orderbookAddress ? "Contract ready" : "Address needed"}</span></div><p className="marketplace-intro">Sell at a price and instant sell share the same escrow. The minimum payout is committed on-chain; the batcher may quote above it off-chain.</p><div className="marketplace-toolbar"><div className="marketplace-segments"><button type="button" className={mode === "all" ? "selected" : ""} onClick={() => setMode("all")}>All listings</button><button type="button" className={mode === "price" ? "selected" : ""} onClick={() => setMode("price")}>Sell at a price</button><button type="button" className={mode === "instant" ? "selected" : ""} onClick={() => setMode("instant")}>Instant sell</button></div><button type="button" className="marketplace-refresh" onClick={() => void refresh()} disabled={loading}>Refresh orderbook</button></div><form onSubmit={createListing}><div className="marketplace-form-grid"><label className="field"><span className="field-label">Listed policy ID</span><input value={form.policyId} onChange={(event) => update("policyId", event.target.value)} placeholder="28-byte policy ID (hex)" /></label><label className="field"><span className="field-label">Listed asset name</span><input value={form.assetName} onChange={(event) => update("assetName", event.target.value)} placeholder="Asset name (hex)" /></label><label className="field"><span className="field-label">Quantity</span><input inputMode="numeric" value={form.quantity} onChange={(event) => update("quantity", event.target.value)} placeholder="1" /></label><label className="field"><span className="field-label">Minimum payout</span><input inputMode="numeric" value={form.price} onChange={(event) => update("price", event.target.value)} placeholder="Smallest quote units" /></label><label className="field"><span className="field-label">Requested policy ID (blank for ADA)</span><input value={form.pricePolicyId} onChange={(event) => update("pricePolicyId", event.target.value)} placeholder="Blank = ADA" /></label><label className="field"><span className="field-label">Requested asset name</span><input value={form.priceAssetName} onChange={(event) => update("priceAssetName", event.target.value)} placeholder="Asset name (hex)" disabled={!form.pricePolicyId} /></label><label className="field field-wide"><span className="field-label">Proceeds address</span><input value={form.proceeds || address} onChange={(event) => update("proceeds", event.target.value)} placeholder="Defaults to connected wallet" /></label></div><div className="marketplace-mode-note"><b>{mode === "instant" ? ">" : "-"}</b><div><strong>{mode === "instant" ? "Instant sell / batcher pickup" : "Sell at a price"}</strong><span>{mode === "instant" ? "The batcher cannot settle below your on-chain minimum." : "Any buyer can consume the listing when payment reaches the proceeds address."}</span></div></div><div className="marketplace-contract-note"><span>*</span><div>Uses <code>p2p_listing_simple</code>; no registry reference is required. Configure <code>NEXT_PUBLIC_SIMPLE_ORDERBOOK_ADDRESS</code> after deployment.</div></div>{message && <p className={message.kind === "error" ? "marketplace-message marketplace-error" : "marketplace-message marketplace-success"} role={message.kind === "error" ? "alert" : "status"}>{message.text}</p>}<div className="marketplace-form-footer"><p><span className="status-dot" />{lucid ? " Eternl connected - ready to sign." : " Connect Eternl to prepare a transaction."}</p><button type="submit" className="primary-button" disabled={loading}>{loading ? "Awaiting wallet..." : "Create listing"} <span className="button-arrow">Go</span></button></div></form></section><section className="marketplace-listings"><div className="marketplace-listings-head"><div><span className="section-kicker">Live script UTxOs</span><h3>Marketplace listings</h3></div><span className="marketplace-count">{loaded ? visible.length + " shown" : "Connect to load"}</span></div>{!orderbookAddress && <p className="marketplace-empty">Set <code>NEXT_PUBLIC_SIMPLE_ORDERBOOK_ADDRESS</code> to load listings and enable actions.</p>}{orderbookAddress && !lucid && <p className="marketplace-empty">Connect Eternl to inspect the orderbook.</p>}{orderbookAddress && lucid && !loading && loaded && visible.length === 0 && <p className="marketplace-empty">No matching listing UTxOs found.</p>}{orderbookAddress && lucid && <div className="marketplace-list">{visible.map((listing) => { const owned = listing.managed; return <article className="marketplace-listing" key={listing.id}><div className="marketplace-asset"><span className="marketplace-asset-mark">RWA</span><div><strong>{listing.rwa.assetName || "Unnamed asset"} x {listing.quantity.toString()}</strong><code>{listing.rwa.policyId}</code><span className={listing.settlement === "pool" ? "marketplace-badge pool" : "marketplace-badge"}>{listing.settlement === "pool" ? "Pool inventory" : "Direct seller"}</span></div></div><div><span className="marketplace-listing-label">Payout</span><strong className="marketplace-listing-value">{listing.price.toString()} <small>{listing.priceAsset.policyId ? listing.priceAsset.assetName || "token" : "lovelace"}</small></strong></div><div><span className="marketplace-listing-label">Escrow</span><strong className="marketplace-listing-value">{(Number(listing.lockedLovelace) / 1000000).toFixed(2)} ADA</strong></div><div className="marketplace-actions">{!owned || listing.settlement === "pool" ? <button type="button" className="primary" onClick={() => void buyListing(listing)} disabled={loading}>Buy</button> : <><button type="button" onClick={() => beginEdit(listing)} disabled={loading}>Edit</button><button type="button" onClick={() => void cancelListing(listing)} disabled={loading}>Cancel</button></>}{editing?.id === listing.id && owned && <div className="marketplace-edit"><label>Quantity<input inputMode="numeric" value={editQuantity} onChange={(event) => setEditQuantity(event.target.value)} /></label><label>Price<input inputMode="numeric" value={editPrice} onChange={(event) => setEditPrice(event.target.value)} /></label><button type="button" className="primary" onClick={() => void updateListing(listing)} disabled={loading}>Save</button></div>}</div></article>; })}</div>}</section></div>;
+  const renderListing = (listing: Listing) => {
+    const owned = listing.managed;
+    const tokenName = assetNameText(listing.rwa.assetName);
+    const originalName = listing.fraction ? assetNameText(listing.fraction.original.assetName) : "";
+    return <article className="marketplace-listing" key={listing.id}>
+      <div className="marketplace-asset">
+        <span className={"marketplace-asset-mark " + (listing.fraction ? "fraction" : "")}>{listing.fraction ? "ƒ" : "RWA"}</span>
+        <div>
+          <strong>{tokenName} × {listing.quantity.toString()}</strong>
+          <code>{listing.rwa.policyId}{listing.rwa.assetName}</code>
+          {listing.fraction && <span className="marketplace-fraction-detail">Fraction of {originalName} · total supply {listing.fraction.totalFractions.toString()}</span>}
+          <span className={listing.settlement === "pool" ? "marketplace-badge pool" : "marketplace-badge"}>{listing.settlement === "pool" ? "Pool owned" : "P2P seller"}</span>
+        </div>
+      </div>
+      <div>
+        <span className="marketplace-listing-label">{listing.settlement === "pool" ? "Pool ask" : "Requested payout"}</span>
+        <strong className="marketplace-listing-value">{listing.price.toString()} <small>{listing.priceAsset.policyId ? assetNameText(listing.priceAsset.assetName) : "ADA"}</small></strong>
+      </div>
+      <div>
+        <span className="marketplace-listing-label">Escrow</span>
+        <strong className="marketplace-listing-value">{(Number(listing.lockedLovelace) / 1000000).toFixed(2)} ADA</strong>
+      </div>
+      <div className="marketplace-actions">
+        {!owned || listing.settlement === "pool" ? <button type="button" className="primary" onClick={() => void buyListing(listing)} disabled={loading}>Buy</button> : <><button type="button" onClick={() => beginEdit(listing)} disabled={loading}>Edit</button><button type="button" onClick={() => void cancelListing(listing)} disabled={loading}>Cancel</button></>}
+        {editing?.id === listing.id && owned && <div className="marketplace-edit"><label>Quantity<input inputMode="numeric" value={editQuantity} onChange={(event) => setEditQuantity(event.target.value)} /></label><label>Price<input inputMode="numeric" value={editPrice} onChange={(event) => setEditPrice(event.target.value)} /></label><button type="button" className="primary" onClick={() => void updateListing(listing)} disabled={loading}>Save</button></div>}
+      </div>
+    </article>;
+  };
+
+  const renderSection = (title: string, kicker: string, items: Listing[], empty: string) => <section className="marketplace-book">
+    <div className="marketplace-book-head"><div><span className="section-kicker">{kicker}</span><h3>{title}</h3></div><span className="marketplace-count">{loaded ? items.length + " available" : "Connect to load"}</span></div>
+    {!orderbookAddress && <p className="marketplace-empty">Set <code>NEXT_PUBLIC_SIMPLE_ORDERBOOK_ADDRESS</code> to discover this book.</p>}
+    {orderbookAddress && !lucid && <p className="marketplace-empty">Connect Eternl to inspect the orderbook.</p>}
+    {orderbookAddress && lucid && loaded && items.length === 0 && <p className="marketplace-empty">{empty}</p>}
+    {orderbookAddress && lucid && items.length > 0 && <div className="marketplace-list">{items.map(renderListing)}</div>}
+  </section>;
+
+  return <div className="marketplace-workbench">
+    <section className="marketplace-card">
+      <div className="section-heading"><div><span className="section-kicker">Orderbook / shared settlement</span><h2>Trade RWA and fractional ownership</h2></div><span className="step-badge">{orderbookAddress ? "Contract ready" : "Address needed"}</span></div>
+      <p className="marketplace-intro">Browse direct P2P listings and pool-owned inventory in one orderbook. Fraction tokens are identified from the active vaults and can use the same buy, sell, and instant-settlement paths.</p>
+      <div className="marketplace-toolbar">
+        <div className="marketplace-segments"><button type="button" className={mode === "price" ? "selected" : ""} onClick={() => setMode("price")}>Sell at a price</button><button type="button" className={mode === "instant" ? "selected" : ""} onClick={() => setMode("instant")}>Instant sell</button></div>
+        <button className="marketplace-refresh" type="button" onClick={() => void refresh()} disabled={loading}>{loading ? "Loading…" : "Refresh books"}</button>
+      </div>
+      <div className="marketplace-view-tabs" role="tablist" aria-label="Marketplace inventory">
+        <button type="button" className={view === "all" ? "selected" : ""} onClick={() => setView("all")}>Overview</button>
+        <button type="button" className={view === "p2p" ? "selected" : ""} onClick={() => setView("p2p")}>Listed tokens</button>
+        <button type="button" className={view === "pool" ? "selected" : ""} onClick={() => setView("pool")}>Pool owned</button>
+        <button type="button" className={view === "fractions" ? "selected" : ""} onClick={() => setView("fractions")}>Fractions</button>
+      </div>
+      <form onSubmit={createListing}>
+        <div className="marketplace-form-grid"><label className="field"><span className="field-label">Listed policy ID</span><input value={form.policyId} onChange={(event) => update("policyId", event.target.value)} placeholder="28-byte policy ID (hex)" /></label><label className="field"><span className="field-label">Listed asset name</span><input value={form.assetName} onChange={(event) => update("assetName", event.target.value)} placeholder="Asset name (hex)" /></label><label className="field"><span className="field-label">Quantity</span><input inputMode="numeric" value={form.quantity} onChange={(event) => update("quantity", event.target.value)} placeholder="1" /></label><label className="field"><span className="field-label">Minimum payout</span><input inputMode="numeric" value={form.price} onChange={(event) => update("price", event.target.value)} placeholder="Smallest quote units" /></label><label className="field"><span className="field-label">Requested policy ID (blank for ADA)</span><input value={form.pricePolicyId} onChange={(event) => update("pricePolicyId", event.target.value)} placeholder="Blank = ADA" /></label><label className="field"><span className="field-label">Requested asset name</span><input value={form.priceAssetName} onChange={(event) => update("priceAssetName", event.target.value)} placeholder="Asset name (hex)" disabled={!form.pricePolicyId} /></label><label className="field field-wide"><span className="field-label">Proceeds address</span><input value={form.proceeds || address} onChange={(event) => update("proceeds", event.target.value)} placeholder="Defaults to connected wallet" /></label></div>
+        <div className="marketplace-mode-note"><b>{mode === "instant" ? ">" : "-"}</b><div><strong>{mode === "instant" ? "Instant sell / batcher pickup" : "Sell at a price"}</strong><span>{mode === "instant" ? "The batcher cannot settle below your on-chain minimum." : "Any buyer can consume the listing when payment reaches the proceeds address."}</span></div></div>
+        <div className="marketplace-contract-note"><span>*</span><div>Uses <code>p2p_listing_simple</code>; no registry reference is required. Fraction listings use the exact fraction asset unit.</div></div>
+        {message && <p className={message.kind === "error" ? "marketplace-message marketplace-error" : "marketplace-message marketplace-success"} role={message.kind === "error" ? "alert" : "status"}>{message.text}</p>}
+        <div className="marketplace-form-footer"><p><span className="status-dot" />{lucid ? " Eternl connected - ready to sign." : " Connect Eternl to prepare a transaction."}</p><button type="submit" className="primary-button" disabled={loading}>{loading ? "Awaiting wallet..." : "Create listing"} <span className="button-arrow">Go</span></button></div>
+      </form>
+    </section>
+    <section className="marketplace-listings">
+      {view !== "pool" && renderSection(view === "fractions" ? "Fraction P2P listings" : "Listed tokens", "P2P orderbook", p2pListings, view === "fractions" ? "No fraction tokens are currently listed by users." : "No direct user listings are currently open.")}
+      {view !== "p2p" && renderSection(view === "fractions" ? "Fraction pool inventory" : "Available tokens", "Shared pool inventory", poolListings, view === "fractions" ? "No fractional tokens are currently available from the pool." : "No pool-owned inventory is currently available.")}
+    </section>
+  </div>;
+
 }
