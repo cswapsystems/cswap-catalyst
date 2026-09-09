@@ -471,3 +471,34 @@ test pool_payment_adds_quote_asset() {
 
   quantity_of(pool_payment(value, pool, 500, 1_000_000), test_quote) == 500
 }
+
+test open_inventory_blocks_liquidity_state_change() {
+  let pool =
+    QuotePoolDatum {
+      admin: #"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+      batcher: #"bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+      pool_token: test_pool_token,
+      lp_token: test_pool_token,
+      inventory_token: test_pool_token,
+      quote_asset: test_quote,
+      total_lp_supply: 10,
+      min_cash_reserve: 0,
+      paused: False,
+      inventory_value: 500,
+    }
+  let next =
+    QuotePoolDatum {
+      admin: pool.admin,
+      batcher: pool.batcher,
+      pool_token: pool.pool_token,
+      lp_token: pool.lp_token,
+      inventory_token: pool.inventory_token,
+      quote_asset: pool.quote_asset,
+      total_lp_supply: pool.total_lp_supply,
+      min_cash_reserve: pool.min_cash_reserve,
+      paused: pool.paused,
+      inventory_value: 0,
+    }
+
+  no_open_inventory(pool, next) == False
+}

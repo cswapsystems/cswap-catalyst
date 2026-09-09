@@ -1,5 +1,6 @@
 use aiken/collection/list
 use cardano/assets
+use cardano/address
 use cardano/address.{Address}
 use cardano/transaction.{InlineDatum, Input, Output, OutputReference, Transaction, find_input}
 use ebecca/types.{AssetClass, Direct, QuotePool, QuotePoolDatum, SimpleListingDatum, ada, has_one, quantity_of}
@@ -268,6 +269,26 @@ const test_extra_asset: AssetClass =
     asset_name: "EXTRA",
   }
 
+const test_pool_token: AssetClass =
+  AssetClass {
+    policy_id: #"cccccccccccccccccccccccccccccccccccccccccccccccccccccccc",
+    asset_name: "POOL",
+  }
+
+const test_inventory_token: AssetClass =
+  AssetClass {
+    policy_id: #"dddddddddddddddddddddddddddddddddddddddddddddddddddddddd",
+    asset_name: "RECEIPT",
+  }
+
+const test_seller: Address =
+  address.Address {
+    payment_credential: address.VerificationKey(
+      #"eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee",
+    ),
+    stake_credential: None,
+  }
+
 test simple_listing_value_rejects_unlisted_assets() {
   let expected = listing_value(test_rwa, 3, 2_000_000)
   let with_extra =
@@ -282,5 +303,34 @@ test simple_listing_value_rejects_unlisted_assets() {
     assets.quantity_of(expected, test_rwa.policy_id, test_rwa.asset_name) == 3,
     assets.quantity_of(expected, test_extra_asset.policy_id, test_extra_asset.asset_name) == 0,
     with_extra == expected == False,
+  }
+}
+
+test pool_listing_escrow_requires_inventory_receipt() {
+  let listing =
+    SimpleListingDatum {
+      seller: test_seller,
+      seller_key: #"eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee",
+      settlement: QuotePool {
+        pool_token: test_pool_token,
+        inventory_token: test_inventory_token,
+      },
+      rwa: test_rwa,
+      quantity: 1,
+      price_asset: test_extra_asset,
+      price: 500,
+    }
+
+  let exact = listing_escrow_value(listing, 2_000_000)
+  let missing_receipt = listing_value(test_rwa, 1, 2_000_000)
+
+  and {
+    assets.quantity_of(
+      exact,
+      test_inventory_token.policy_id,
+      test_inventory_token.asset_name,
+    ) == 1,
+    listing_escrow_is_exact(exact, listing, 2_000_000),
+    listing_escrow_is_exact(missing_receipt, listing, 2_000_000) == False,
   }
 }
