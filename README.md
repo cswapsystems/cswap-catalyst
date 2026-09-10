@@ -1,3 +1,9 @@
+# CSWAP Catalyst
+
+For the basic on-chain asset registry, setup instructions, and tests, see [Asset registry](docs/ASSET_REGISTRY.md). Manage approvals at `/registry`.
+
+The app remembers Eternl in local storage and restores an already-authorized connection after reload. The current account is read from the wallet; no signing credentials are stored. Use **Disconnect** in the wallet button to clear the preference. Run `npm run test:wallet` for the wallet-session tests.
+
 This is a [Next.js](https://nextjs.org) project bootstrapped with [`create-next-app`](https://nextjs.org/docs/app/api-reference/cli/create-next-app).
 
 ## Getting Started

@@ -1,37 +1,36 @@
 "use client";
 
-import Link from "next/link";
 import { useEffect, useMemo, useState } from "react";
-import EternlWalletButton from "./eternl-wallet";
+import PlatformHeader from "./platform-header";
 import { useWallet } from "./wallet-context";
 
 const historyStyles = `
 .history-board { padding: clamp(25px, 4vw, 46px); border: 1px solid var(--line); border-radius: 14px; background: var(--cream); box-shadow: 0 22px 50px rgba(38,50,40,.07); }
 .history-board-head { display: flex; align-items: start; justify-content: space-between; gap: 20px; }
 .history-board h2 { margin-top: 8px; font-family: var(--font-financial); font-size: 29px; font-weight: 750; letter-spacing: -1px; }
-.history-intro { max-width: 680px; margin-top: 17px; color: var(--muted); font-size: 13px; line-height: 1.6; }
-.history-wallet { display: flex; align-items: center; gap: 9px; min-width: 230px; padding: 11px 13px; color: #65736b; border: 1px solid #dce2d8; border-radius: 7px; background: #f6f8f3; font-size: 10px; }
+.history-intro { max-width: 680px; margin-top: 17px; color: var(--muted); font-size: 16px; line-height: 1.6; }
+.history-wallet { display: flex; align-items: center; gap: 9px; min-width: 230px; padding: 11px 13px; color: #65736b; border: 1px solid #dce2d8; border-radius: 7px; background: #f6f8f3; font-size: 13px; }
 .history-wallet i { width: 7px; height: 7px; flex: 0 0 auto; background: #82b865; border-radius: 50%; }
-.history-wallet code { overflow: hidden; color: var(--deep-moss); font-size: 10px; text-overflow: ellipsis; white-space: nowrap; }
+.history-wallet code { overflow: hidden; color: var(--deep-moss); font-size: 13px; text-overflow: ellipsis; white-space: nowrap; }
 .history-toolbar { display: flex; align-items: center; justify-content: space-between; gap: 18px; padding: 18px 0 15px; margin-top: 28px; border-top: 1px solid var(--line); }
 .history-filters { display: flex; flex-wrap: wrap; gap: 5px; }
-.history-filter { padding: 8px 11px; color: #7c8780; border: 1px solid #dbe1d8; border-radius: 999px; background: white; font-size: 10px; font-weight: 800; }
+.history-filter { padding: 8px 11px; color: #7c8780; border: 1px solid #dbe1d8; border-radius: 999px; background: white; font-size: 13px; font-weight: 800; }
 .history-filter.active { color: var(--deep-moss); border-color: var(--deep-moss); background: #eaf0e5; }
-.history-refresh { padding: 8px 11px; color: var(--moss); border: 1px solid #cfd8c9; border-radius: 5px; background: white; font-size: 10px; font-weight: 800; }
+.history-refresh { padding: 8px 11px; color: var(--moss); border: 1px solid #cfd8c9; border-radius: 5px; background: white; font-size: 13px; font-weight: 800; }
 .history-refresh:disabled { cursor: wait; opacity: .65; }
 .history-list { overflow: hidden; border: 1px solid #e0e5dc; border-radius: 8px; background: white; }
 .history-row { display: grid; grid-template-columns: 42px minmax(150px, 1.4fr) minmax(100px, .9fr) minmax(92px, .65fr) auto; align-items: center; gap: 16px; padding: 17px 18px; border-bottom: 1px solid #edf0eb; }
 .history-row:last-child { border-bottom: 0; }
 .history-icon { display: grid; place-items: center; width: 35px; height: 35px; color: var(--deep-moss); background: var(--lime); border-radius: 50%; font-size: 14px; font-weight: 900; }
 .history-icon.fractionalize { background: #dce9c7; }.history-icon.combine { background: #f5dea1; color: #765d21; }.history-icon.list { background: #cbe5e7; color: #356a70; }.history-icon.buy { background: #ffd2c8; color: #994b3b; }
-.history-action strong, .history-action small { display: block; }.history-action strong { font-size: 12px; }.history-action small { margin-top: 5px; color: #89928d; font-size: 10px; }
-.history-detail span, .history-meta span { display: block; color: #9aa39d; font-size: 9px; font-weight: 800; letter-spacing: .5px; text-transform: uppercase; }.history-detail strong, .history-meta strong { display: block; margin-top: 5px; color: #536158; font-size: 11px; }
-.history-meta { text-align: right; }.history-link { color: var(--moss); font-size: 11px; font-weight: 800; text-decoration: none; white-space: nowrap; }.history-link:hover { color: var(--deep-moss); }
-.history-empty { display: grid; justify-items: center; padding: 55px 25px; text-align: center; border: 1px dashed #bdc8ba; border-radius: 8px; background: #f7f9f3; }.history-empty-mark { display: grid; place-items: center; width: 55px; height: 55px; color: var(--deep-moss); background: var(--lime); border-radius: 50%; font-size: 24px; }.history-empty strong { margin-top: 17px; font-size: 14px; }.history-empty p { max-width: 480px; margin-top: 7px; color: #89928d; font-size: 11px; line-height: 1.6; }.history-empty .primary-button { margin-top: 19px; }
-.history-error { padding: 12px 14px; margin-bottom: 15px; color: #843728; background: #fff0ec; border-radius: 5px; font-size: 11px; line-height: 1.45; }.history-note { margin-top: 13px; color: #9aa39d; font-size: 10px; }
-.history-mint-name { color: var(--moss) !important; font-weight: 800; }.history-metadata { grid-column: 2 / -1; margin-top: 3px; }.history-metadata summary { color: var(--moss); cursor: pointer; font-size: 10px; font-weight: 800; }.history-metadata pre { max-height: 220px; padding: 12px; margin-top: 9px; overflow: auto; color: #536158; background: #f5f7f2; border-radius: 6px; font-size: 10px; line-height: 1.5; white-space: pre-wrap; }
+.history-action strong, .history-action small { display: block; }.history-action strong { font-size: 15px; }.history-action small { margin-top: 5px; color: #89928d; font-size: 13px; }
+.history-detail span, .history-meta span { display: block; color: #9aa39d; font-size: 12px; font-weight: 800; letter-spacing: .5px; text-transform: uppercase; }.history-detail strong, .history-meta strong { display: block; margin-top: 5px; color: #536158; font-size: 14px; }
+.history-meta { text-align: right; }.history-link { color: var(--moss); font-size: 14px; font-weight: 800; text-decoration: none; white-space: nowrap; }.history-link:hover { color: var(--deep-moss); }
+.history-empty { display: grid; justify-items: center; padding: 55px 25px; text-align: center; border: 1px dashed #bdc8ba; border-radius: 8px; background: #f7f9f3; }.history-empty-mark { display: grid; place-items: center; width: 55px; height: 55px; color: var(--deep-moss); background: var(--lime); border-radius: 50%; font-size: 24px; }.history-empty strong { margin-top: 17px; font-size: 17px; }.history-empty p { max-width: 480px; margin-top: 7px; color: #89928d; font-size: 14px; line-height: 1.6; }.history-empty .primary-button { margin-top: 19px; }
+.history-error { padding: 12px 14px; margin-bottom: 15px; color: #843728; background: #fff0ec; border-radius: 5px; font-size: 14px; line-height: 1.45; }.history-note { margin-top: 13px; color: #9aa39d; font-size: 13px; }
+.history-mint-name { color: var(--moss) !important; font-weight: 800; }.history-metadata { grid-column: 2 / -1; margin-top: 3px; }.history-metadata summary { color: var(--moss); cursor: pointer; font-size: 13px; font-weight: 800; }.history-metadata pre { max-height: 220px; padding: 12px; margin-top: 9px; overflow: auto; color: #536158; background: #f5f7f2; border-radius: 6px; font-size: 13px; line-height: 1.5; white-space: pre-wrap; }
 @media (max-width: 800px) { .history-board-head { flex-direction: column; }.history-wallet { min-width: 0; width: 100%; }.history-row { grid-template-columns: 35px minmax(0, 1fr) auto; gap: 11px; }.history-detail { grid-column: 2; }.history-meta { grid-column: 3; grid-row: 1 / span 2; }.history-link { grid-column: 2 / -1; }.history-toolbar { align-items: start; flex-direction: column; gap: 12px; } }
-@media (max-width: 480px) { .history-board { padding: 26px 20px; }.history-row { padding: 14px 12px; }.history-detail strong { font-size: 10px; }.history-action strong { font-size: 11px; } }
+@media (max-width: 480px) { .history-board { padding: 26px 20px; }.history-row { padding: 14px 12px; }.history-detail strong { font-size: 13px; }.history-action strong { font-size: 14px; } }
 `;
 
 type ActionType = "Mint" | "Fractionalize" | "Combine" | "List" | "Buy";
@@ -105,7 +104,6 @@ async function loadHistory(address: string): Promise<HistoryTransaction[]> {
   return history.filter((transaction): transaction is HistoryTransaction => transaction !== null);
 }
 
-const navItems = [["/mint", "Mint RWA"], ["/fractionalize", "Fractionalize"], ["/liquidate", "Liquidate"], ["/marketplace", "Marketplace"], ["/reserves", "Reserves"], ["/assets", "Asset browser"], ["/wallets", "Wallets"]];
 const actionIcons: Record<ActionType, string> = { Mint: "◇", Fractionalize: "◒", Combine: "↙", List: "□", Buy: "↗" };
 
 function HistoryBoard() {
@@ -135,5 +133,5 @@ function HistoryBoard() {
 }
 
 export default function HistoryPlatform() {
-  return <div className="platform-shell"><style>{historyStyles}</style><header className="topbar"><Link href="/" className="brand"><span className="brand-mark"><i /><i /><i /></span><span>CSWAP Systems</span></Link><nav aria-label="Main navigation">{navItems.map(([href, label]) => <Link href={href} key={href} className={href === "/history" ? "active" : ""}>{label}</Link>)}</nav><Link href="/history" className="history-shortcut connected">History</Link><EternlWalletButton /></header><main className="page-main"><section className="hero"><div><span className="eyebrow"><span className="eyebrow-icon">◷</span>Transaction history</span><h1>Every action, accounted for.</h1><p>Follow the on-chain trail of your real-world asset positions, from first mint to secondary-market purchase.</p></div><div className="portfolio-pill"><span>Tracked actions</span><strong>Mint · Trade · Own</strong><small>Verified on Cardano</small></div></section><HistoryBoard /></main><footer><span>© 2025 CSWAP Systems</span><span>Built for real-world assets <b>•</b> Secured on-chain</span><div><a href="#">Terms</a><a href="#">Support</a></div></footer></div>;
+  return <div className="platform-shell"><style>{historyStyles}</style><PlatformHeader /><main className="page-main"><section className="hero"><div><span className="eyebrow"><span className="eyebrow-icon">◷</span>Transaction history</span><h1>Every action, accounted for.</h1><p>Follow the on-chain trail of your real-world asset positions, from first mint to secondary-market purchase.</p></div><div className="portfolio-pill"><span>Tracked actions</span><strong>Mint · Trade · Own</strong><small>Verified on Cardano</small></div></section><HistoryBoard /></main><footer><span>© 2025 CSWAP Systems</span><span>Built for real-world assets <b>•</b> Secured on-chain</span><div><a href="#">Terms</a><a href="#">Support</a></div></footer></div>;
 }

@@ -1,8 +1,7 @@
 "use client";
 
-import Link from "next/link";
 import { useEffect, useState } from "react";
-import EternlWalletButton from "./eternl-wallet";
+import PlatformHeader from "./platform-header";
 import Cip25MintForm from "./cip25-mint-form";
 import OnchainFractionalizeForm from "./fractionalize-form";
 import MarketplaceWorkbench from "./marketplace-workbench";
@@ -10,14 +9,7 @@ import ReservesWorkbench from "./reserves-workbench";
 
 type Page = "mint" | "fractionalize" | "liquidate" | "marketplace" | "reserves" | "wallets";
 
-const navItems: { href: string; label: string; page: Page; icon: string }[] = [
-  { href: "/mint", label: "Mint RWA", page: "mint", icon: "◇" },
-  { href: "/fractionalize", label: "Fractionalize", page: "fractionalize", icon: "◒" },
-  { href: "/liquidate", label: "Liquidate", page: "liquidate", icon: "↘" },
-  { href: "/marketplace", label: "Marketplace", page: "marketplace", icon: "□" },
-  { href: "/reserves", label: "Reserves", page: "reserves", icon: "◈" },
-  { href: "/wallets", label: "Wallets", page: "wallets", icon: "⌘" },
-];
+const pageIcons: Record<Page, string> = { mint: "◇", fractionalize: "◒", liquidate: "↘", marketplace: "□", reserves: "◈", wallets: "⌘" };
 
 const pageDetails: Record<Page, { eyebrow: string; title: string; description: string }> = {
   mint: { eyebrow: "Asset origination", title: "Mint real-world value", description: "Create a verifiable on-chain representation of an off-chain asset." },
@@ -110,5 +102,5 @@ function SidePanel({ page }: { page: Page }) {
 export default function RwaPlatform({ page }: { page: Page }) {
   const detail = pageDetails[page];
   const form = page === "mint" ? <MintForm /> : page === "fractionalize" ? <FractionalizeForm /> : page === "liquidate" ? <LiquidateForm /> : page === "marketplace" ? <MarketplaceForm /> : <ReservesForm />;
-  return <div className="platform-shell"><header className="topbar"><Link href="/" className="brand"><span className="brand-mark"><i /><i /><i /></span><span>CSWAP Systems</span></Link><nav aria-label="Main navigation">{navItems.map((item) => <Link href={item.href} key={item.href} className={page === item.page ? "active" : ""}>{item.label}</Link>)}</nav><Link href="/history" className="history-shortcut">History</Link><EternlWalletButton /></header><main className="page-main"><section className="hero"><div><span className="eyebrow"><span className="eyebrow-icon">{navItems.find((item) => item.page === page)?.icon}</span>{detail.eyebrow}</span><h1>{detail.title}</h1><p>{detail.description}</p></div>{page !== "wallets" && <div className="portfolio-pill"><span>Portfolio value</span><strong>$48,240.80</strong><small>+ 4.8% this month</small></div>}</section>{page === "wallets" ? <WalletDirectory /> : <div className="workspace">{form}<SidePanel page={page} /></div>}</main><footer><span>© 2025 CSWAP Systems</span><span>Built for real-world assets <b>•</b> Secured on-chain</span><div><a href="#">Terms</a><a href="#">Support</a></div></footer></div>;
+  return <div className="platform-shell"><PlatformHeader /><main className="page-main"><section className="hero"><div><span className="eyebrow"><span className="eyebrow-icon">{pageIcons[page]}</span>{detail.eyebrow}</span><h1>{detail.title}</h1><p>{detail.description}</p></div></section>{page === "wallets" ? <WalletDirectory /> : <div className="workspace">{form}<SidePanel page={page} /></div>}</main><footer><span>© 2025 CSWAP Systems</span><span>Built for real-world assets <b>•</b> Secured on-chain</span><div><a href="#">Terms</a><a href="#">Support</a></div></footer></div>;
 }

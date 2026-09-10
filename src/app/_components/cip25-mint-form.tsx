@@ -54,7 +54,7 @@ function FilePicker({ label, file, accept, help, inputRef, disabled, onSelect }:
 }
 
 export default function Cip25MintForm() {
-  const { registerAddress } = useWallet();
+  const { connect } = useWallet();
   const [form, setForm] = useState(initialState);
   const [image, setImage] = useState<File | null>(null);
   const [proof, setProof] = useState<File | null>(null);
@@ -99,21 +99,18 @@ export default function Cip25MintForm() {
 
     setSubmitting(true);
     try {
-      const api = await window.cardano.eternl.enable();
-      if (await api.getNetworkId() !== 0) throw new Error("Eternl must be set to Cardano Preprod.");
+      const lucid = await connect();
+      if (!lucid) throw new Error("Unable to connect Eternl. Check the wallet connection message.");
 
       const uploadedImage = await uploadAssetFile(image, "image");
       const uploadedProof = await uploadAssetFile(proof, "proof");
       const uploadedMetadata = await uploadAssetFile(metadataFile, "metadata");
-      const { Blockfrost, Constr, Data, Lucid, applyParamsToScript, fromText, mintingPolicyToId } = await import("@lucid-evolution/lucid");
+      const { Constr, Data, applyParamsToScript, fromText, mintingPolicyToId } = await import("@lucid-evolution/lucid");
       const policyResponse = await fetch("/api/minter-blueprint", { cache: "no-store" });
       if (!policyResponse.ok) throw new Error("Unable to load the minter policy.");
 
       const { compiledCode }: { compiledCode: string } = await policyResponse.json();
-      const lucid = await Lucid(new Blockfrost("/api/blockfrost", ""), "Preprod");
-      lucid.selectWallet.fromAPI(api);
       const address = await lucid.wallet().address();
-      registerAddress(address);
       const seed = (await lucid.utxosAt(address))
         .filter((utxo) => Object.keys(utxo.assets).every((unit) => unit === "lovelace") && utxo.assets.lovelace > BigInt(5_000_000))
         .sort((a, b) => (a.assets.lovelace > b.assets.lovelace ? -1 : 1))[0];

@@ -6,7 +6,10 @@
     "dev": "next dev",
     "build": "next build",
     "start": "next start",
-    "lint": "eslint"
+    "lint": "eslint",
+    "test:registry": "node --experimental-strip-types --test tests/asset-registry.test.mjs",
+    "test:wallet": "node --experimental-strip-types --test tests/wallet-session.test.mjs",
+    "test:wallet-assets": "node --experimental-strip-types --test tests/wallet-assets.test.mjs"
   },
   "dependencies": {
     "@lucid-evolution/lucid": "^0.6.2",

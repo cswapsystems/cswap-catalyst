@@ -1,7 +1,9 @@
 "use client";
 
 import { FormEvent, useCallback, useEffect, useMemo, useState } from "react";
+import Link from "next/link";
 import { useWallet } from "./wallet-context";
+import { readRegistry, registryConfigured } from "@/lib/asset-registry";
 
 type Mode = "all" | "price" | "instant";
 type MarketplaceView = "all" | "p2p" | "pool" | "fractions";
@@ -142,6 +144,9 @@ export default function MarketplaceWorkbench() {
   const { address, lucid } = useWallet();
   const [form, setForm] = useState<FormState>(initialForm);
   const [mode, setMode] = useState<Mode>("price");
+  const [registeredOnly, setRegisteredOnly] = useState(false);
+  const [registeredAssets, setRegisteredAssets] = useState<Set<string> | null>(null);
+  const [registryError, setRegistryError] = useState("");
   const [view, setView] = useState<MarketplaceView>("all");
   const [listings, setListings] = useState<Listing[]>([]);
   const [editing, setEditing] = useState<Listing | null>(null);
@@ -156,10 +161,18 @@ export default function MarketplaceWorkbench() {
     setMessage(null);
     if (!lucid || !orderbookAddress) { setListings([]); setLoaded(true); return; }
     setLoading(true);
+    setRegisteredAssets(null);
     try {
       const tools = await import("@lucid-evolution/lucid");
       let fractions = new Map<string, FractionInfo>();
       try { fractions = await loadFractionIndex(lucid); } catch { /* Fraction metadata is optional for generic listings. */ }
+      let approved: Set<string> | null = null;
+      let approvalError = "";
+      if (registryConfigured) {
+        try { approved = new Set((await readRegistry(lucid)).entries); }
+        catch { approvalError = "Registry verification unavailable. Registered-only results are hidden until a successful refresh."; }
+      }
+      setRegisteredAssets(approved); setRegistryError(approvalError);
       const found: Listing[] = [];
       for (const utxo of await lucid.utxosAt(orderbookAddress)) {
         if (!utxo.datum) continue;
@@ -178,7 +191,8 @@ export default function MarketplaceWorkbench() {
 
   useEffect(() => { const timer = window.setTimeout(() => { void refresh(); }, 0); return () => window.clearTimeout(timer); }, [refresh]);
   const visible = useMemo(() => listings
-    .filter((listing) => view === "all" || (view === "p2p" && listing.settlement === "direct") || (view === "pool" && listing.settlement === "pool") || (view === "fractions" && Boolean(listing.fraction))), [listings, view]);
+    .filter((listing) => !registeredOnly || registeredAssets?.has(unit(listing.rwa)))
+    .filter((listing) => view === "all" || (view === "p2p" && listing.settlement === "direct") || (view === "pool" && listing.settlement === "pool") || (view === "fractions" && Boolean(listing.fraction))), [listings, view, registeredOnly, registeredAssets]);
   const p2pListings = useMemo(() => visible.filter((listing) => listing.settlement === "direct"), [visible]);
   const poolListings = useMemo(() => visible.filter((listing) => listing.settlement === "pool"), [visible]);
   const update = (key: keyof FormState, value: string) => { setForm((current) => ({ ...current, [key]: value })); setMessage(null); };
@@ -326,6 +340,9 @@ export default function MarketplaceWorkbench() {
         <div className="marketplace-segments"><button type="button" className={mode === "price" ? "selected" : ""} onClick={() => setMode("price")}>Sell at a price</button><button type="button" className={mode === "instant" ? "selected" : ""} onClick={() => setMode("instant")}>Instant sell</button></div>
         <button className="marketplace-refresh" type="button" onClick={() => void refresh()} disabled={loading}>{loading ? "Loading…" : "Refresh books"}</button>
       </div>
+      <label><input type="checkbox" checked={registeredOnly} disabled={!registryConfigured} onChange={(event) => setRegisteredOnly(event.target.checked)} /> CSWAP-registered assets only</label>
+      {!registryConfigured && <p>Configure the asset registry to enable approval filtering. <Link href="/registry">Open registry</Link></p>}
+      {registryError && <p role="alert">{registryError}</p>}
       <div className="marketplace-view-tabs" role="tablist" aria-label="Marketplace inventory">
         <button type="button" className={view === "all" ? "selected" : ""} onClick={() => setView("all")}>Overview</button>
         <button type="button" className={view === "p2p" ? "selected" : ""} onClick={() => setView("p2p")}>Listed tokens</button>

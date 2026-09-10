@@ -105,7 +105,7 @@ function Field({ label, placeholder, hint, value, onChange, readOnly, select, op
 function Arrow() { return <span aria-hidden="true" className="button-arrow">↗</span>; }
 
 export default function FractionalizeForm() {
-  const { address, lucid } = useWallet();
+  const { address, lucid, connect } = useWallet();
   const [mode, setMode] = useState<"split" | "combine">("split");
   const [assets, setAssets] = useState<WalletAsset[]>([]);
   const [assetStatus, setAssetStatus] = useState<"idle" | "loading" | "ready" | "error">("idle");
@@ -148,15 +148,12 @@ export default function FractionalizeForm() {
 
     setSubmitting(true);
     try {
-      if (!window.cardano?.eternl) throw new Error("Install Eternl and switch it to Preprod.");
-      const api = await window.cardano.eternl.enable();
-      if (await api.getNetworkId() !== 0) throw new Error("Eternl must be set to Cardano Preprod.");
-      const { Blockfrost, Constr, Data, Lucid, applyParamsToScript, fromText, getAddressDetails, mintingPolicyToId, validatorToAddress, validatorToScriptHash } = await import("@lucid-evolution/lucid");
+      const lucid = await connect();
+      if (!lucid) throw new Error("Unable to connect Eternl. Check the wallet connection message.");
+      const { Constr, Data, applyParamsToScript, fromText, getAddressDetails, mintingPolicyToId, validatorToAddress, validatorToScriptHash } = await import("@lucid-evolution/lucid");
       const blueprintResponse = await fetch("/api/fractionalize-blueprint", { cache: "no-store" });
       const blueprint = await blueprintResponse.json() as Blueprint & { error?: string };
       if (!blueprintResponse.ok || !blueprint.ftCompiledCode || !blueprint.vaultCompiledCode) throw new Error(blueprint.error || "Unable to load the fractionalization validators.");
-      const lucid = await Lucid(new Blockfrost("/api/blockfrost", ""), "Preprod");
-      lucid.selectWallet.fromAPI(api);
       const walletAddress = await lucid.wallet().address();
       if (walletAddress !== address) throw new Error("The connected wallet changed. Refresh the asset list and try again.");
 
