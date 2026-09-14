@@ -12,6 +12,7 @@ type Constr = { index: number; fields: unknown[] };
 type FractionInfo = { fraction: AssetClass; original: AssetClass; totalFractions: bigint };
 type FormState = { policyId: string; assetName: string; quantity: string; pricePolicyId: string; priceAssetName: string; price: string; proceeds: string };
 type Listing = { id: string; utxo: import("@lucid-evolution/lucid").UTxO; seller: string; sellerKey: string; managed: boolean; settlement: "direct" | "pool"; poolToken?: AssetClass; inventoryToken?: AssetClass; fraction?: FractionInfo; rwa: AssetClass; quantity: bigint; priceAsset: AssetClass; price: bigint; lockedLovelace: bigint };
+type PoolSellRequest = { id: string; utxo: import("@lucid-evolution/lucid").UTxO; seller: string; sellerKey: string; managed: boolean; poolToken: AssetClass; rwa: AssetClass; quantity: bigint; quoteAsset: AssetClass; minPayout: bigint; lockedLovelace: bigint };
 
 const initialForm: FormState = { policyId: "", assetName: "", quantity: "1", pricePolicyId: "", priceAssetName: "", price: "", proceeds: "" };
 
@@ -139,6 +140,31 @@ function encodeListing(tools: typeof import("@lucid-evolution/lucid"), form: For
   const datum = new tools.Constr(0, [addressData(tools.Data, tools.AddressSchema, tools.getAddressDetails, form.proceeds.trim() || address), details.paymentCredential.hash, new tools.Constr(0, []), assetData(tools.Constr, { policyId, assetName }), quantity, assetData(tools.Constr, { policyId: pricePolicyId, assetName: priceAssetName }), price]);
   return { datum, policyId, assetName, quantity };
 }
+function decodePoolSellRequest(utxo: import("@lucid-evolution/lucid").UTxO, tools: { Data: { from: (raw: string) => unknown }; credentialToAddress: (network: "Preprod" | "Mainnet", payment: { type: "Key" | "Script"; hash: string }, stake?: { type: "Key" | "Script"; hash: string }) => string }): PoolSellRequest {
+  if (!utxo.datum) throw new Error("Pool sell request has no datum.");
+  const root = getConstr(tools.Data.from(utxo.datum), "pool sell request");
+  if (root.index !== 0 || root.fields.length !== 7 || typeof root.fields[1] !== "string" || typeof root.fields[4] !== "bigint" || typeof root.fields[6] !== "bigint") throw new Error("Not a pool sell request datum.");
+  return { id: utxo.txHash + "#" + utxo.outputIndex, utxo, seller: getAddress(root.fields[0], tools), sellerKey: root.fields[1], managed: false, poolToken: getAsset(root.fields[2], "request pool token"), rwa: getAsset(root.fields[3], "requested RWA"), quantity: root.fields[4], quoteAsset: getAsset(root.fields[5], "request quote asset"), minPayout: root.fields[6], lockedLovelace: utxo.assets.lovelace };
+}
+function encodePoolSellRequest(tools: typeof import("@lucid-evolution/lucid"), form: FormState, address: string, poolToken: AssetClass, quoteAsset: AssetClass) {
+  const policyId = validateHex(form.policyId, "Listed policy ID");
+  const assetName = validateHex(form.assetName, "Listed asset name", true);
+  const pricePolicyId = form.pricePolicyId.trim() ? validateHex(form.pricePolicyId, "Requested policy ID") : "";
+  const priceAssetName = pricePolicyId ? validateHex(form.priceAssetName, "Requested asset name", true) : "";
+  const quantity = BigInt(form.quantity);
+  const minPayout = BigInt(form.price);
+  if (policyId.length !== 56 || (pricePolicyId && pricePolicyId.length !== 56)) throw new Error("Policy IDs must be 28 bytes (56 hex characters).");
+  if (quantity <= BigInt(0) || minPayout <= BigInt(0)) throw new Error("Quantity and minimum payout must be greater than zero.");
+  const rwa = { policyId, assetName };
+  const requested = { policyId: pricePolicyId, assetName: priceAssetName };
+  if (sameAsset(rwa, requested)) throw new Error("The requested asset cannot be the listed asset.");
+  if (!sameAsset(requested, quoteAsset)) throw new Error("The minimum payout asset must match the shared pool quote asset.");
+  const details = tools.getAddressDetails(address);
+  if (!details?.paymentCredential || details.paymentCredential.type !== "Key") throw new Error("The connected wallet needs a payment-key address.");
+  const seller = form.proceeds.trim() || address;
+  const datum = new tools.Constr(0, [addressData(tools.Data, tools.AddressSchema, tools.getAddressDetails, seller), details.paymentCredential.hash, assetData(tools.Constr, poolToken), assetData(tools.Constr, rwa), quantity, assetData(tools.Constr, requested), minPayout]);
+  return { datum, policyId, assetName, quantity };
+}
 
 export default function MarketplaceWorkbench() {
   const { address, lucid } = useWallet();
@@ -149,6 +175,7 @@ export default function MarketplaceWorkbench() {
   const [registryError, setRegistryError] = useState("");
   const [view, setView] = useState<MarketplaceView>("all");
   const [listings, setListings] = useState<Listing[]>([]);
+  const [sellRequests, setSellRequests] = useState<PoolSellRequest[]>([]);
   const [editing, setEditing] = useState<Listing | null>(null);
   const [editQuantity, setEditQuantity] = useState("");
   const [editPrice, setEditPrice] = useState("");
@@ -156,6 +183,7 @@ export default function MarketplaceWorkbench() {
   const [loaded, setLoaded] = useState(false);
   const [message, setMessage] = useState<{ kind: "error" | "success"; text: string } | null>(null);
   const orderbookAddress = process.env.NEXT_PUBLIC_SIMPLE_ORDERBOOK_ADDRESS ?? "";
+  const quotePoolAddress = process.env.NEXT_PUBLIC_QUOTE_POOL_ADDRESS ?? "";
 
   const refresh = useCallback(async () => {
     setMessage(null);
@@ -183,11 +211,27 @@ export default function MarketplaceWorkbench() {
           found.push({ ...listing, managed, fraction: fractions.get(unit(listing.rwa)) });
         } catch { /* skip unrelated script UTxOs */ }
       }
-      setListings(found); setLoaded(true);
+      const requests: PoolSellRequest[] = [];
+      if (quotePoolAddress) {
+        try {
+          const requestCode = await loadScript("pool_sell_request.pool_sell_request.spend");
+          const network = process.env.NEXT_PUBLIC_CARDANO_NETWORK === "mainnet" ? "Mainnet" as const : "Preprod" as const;
+          const requestAddress = tools.validatorToAddress(network, { type: "PlutusV3", script: tools.applyParamsToScript(requestCode.script, [addressData(tools.Data, tools.AddressSchema, tools.getAddressDetails, quotePoolAddress) as import("@lucid-evolution/lucid").Data]) });
+          for (const utxo of await lucid.utxosAt(requestAddress)) {
+            if (!utxo.datum) continue;
+            try {
+              const request = decodePoolSellRequest(utxo, tools);
+              const details = address ? tools.getAddressDetails(address) : undefined;
+              requests.push({ ...request, managed: details?.paymentCredential?.type === "Key" && details.paymentCredential.hash === request.sellerKey });
+            } catch { /* Skip unrelated script outputs. */ }
+          }
+        } catch { /* Request availability does not prevent orderbook browsing. */ }
+      }
+      setListings(found); setSellRequests(requests); setLoaded(true);
     } catch (cause) {
       setMessage({ kind: "error", text: cause instanceof Error ? cause.message : "Unable to read orderbook listings." });
     } finally { setLoading(false); }
-  }, [address, lucid, orderbookAddress]);
+  }, [address, lucid, orderbookAddress, quotePoolAddress]);
 
   useEffect(() => { const timer = window.setTimeout(() => { void refresh(); }, 0); return () => window.clearTimeout(timer); }, [refresh]);
   const visible = useMemo(() => listings
@@ -201,14 +245,29 @@ export default function MarketplaceWorkbench() {
     event.preventDefault(); setMessage(null);
     if (!lucid || !address) { setMessage({ kind: "error", text: "Connect Eternl before creating a listing." }); return; }
     if (!orderbookAddress) { setMessage({ kind: "error", text: "Set NEXT_PUBLIC_SIMPLE_ORDERBOOK_ADDRESS to the deployed registry-free orderbook script address." }); return; }
+    if (mode === "instant" && !quotePoolAddress) { setMessage({ kind: "error", text: "Set NEXT_PUBLIC_QUOTE_POOL_ADDRESS to submit a shared-pool sell request." }); return; }
     setLoading(true);
     try {
       const tools = await import("@lucid-evolution/lucid");
-      const encoded = encodeListing(tools, form, address);
+      let destination = orderbookAddress;
+      let encoded: ReturnType<typeof encodeListing> | ReturnType<typeof encodePoolSellRequest>;
+      if (mode === "instant") {
+        const poolUtxo = (await lucid.utxosAt(quotePoolAddress)).find((utxo) => utxo.datum && (() => { try { const datum = getConstr(tools.Data.from(utxo.datum!), "quote pool"); return datum.index === 0 && datum.fields.length === 10; } catch { return false; } })());
+        if (!poolUtxo?.datum) throw new Error("No active shared-pool state was found.");
+        const poolDatum = getConstr(tools.Data.from(poolUtxo.datum), "quote pool");
+        const poolToken = getAsset(poolDatum.fields[2], "pool token");
+        const quoteAsset = getAsset(poolDatum.fields[5], "pool quote asset");
+        encoded = encodePoolSellRequest(tools, form, address, poolToken, quoteAsset);
+        const requestCode = await loadScript("pool_sell_request.pool_sell_request.spend");
+        const network = process.env.NEXT_PUBLIC_CARDANO_NETWORK === "mainnet" ? "Mainnet" as const : "Preprod" as const;
+        destination = tools.validatorToAddress(network, { type: "PlutusV3", script: tools.applyParamsToScript(requestCode.script, [addressData(tools.Data, tools.AddressSchema, tools.getAddressDetails, quotePoolAddress) as import("@lucid-evolution/lucid").Data]) });
+      } else {
+        encoded = encodeListing(tools, form, address);
+      }
       const escrow = { lovelace: BigInt(2000000), [unit({ policyId: encoded.policyId, assetName: encoded.assetName })]: encoded.quantity };
-      const tx = await lucid.newTx().pay.ToContract(orderbookAddress, { kind: "inline", value: tools.Data.to(encoded.datum as import("@lucid-evolution/lucid").Data) }, escrow).attach.SpendingValidator(await loadScript("p2p_listing_simple.p2p_listing_simple.spend")).complete();
+      const tx = await lucid.newTx().pay.ToContract(destination, { kind: "inline", value: tools.Data.to(encoded.datum as import("@lucid-evolution/lucid").Data) }, escrow).complete();
       const hash = await (await tx.sign.withWallet().complete()).submit();
-      setForm({ ...initialForm, proceeds: address }); setMessage({ kind: "success", text: "Listing submitted: " + hash }); await refresh();
+      setForm({ ...initialForm, proceeds: address }); setMessage({ kind: "success", text: (mode === "instant" ? "Pool sell request submitted: " : "Listing submitted: ") + hash }); await refresh();
     } catch (cause) { setMessage({ kind: "error", text: cause instanceof Error ? cause.message : "Listing creation was cancelled or failed." }); }
     finally { setLoading(false); }
   }
@@ -249,7 +308,9 @@ export default function MarketplaceWorkbench() {
           poolRoot.fields[8],
           nextInventoryValue,
         ]);
-        const poolRedeemer = new tools.Constr(3, [listing.price, buyer, nextDatum]);
+        // QuotePoolRedeemer.InventorySale follows BatcherInstantSell in the
+        // on-chain enum, so its constructor index is 4.
+        const poolRedeemer = new tools.Constr(4, [listing.price, buyer, nextDatum]);
         const poolCode = await loadScript("quote_pool.quote_pool.spend");
         const receiptCode = await loadScript("inventory_policy.inventory_policy.mint");
         const poolScript = { type: "PlutusV3" as const, script: tools.applyParamsToScript(poolCode.script, [addressData(tools.Data, tools.AddressSchema, tools.getAddressDetails, orderbookAddress) as import("@lucid-evolution/lucid").Data]) };
@@ -273,6 +334,22 @@ export default function MarketplaceWorkbench() {
       const hash = await (await tx.sign.withWallet().complete()).submit();
       setMessage({ kind: "success", text: "Cancellation submitted: " + hash }); await refresh();
     } catch (cause) { setMessage({ kind: "error", text: cause instanceof Error ? cause.message : "Cancellation was cancelled or failed." }); }
+    finally { setLoading(false); }
+  }
+
+  async function cancelPoolSellRequest(request: PoolSellRequest) {
+    setMessage(null);
+    if (!lucid || !address || !request.managed) { setMessage({ kind: "error", text: "Connect the request wallet before cancelling." }); return; }
+    if (!quotePoolAddress) { setMessage({ kind: "error", text: "Configure NEXT_PUBLIC_QUOTE_POOL_ADDRESS before cancelling." }); return; }
+    setLoading(true);
+    try {
+      const tools = await import("@lucid-evolution/lucid");
+      const requestCode = await loadScript("pool_sell_request.pool_sell_request.spend");
+      const requestScript = { type: "PlutusV3" as const, script: tools.applyParamsToScript(requestCode.script, [addressData(tools.Data, tools.AddressSchema, tools.getAddressDetails, quotePoolAddress) as import("@lucid-evolution/lucid").Data]) };
+      const tx = await lucid.newTx().collectFrom([request.utxo], tools.Data.to(new tools.Constr(1, []) as import("@lucid-evolution/lucid").Data)).attach.SpendingValidator(requestScript).pay.ToAddress(request.seller, { ...request.utxo.assets }).addSigner(address).complete();
+      const hash = await (await tx.sign.withWallet().complete()).submit();
+      setMessage({ kind: "success", text: "Pool sell request cancelled: " + hash }); await refresh();
+    } catch (cause) { setMessage({ kind: "error", text: cause instanceof Error ? cause.message : "The pool sell request could not be cancelled." }); }
     finally { setLoading(false); }
   }
 
@@ -331,6 +408,12 @@ export default function MarketplaceWorkbench() {
     {orderbookAddress && lucid && loaded && items.length === 0 && <p className="marketplace-empty">{empty}</p>}
     {orderbookAddress && lucid && items.length > 0 && <div className="marketplace-list">{items.map(renderListing)}</div>}
   </section>;
+  const renderRequest = (request: PoolSellRequest) => <article className="marketplace-listing" key={request.id}>
+    <div className="marketplace-asset"><span className="marketplace-asset-mark">⇢</span><div><strong>{assetNameText(request.rwa.assetName)} × {request.quantity.toString()}</strong><code>{request.rwa.policyId}{request.rwa.assetName}</code><span className="marketplace-badge">Awaiting pool pickup</span></div></div>
+    <div><span className="marketplace-listing-label">Minimum payout</span><strong className="marketplace-listing-value">{request.minPayout.toString()} <small>{request.quoteAsset.policyId ? assetNameText(request.quoteAsset.assetName) : "ADA"}</small></strong></div>
+    <div><span className="marketplace-listing-label">Escrow</span><strong className="marketplace-listing-value">{(Number(request.lockedLovelace) / 1000000).toFixed(2)} ADA</strong></div>
+    <div className="marketplace-actions">{request.managed ? <button type="button" onClick={() => void cancelPoolSellRequest(request)} disabled={loading}>Cancel request</button> : <span className="explorer-link muted-link">Pool batcher may settle</span>}</div>
+  </article>;
 
   return <div className="marketplace-workbench">
     <section className="marketplace-card">
@@ -351,13 +434,14 @@ export default function MarketplaceWorkbench() {
       </div>
       <form onSubmit={createListing}>
         <div className="marketplace-form-grid"><label className="field"><span className="field-label">Listed policy ID</span><input value={form.policyId} onChange={(event) => update("policyId", event.target.value)} placeholder="28-byte policy ID (hex)" /></label><label className="field"><span className="field-label">Listed asset name</span><input value={form.assetName} onChange={(event) => update("assetName", event.target.value)} placeholder="Asset name (hex)" /></label><label className="field"><span className="field-label">Quantity</span><input inputMode="numeric" value={form.quantity} onChange={(event) => update("quantity", event.target.value)} placeholder="1" /></label><label className="field"><span className="field-label">Minimum payout</span><input inputMode="numeric" value={form.price} onChange={(event) => update("price", event.target.value)} placeholder="Smallest quote units" /></label><label className="field"><span className="field-label">Requested policy ID (blank for ADA)</span><input value={form.pricePolicyId} onChange={(event) => update("pricePolicyId", event.target.value)} placeholder="Blank = ADA" /></label><label className="field"><span className="field-label">Requested asset name</span><input value={form.priceAssetName} onChange={(event) => update("priceAssetName", event.target.value)} placeholder="Asset name (hex)" disabled={!form.pricePolicyId} /></label><label className="field field-wide"><span className="field-label">Proceeds address</span><input value={form.proceeds || address} onChange={(event) => update("proceeds", event.target.value)} placeholder="Defaults to connected wallet" /></label></div>
-        <div className="marketplace-mode-note"><b>{mode === "instant" ? ">" : "-"}</b><div><strong>{mode === "instant" ? "Instant sell / batcher pickup" : "Sell at a price"}</strong><span>{mode === "instant" ? "The batcher cannot settle below your on-chain minimum." : "Any buyer can consume the listing when payment reaches the proceeds address."}</span></div></div>
-        <div className="marketplace-contract-note"><span>*</span><div>Uses <code>p2p_listing_simple</code>; no registry reference is required. Fraction listings use the exact fraction asset unit.</div></div>
+        <div className="marketplace-mode-note"><b>{mode === "instant" ? ">" : "-"}</b><div><strong>{mode === "instant" ? "Shared-pool sell request" : "Sell at a price"}</strong><span>{mode === "instant" ? "Your asset is escrowed for the pool batcher; it can only settle at or above your on-chain minimum, or you can cancel it with your wallet." : "Any buyer can consume the listing when payment reaches the proceeds address."}</span></div></div>
+        <div className="marketplace-contract-note"><span>*</span><div>{mode === "instant" ? <>Uses <code>pool_sell_request</code> and the configured shared pool. Settlement requires the pool batcher; no signing key is exposed to the browser.</> : <>Uses <code>p2p_listing_simple</code>; no registry reference is required. Fraction listings use the exact fraction asset unit.</>}</div></div>
         {message && <p className={message.kind === "error" ? "marketplace-message marketplace-error" : "marketplace-message marketplace-success"} role={message.kind === "error" ? "alert" : "status"}>{message.text}</p>}
-        <div className="marketplace-form-footer"><p><span className="status-dot" />{lucid ? " Eternl connected - ready to sign." : " Connect Eternl to prepare a transaction."}</p><button type="submit" className="primary-button" disabled={loading}>{loading ? "Awaiting wallet..." : "Create listing"} <span className="button-arrow">Go</span></button></div>
+        <div className="marketplace-form-footer"><p><span className="status-dot" />{lucid ? " Eternl connected - ready to sign." : " Connect Eternl to prepare a transaction."}</p><button type="submit" className="primary-button" disabled={loading}>{loading ? "Awaiting wallet..." : mode === "instant" ? "Submit pool request" : "Create listing"} <span className="button-arrow">Go</span></button></div>
       </form>
     </section>
     <section className="marketplace-listings">
+      {sellRequests.length > 0 && <section className="marketplace-book"><div className="marketplace-book-head"><div><span className="section-kicker">Shared-pool requests</span><h3>Awaiting pool pickup</h3></div><span className="marketplace-count">{sellRequests.length} pending</span></div><p className="directory-intro">A batcher can settle a request only with the shared pool and only at or above its minimum payout. Request owners can cancel at any time.</p><div className="marketplace-list">{sellRequests.map(renderRequest)}</div></section>}
       {view !== "pool" && renderSection(view === "fractions" ? "Fraction P2P listings" : "Listed tokens", "P2P orderbook", p2pListings, view === "fractions" ? "No fraction tokens are currently listed by users." : "No direct user listings are currently open.")}
       {view !== "p2p" && renderSection(view === "fractions" ? "Fraction pool inventory" : "Available tokens", "Shared pool inventory", poolListings, view === "fractions" ? "No fractional tokens are currently available from the pool." : "No pool-owned inventory is currently available.")}
     </section>

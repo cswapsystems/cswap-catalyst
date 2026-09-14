@@ -61,7 +61,7 @@ single AMM address.
 - `Swap`: preserves LP supply and enforces the fee-adjusted constant-product
   maximum output.
 - `AddLiquidity`: accepts only the current exact reserve ratio and requires
-  matching LP minting.
+  matching LP minting capped at the provider's proportional share.
 - `RemoveLiquidity`: requires matching LP burning and only permits a rounded
   down proportional withdrawal.
 - `Close`: requires the factory admin signature, full LP-supply burn, pool-NFT
@@ -82,6 +82,30 @@ in all datums are raw Cardano bytes, not display text.
 aiken check --deny
 aiken build
 ```
+
+## Preprod operator and UI
+
+The repository root includes `scripts/dex-preprod.mjs`, which uses the funded
+admin wallet configured in the ignored `.env.local` file. Its commands cover
+the full lifecycle:
+
+```sh
+npm run dex:preprod -- status
+npm run dex:preprod -- pool <fraction-unit>
+npm run dex:preprod -- collateral
+npm run dex:preprod -- create <fraction-unit> <lovelace> <fraction-units>
+npm run dex:preprod -- add <fraction-unit> <lovelace>
+npm run dex:preprod -- swap <fraction-unit> <lovelace>
+npm run dex:preprod -- swap-b <fraction-unit> <fraction-units>
+npm run dex:preprod -- remove <fraction-unit> <lp-units>
+npm run dex:preprod -- close <fraction-unit>
+```
+
+The public deployment addresses and confirmed lifecycle transaction IDs are
+recorded in `dex-deployment.preprod.json`; it contains no signing material.
+The `/dex` UI derives the same scripts from that deployment, reads live pools,
+and signs create, destroy, add, remove, and two-way swap transactions with the
+connected Eternl wallet.
 
 ## Security boundary
 

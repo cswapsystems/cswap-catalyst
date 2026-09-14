@@ -133,6 +133,8 @@ fn valid_add_liquidity(
     minted_lp > 0,
     minted_lp >= minimum_lp_out,
     added_a * before.reserve_b == added_b * before.reserve_a,
+    minted_lp * before.reserve_a <= added_a * before.total_liquidity,
+    minted_lp * before.reserve_b <= added_b * before.total_liquidity,
     assets.quantity_of(
       minted,
       before.lp_token.policy_id,
@@ -250,4 +252,24 @@ test remove_liquidity_requires_matching_lp_burn() {
     100_000,
     assets.zero |> assets.add("lp", "LP", -100_000),
   )
+}
+
+test add_liquidity_rejects_excessive_lp_mint() {
+  valid_add_liquidity(
+    test_pool(1_000_000, 1_000_000),
+    PoolDatum {
+      pool_nft: AssetId { policy_id: "pool", asset_name: "nft" },
+      asset_a: AssetId { policy_id: "", asset_name: "" },
+      asset_b: AssetId { policy_id: "token", asset_name: "B" },
+      lp_token: AssetId { policy_id: "lp", asset_name: "LP" },
+      fee_numerator: 997,
+      fee_denominator: 1000,
+      reserve_a: 1_100_000,
+      reserve_b: 1_100_000,
+      total_liquidity: 1_100_001,
+      pool_lovelace: 1_100_000,
+    },
+    100_001,
+    assets.zero |> assets.add("lp", "LP", 100_001),
+  ) == False
 }

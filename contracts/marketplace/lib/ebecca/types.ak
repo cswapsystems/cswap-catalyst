@@ -159,6 +159,19 @@ pub type SimpleListingDatum {
   price: Int,
 }
 
+// A seller-owned escrow submitted to the shared quote pool. Unlike a direct
+// listing, it is not publicly purchasable: the pool batcher either settles it
+// atomically against the pool or the seller cancels and recovers the asset.
+pub type PoolSellRequestDatum {
+  seller: Address,
+  seller_key: VerificationKeyHash,
+  pool_token: AssetClass,
+  rwa: AssetClass,
+  quantity: Int,
+  quote_asset: AssetClass,
+  min_payout: Int,
+}
+
 pub type QuotePoolDatum {
   admin: VerificationKeyHash,
   batcher: VerificationKeyHash,

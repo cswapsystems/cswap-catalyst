@@ -9,6 +9,7 @@ const navigation = [
   ["/fractionalize", "Fractionalize"],
   ["/liquidate", "Liquidate"],
   ["/marketplace", "Marketplace"],
+  ["/dex", "DEX"],
   ["/reserves", "Reserves"],
   ["/my-assets", "My assets"],
   ["/assets", "Asset browser"],

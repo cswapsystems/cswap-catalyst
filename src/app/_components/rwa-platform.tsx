@@ -6,16 +6,18 @@ import Cip25MintForm from "./cip25-mint-form";
 import OnchainFractionalizeForm from "./fractionalize-form";
 import MarketplaceWorkbench from "./marketplace-workbench";
 import ReservesWorkbench from "./reserves-workbench";
+import DexWorkbench from "./dex-workbench";
 
-type Page = "mint" | "fractionalize" | "liquidate" | "marketplace" | "reserves" | "wallets";
+type Page = "mint" | "fractionalize" | "liquidate" | "marketplace" | "dex" | "reserves" | "wallets";
 
-const pageIcons: Record<Page, string> = { mint: "◇", fractionalize: "◒", liquidate: "↘", marketplace: "□", reserves: "◈", wallets: "⌘" };
+const pageIcons: Record<Page, string> = { mint: "◇", fractionalize: "◒", liquidate: "↘", marketplace: "□", dex: "DEX", reserves: "◈", wallets: "⌘" };
 
 const pageDetails: Record<Page, { eyebrow: string; title: string; description: string }> = {
   mint: { eyebrow: "Asset origination", title: "Mint real-world value", description: "Create a verifiable on-chain representation of an off-chain asset." },
   fractionalize: { eyebrow: "Portfolio tooling", title: "Make ownership flexible", description: "Split an RWA into transferable units or reassemble units you hold." },
   liquidate: { eyebrow: "Redemption desk", title: "Exit with confidence", description: "Redeem eligible RWA tokens against the reserve and settle the position." },
   marketplace: { eyebrow: "Secondary market", title: "Buy and sell RWA tokens", description: "Trade verified real-world asset tokens through transparent on-chain escrow." },
+  dex: { eyebrow: "Fraction exchange", title: "Trade fractional ownership", description: "Create and operate on-chain tADA liquidity pools for fractionalized RWA tokens." },
   reserves: { eyebrow: "Liquidity operations", title: "Fund Instant Sell", description: "Add or withdraw shared quote reserves used to settle approved RWA sales." },
   wallets: { eyebrow: "Operational directory", title: "Wallets & custody", description: "Inspect the public addresses that support each part of the RWA lifecycle." },
 };
@@ -40,6 +42,10 @@ function MarketplaceForm() {
 
 function ReservesForm() {
   return <ReservesWorkbench />;
+}
+
+function DexForm() {
+  return <DexWorkbench />;
 }
 
 const walletRoles = [
@@ -101,6 +107,6 @@ function SidePanel({ page }: { page: Page }) {
 
 export default function RwaPlatform({ page }: { page: Page }) {
   const detail = pageDetails[page];
-  const form = page === "mint" ? <MintForm /> : page === "fractionalize" ? <FractionalizeForm /> : page === "liquidate" ? <LiquidateForm /> : page === "marketplace" ? <MarketplaceForm /> : <ReservesForm />;
+  const form = page === "mint" ? <MintForm /> : page === "fractionalize" ? <FractionalizeForm /> : page === "liquidate" ? <LiquidateForm /> : page === "marketplace" ? <MarketplaceForm /> : page === "dex" ? <DexForm /> : <ReservesForm />;
   return <div className="platform-shell"><PlatformHeader /><main className="page-main"><section className="hero"><div><span className="eyebrow"><span className="eyebrow-icon">{pageIcons[page]}</span>{detail.eyebrow}</span><h1>{detail.title}</h1><p>{detail.description}</p></div></section>{page === "wallets" ? <WalletDirectory /> : <div className="workspace">{form}<SidePanel page={page} /></div>}</main><footer><span>© 2025 CSWAP Systems</span><span>Built for real-world assets <b>•</b> Secured on-chain</span><div><a href="#">Terms</a><a href="#">Support</a></div></footer></div>;
 }

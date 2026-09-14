@@ -4,7 +4,7 @@ use cardano/address.{Address}
 use cardano/assets
 use cardano/transaction.{InlineDatum, Input, Output, OutputReference, Transaction, find_input}
 use ebecca/types.{
-  AssetClass, Direct, QuotePool, QuotePoolDatum, SimpleListingDatum, ada,
+  AssetClass, Direct, PoolSellRequestDatum, QuotePool, QuotePoolDatum, SimpleListingDatum, ada,
   has_one, quantity_of,
 }
 
@@ -25,6 +25,12 @@ pub type QuotePoolRedeemer {
   }
   BatcherAcquire {
     amount: Int,
+    inventory: SimpleListingDatum,
+    next: QuotePoolDatum,
+  }
+  BatcherInstantSell {
+    amount: Int,
+    request: PoolSellRequestDatum,
     inventory: SimpleListingDatum,
     next: QuotePoolDatum,
   }
@@ -102,6 +108,42 @@ fn find_listing_input(
   list.find(
     inputs,
     fn(input) { input.output.address == orderbook_address },
+  )
+}
+
+fn request_from_output(output: Output) -> Option<PoolSellRequestDatum> {
+  when output.datum is {
+    InlineDatum(data) -> {
+      expect request: PoolSellRequestDatum = data
+      Some(request)
+    }
+    _ -> None
+  }
+}
+
+fn find_request_input(
+  inputs: List<Input>,
+  expected: PoolSellRequestDatum,
+) -> Option<Input> {
+  list.find(
+    inputs,
+    fn(input) {
+      // Do not attempt to decode unrelated inline datums (including the pool
+      // datum itself) as a sell request. A request escrow holds only the RWA
+      // specified in its datum, plus lovelace.
+      if assets.without_lovelace(input.output.value) == assets.from_asset(
+        expected.rwa.policy_id,
+        expected.rwa.asset_name,
+        expected.quantity,
+      ) {
+        when request_from_output(input.output) is {
+          Some(request) -> request == expected
+          None -> False
+        }
+      } else {
+        False
+      }
+    },
   )
 }
 
@@ -364,6 +406,48 @@ validator quote_pool(orderbook_address: Address) {
           minted(tx, pool.inventory_token) == 1,
           inventory.rwa == listing.rwa,
           inventory.quantity == listing.quantity,
+          inventory.price > 0,
+          inventory_lovelace > 0,
+          inventory_output.value == listing_value(inventory, inventory_lovelace),
+          next.total_lp_supply == pool.total_lp_supply,
+          next.inventory_value == pool.inventory_value + inventory.price,
+          same_config(pool, next),
+          pool_can_pay(own_input.output, pool, amount, locked_lovelace),
+          next_output.value == pool_payment(
+            own_input.output.value,
+            pool,
+            -amount,
+            -locked_lovelace,
+          ),
+        }
+      }
+
+      BatcherInstantSell { amount, request, inventory, next } -> {
+        expect Some(request_input) = find_request_input(tx.inputs, request)
+        expect Some(next_output) = pool_continuation(tx.outputs, pool_address, next)
+        expect Some(inventory_output) =
+          find_listing_output(tx.outputs, orderbook_address, inventory)
+        let locked_lovelace = request_input.output.value |> quantity_of(ada())
+        let inventory_lovelace = inventory_output.value |> quantity_of(ada())
+
+        and {
+          has_pool_token,
+          !pool.paused,
+          signed(tx, pool.batcher),
+          request.pool_token == pool.pool_token,
+          request.quantity > 0,
+          request.min_payout > 0,
+          request.rwa != ada(),
+          request.quote_asset == pool.quote_asset,
+          amount >= request.min_payout,
+          request_input.output.value == (
+            assets.from_lovelace(locked_lovelace)
+              |> assets.add(request.rwa.policy_id, request.rwa.asset_name, request.quantity)
+          ),
+          inventory_listing_is_bound(inventory, pool, pool_address),
+          minted(tx, pool.inventory_token) == 1,
+          inventory.rwa == request.rwa,
+          inventory.quantity == request.quantity,
           inventory.price > 0,
           inventory_lovelace > 0,
           inventory_output.value == listing_value(inventory, inventory_lovelace),

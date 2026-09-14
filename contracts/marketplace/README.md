@@ -253,3 +253,12 @@ orderbook address before preparing a pool inventory buy. Set
 NEXT_PUBLIC_SIMPLE_ORDERBOOK_ADDRESS after deploying the registry-free
 orderbook; pool addresses/tokens are read from the inventory listing and pool
 UTxO datum.
+
+For seller-only instant sell, `pool_sell_request` is parameterized with the
+shared pool address. A seller locks an exact RWA asset and a minimum payout in
+that request rather than creating a publicly purchasable listing. The pool
+batcher later consumes the request together with the pool, pays at least the
+minimum, and creates the pool-owned inventory listing. The seller can cancel
+the request with its payment key. Batchers must be operated as a separate
+signing service; do not expose the batcher private key in a Next.js public
+environment variable or browser bundle.

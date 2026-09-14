@@ -412,6 +412,7 @@ the aggregate value of all open inventory.
 | `AddLiquidity` | Adds quote asset, mints the calculated LP amount, and requires no open inventory. |
 | `RemoveLiquidity` | Burns LP tokens, withdraws only above `min_cash_reserve`, and requires no open inventory. |
 | `BatcherAcquire` | Batcher buys a `Direct` listing using pool funds and creates a pool-owned listing. |
+| `BatcherInstantSell` | Batcher settles a seller-only pool request at or above its minimum payout and creates a pool-owned listing. |
 | `InventorySale` | Any buyer buys a pool-owned listing; the pool receives the quote payment and the receipt is burned. |
 | `AdminUpdate` | Admin changes permitted configuration while preserving accounting fields. |
 | `AdminClose` | Admin closes only when `inventory_value == 0` and burns the pool token. |
@@ -443,7 +444,31 @@ The pool-owned listing is bound to the pool by all of these fields:
 - listing seller key equals the batcher key;
 - listing price asset equals the pool quote asset.
 
-### 8.4 Inventory sale flow
+### 8.4 Seller-only instant-sale requests
+
+[`pool_sell_request.ak`](../contracts/marketplace/validators/pool_sell_request.ak)
+is parameterized by the shared-pool address. It keeps an instant-sale request
+separate from a public P2P listing. Its datum binds the seller and cancellation
+key, the pool identity token, exact RWA unit and quantity, quote asset, and
+minimum payout.
+
+```text
+1. Seller locks RWA + its ADA buffer in a pool-sell-request UTxO.
+2. The seller can cancel at any time with its payment-key signature.
+3. The allow-listed batcher chooses to accept a request.
+4. One transaction spends the request and shared pool, pays the seller at
+   least the stated minimum, mints the inventory receipt, and creates a
+   pool-owned orderbook listing.
+```
+
+The request validator requires the authenticated pool to be spent in the
+settlement transaction and requires the seller's payout. The quote-pool
+validator separately requires its batcher signature, checks that the exact
+request asset becomes inventory, and debits the reserve by the settled amount
+plus the request's ADA buffer. This keeps the batcher key off the browser while
+making a seller's minimum payout and cancellation right enforceable on-chain.
+
+### 8.5 Inventory sale flow
 
 ```text
 1. Buyer chooses a pool-owned listing.

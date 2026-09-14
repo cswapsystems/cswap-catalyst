@@ -93,6 +93,26 @@ footer { width: min(1180px, calc(100% - 48px)); padding: 28px 0; margin: 0 auto;
 /* Keep the full shared navigation usable on smaller desktop screens. */
 .topbar .brand, .topbar .wallet-connect-wrap, .topbar .history-shortcut { flex-shrink: 0; }
 .topbar nav a { white-space: nowrap; }
+
+.dex-workbench { display: grid; gap: 16px; min-width: 0; }
+.dex-card, .dex-pools { padding: clamp(23px, 3vw, 34px); background: var(--cream); border: 1px solid var(--line); border-radius: 12px; }
+.dex-intro { max-width: 720px; margin-top: 15px; color: var(--muted); font-size: 13px; line-height: 1.6; }
+.dex-tabs { display: flex; flex-wrap: wrap; gap: 4px; padding: 4px; margin-top: 23px; background: #edf0ea; border-radius: 7px; }
+.dex-tabs button { flex: 1 0 auto; padding: 9px 11px; color: #77817c; background: transparent; border: 0; border-radius: 5px; font-size: 10px; font-weight: 800; }
+.dex-tabs button.selected { color: var(--ink); background: white; box-shadow: 0 1px 4px rgba(25,37,33,.12); }
+.dex-field { margin-top: 24px; }
+.dex-form-grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 18px 14px; margin-top: 24px; }
+.dex-form-grid .field-wide { grid-column: 1 / -1; }
+.dex-warning, .dex-empty { padding: 14px 16px; margin-top: 22px; color: #765d21; background: #fff6da; border-left: 3px solid #d3ae41; border-radius: 6px; font-size: 12px; line-height: 1.55; }
+.dex-pools-head { display: flex; align-items: center; justify-content: space-between; gap: 16px; }
+.dex-pools-head h3 { margin-top: 7px; font-size: 21px; }
+.dex-pool { padding: 16px; margin-top: 15px; background: white; border: 1px solid #e0e5dc; border-radius: 8px; }
+.dex-pool strong, .dex-pool code { display: block; }
+.dex-pool code { margin-top: 6px; overflow: hidden; color: #7d887f; font-size: 9px; text-overflow: ellipsis; white-space: nowrap; }
+.dex-pool dl { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 10px; margin-top: 15px; }
+.dex-pool dt { color: #929b95; font-size: 9px; font-weight: 800; text-transform: uppercase; }
+.dex-pool dd { margin: 5px 0 0; color: var(--deep-moss); font-size: 13px; font-weight: 800; overflow-wrap: anywhere; }
+@media (max-width: 600px) { .dex-form-grid { grid-template-columns: 1fr; }.dex-form-grid .field-wide { grid-column: auto; }.dex-pool dl { grid-template-columns: repeat(2, minmax(0, 1fr)); } }
 @media (max-width: 1500px) {
   .topbar { height: auto; min-height: 82px; padding-top: 16px; padding-bottom: 16px; flex-wrap: wrap; gap: 16px; }
   .topbar nav { order: 3; width: 100%; overflow-x: auto; justify-content: center; }
