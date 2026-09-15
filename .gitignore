@@ -2,6 +2,7 @@
 
 # dependencies
 /node_modules
+**/node_modules/
 /.pnp
 .pnp.*
 .yarn/*
@@ -19,6 +20,8 @@
 
 # production
 /build
+/infra/offchain/packaged.yaml
+/infra/offchain/.aws-sam/
 
 # misc
 .DS_Store
