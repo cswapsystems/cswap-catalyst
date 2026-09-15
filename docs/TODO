@@ -1,0 +1,5 @@
+Wallet Connection
+1. Add Eternl and Lace wallet support
+2. Store connected wallets in database
+3. Adjust Mint action to store RWA record in database
+4. Adjust Fractionalize action to store FT record in database
