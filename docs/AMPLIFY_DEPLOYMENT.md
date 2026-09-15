@@ -1,6 +1,6 @@
 # Amplify Hosting deployment
 
-## Current Preprod environment
+## Amplify environments
 
 - AWS account: `515048575435`
 - Region: `us-west-1`
@@ -8,28 +8,30 @@
 - Amplify app: `cswap-catalyst` (`d2r4qj82rav2zq`)
 - Platform: `WEB_COMPUTE` (Next.js SSR)
 - Default domain: `d2r4qj82rav2zq.amplifyapp.com`
-- Source branch: `main` (connect after authorizing the regional AWS Amplify GitHub App)
+- Preprod source branch: `preprod` (`BETA`, automatic builds enabled)
+- Mainnet source branch: `mainnet` (`PRODUCTION`, automatic builds disabled until Mainnet contracts are deployed)
 
 The app is pinned to Next.js 15 because that is the newest major version listed as supported by Amplify Hosting compute. `next.config.ts` enables asynchronous WebAssembly for Lucid, and `amplify.yml` builds the `.next` SSR artifact.
 
 ## Required Amplify variables
 
-Configure these at app scope:
+Configure these as branch overrides:
 
-- `NEXT_PUBLIC_CARDANO_NETWORK=preprod`
-- `BLOCKFROST_PROJECT_ID` (server-only)
-- `BLOCKFROST_IPFS_PROJECT_ID` (server-only)
+- `preprod`: `NEXT_PUBLIC_CARDANO_NETWORK=preprod` and the Preprod `BLOCKFROST_PROJECT_ID` / `BLOCKFROST_IPFS_PROJECT_ID` values.
+- `mainnet`: `NEXT_PUBLIC_CARDANO_NETWORK=mainnet`; its Blockfrost values remain deliberately unconfigured until Mainnet credentials are supplied.
 
 The buildspec copies only these named values into `.env.production`, as required for Amplify SSR runtime access. Never upload `CARDANO_WALLET_SEED`; the hosted application uses browser wallet signing and the seed remains local to operator scripts.
 
 ## Deployment flow
 
 1. Install/authorize the regional AWS Amplify GitHub App for only `cswapsystems/cswap-catalyst`.
-2. Connect `https://github.com/cswapsystems/cswap-catalyst` and branch `main` to app `d2r4qj82rav2zq`.
-3. Add the two server-only Blockfrost variables.
-4. Start a release build and check both static pages and `/api/blockfrost/health`-equivalent API behavior.
+2. Connect `https://github.com/cswapsystems/cswap-catalyst` to app `d2r4qj82rav2zq`, mapping the existing `preprod` and `mainnet` Amplify environments to their matching Git branches.
+3. Build and validate `preprod` first.
+4. Deploy contracts and registries on Cardano Mainnet, add Mainnet-specific deployment manifests and Blockfrost credentials, validate wallet/network switching, and only then enable automatic builds for `mainnet`.
 
-Amplify automatically rebuilds `main` after the repository is connected. Runtime logs use the least-privilege `cswap-amplify-ssr-logs` role, constrained to this AWS account and Amplify app.
+Runtime logs use the least-privilege `cswap-amplify-ssr-logs` role, constrained to this AWS account and Amplify app.
+
+The current application contains several deliberately Preprod-only contract addresses and wallet guards. The `mainnet` environment must remain gated until those references are parameterized and fresh Mainnet contract identities are deployed; changing only the network environment variable is not sufficient.
 
 ## Account security
 
