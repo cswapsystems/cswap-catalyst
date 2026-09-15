@@ -1,0 +1,17 @@
+{
+  "Version": "2012-10-17",
+  "Statement": [
+    {
+      "Sid": "AmplifySsrRuntimeLogs",
+      "Effect": "Allow",
+      "Action": ["logs:CreateLogStream", "logs:PutLogEvents"],
+      "Resource": "arn:aws:logs:us-west-1:515048575435:log-group:/aws/amplify/d2r4qj82rav2zq:*"
+    },
+    {
+      "Sid": "DiscoverAndCreateAmplifyLogGroup",
+      "Effect": "Allow",
+      "Action": ["logs:CreateLogGroup", "logs:DescribeLogGroups"],
+      "Resource": "*"
+    }
+  ]
+}
