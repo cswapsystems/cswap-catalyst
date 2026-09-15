@@ -10,6 +10,7 @@
     "test:registry": "node --experimental-strip-types --test tests/asset-registry.test.mjs",
     "test:wallet": "node --experimental-strip-types --test tests/wallet-session.test.mjs",
     "test:wallet-assets": "node --experimental-strip-types --test tests/wallet-assets.test.mjs",
+    "test:metadata": "node --experimental-strip-types --test tests/rwa-metadata.test.mjs",
     "test:offchain": "npm --prefix infra/offchain test",
     "dex:preprod": "node scripts/dex-preprod.mjs",
     "marketplace:preprod": "node scripts/marketplace-preprod.mjs"

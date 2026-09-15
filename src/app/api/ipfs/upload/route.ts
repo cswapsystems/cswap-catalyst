@@ -1,3 +1,5 @@
+import { isRwaManifestDocument } from "@/lib/rwa-metadata";
+
 export const runtime = "nodejs";
 
 const MAX_FILE_BYTES = 5 * 1024 * 1024;
@@ -29,7 +31,7 @@ function detectMediaType(kind: UploadKind, bytes: Uint8Array): MediaType | null 
 
   try {
     const value = JSON.parse(new TextDecoder("utf-8", { fatal: true }).decode(bytes)) as unknown;
-    return value !== null && typeof value === "object" && !Array.isArray(value) ? "application/json" : null;
+    return isRwaManifestDocument(value) ? "application/json" : null;
   } catch {
     return null;
   }
@@ -65,7 +67,7 @@ export async function POST(request: Request) {
   const bytes = new Uint8Array(await file.arrayBuffer());
   const mediaType = detectMediaType(kind, bytes);
   if (!mediaType) {
-    const description = kind === "image" ? "a valid PNG, JPEG, or WebP image" : kind === "proof" ? "a valid PDF document" : "a valid JSON object";
+    const description = kind === "image" ? "a valid PNG, JPEG, or WebP image" : kind === "proof" ? "a valid PDF document" : "a valid cswap.rwa-manifest/v1 JSON document";
     return Response.json({ error: `Provide ${description}.` }, { status: 415 });
   }
 

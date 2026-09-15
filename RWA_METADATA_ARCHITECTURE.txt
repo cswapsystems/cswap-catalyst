@@ -30,30 +30,45 @@ Recommended split
    is content-addressed, so changing the file produces a new CID. Suggested
    path: ipfs://<CID>/rwa-manifest.json
 
-   Suggested manifest structure:
+   The mint page generates `cswap.rwa-manifest/v1`; users do not upload an
+   arbitrary JSON document. The shared fields are asset identity, issuer,
+   valuation, public image, authenticity proof, and publication declaration.
+
+   Basic Real Estate template:
 
    {
      "schema": "cswap.rwa-manifest/v1",
+     "category": "real-estate",
      "asset": {
-       "assetId": "NLS-001",
-       "class": "solar-infrastructure",
-       "issuer": "Example Issuer Ltd.",
-       "jurisdiction": "PH"
+       "name": "Harbor View Unit 12",
+       "tokenName": "HVU-012",
+       "externalId": "PROP-2026-001",
+       "description": "Public description of the represented property."
      },
-     "attestations": [
-       {
-         "type": "valuation",
-         "issuedAt": "2026-08-26",
-         "document": {
-           "uri": "ipfs://<CID>/valuation.pdf",
-           "sha256": "<hash>"
-         }
-       }
-     ],
-     "disclosure": {
-       "uri": "ipfs://<CID>/disclosure.pdf",
-       "sha256": "<hash>"
-     }
+     "issuer": { "name": "Example Issuer Ltd.", "country": "PH" },
+     "realEstate": {
+       "propertyType": "commercial",
+       "publicLocation": "Makati City, Philippines",
+       "titleOrParcelReference": "TCT-123456",
+       "area": { "value": "125.5", "unit": "sqm" }
+     },
+     "valuation": { "amount": "250000", "currency": "USD", "asOf": "2026-01-10" },
+     "documents": {
+       "image": { "uri": "ipfs://<image-CID>", "mediaType": "image/jpeg" },
+       "authenticityProof": { "uri": "ipfs://<proof-CID>", "mediaType": "application/pdf" }
+     },
+     "declarations": { "publicDataApproved": true, "generatedAt": "<ISO-8601 timestamp>" }
+   }
+
+   A Collectible manifest uses the same shared fields and replaces
+   `realEstate` with:
+
+   "collectible": {
+     "type": "artwork",
+     "makerOrCreator": "Example Creator",
+     "productionYear": 2020,
+     "serialOrCatalogueNumber": "CAT-001",
+     "condition": "excellent"
    }
 
    Public documents may be stored on IPFS or Arweave. Store each source URI
@@ -133,8 +148,8 @@ Implementation notes
   Cardano Preprod `BLOCKFROST_PROJECT_ID`. Add an authenticated server upload
   route only after this value is configured.
 - The upload route validates PNG, JPEG, and WebP image signatures, a PDF proof
-  document, and a JSON-object metadata file before pinning. The image becomes
-  the CIP-25 `image` URI; the proof and JSON metadata document become named
+  document, and the generated JSON-object manifest before pinning. The image
+  becomes the CIP-25 `image` URI; the proof and generated manifest become named
   entries in CIP-25's `files` array. Add issuer authentication and rate limits
   before public deployment.
 - The mint transaction should include both label 721 (CIP-25) and the initial
