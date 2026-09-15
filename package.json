@@ -10,7 +10,8 @@
     "test:registry": "node --experimental-strip-types --test tests/asset-registry.test.mjs",
     "test:wallet": "node --experimental-strip-types --test tests/wallet-session.test.mjs",
     "test:wallet-assets": "node --experimental-strip-types --test tests/wallet-assets.test.mjs",
-    "dex:preprod": "node scripts/dex-preprod.mjs"
+    "dex:preprod": "node scripts/dex-preprod.mjs",
+    "marketplace:preprod": "node scripts/marketplace-preprod.mjs"
   },
   "dependencies": {
     "@lucid-evolution/lucid": "^0.6.2",

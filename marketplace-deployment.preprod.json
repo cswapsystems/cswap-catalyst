@@ -1,0 +1,23 @@
+{
+  "network": "preprod",
+  "team": "6b88f592b89de5b5fac9359aa273184519ea23a538d776565c7220a1",
+  "batcher": "6b88f592b89de5b5fac9359aa273184519ea23a538d776565c7220a1",
+  "orderbookAddress": "addr_test1wzcxcdqwde4uw9rd2rcnyeuycprpk3e4rkketuhv00ffzaqh4zhpn",
+  "registry": {
+    "token": "24a243c3a921e55b01f865c002505f1262b179ccc4e4fb3ef16e82d643535741505f5245474953545259",
+    "issuer": "6b88f592b89de5b5fac9359aa273184519ea23a538d776565c7220a1",
+    "address": "addr_test1wq3jzptm3qpslktvlalqcvcy28rzssggfwvks33sf0dwv7qpmf3f2",
+    "transaction": "62ca56465ec5741a1e83215a2220fa999fbf1cf08ef7f1cd2599debe14cdfb7e",
+    "lastUpdateTransaction": "c848fe3fd241da84206ea092aa4d93e871b82fa937dbb2aec9f98269804b3966"
+  },
+  "pool": {
+    "token": "300cbde45feb8641a8c9ddd8582db9396144306be9c9dcb416b5b57f43535741505f51554f54455f504f4f4c",
+    "address": "addr_test1wpexym4uwfp0ms0qn7s6yvr6zrwfgqzuftf4gvgghfq0uaszacs2t",
+    "lpToken": "747e6e0150ea2a683aaf69cde2cd72bc0a3365cfdf046be6cb137f5643535741505f504f4f4c5f4c50",
+    "inventoryToken": "79f7110cc735755ed0ba7098198ea10c6dbac6fb32707acf7e56a0d743535741505f494e56454e544f5259",
+    "quoteUnit": "lovelace",
+    "minCashReserve": "20000000",
+    "transaction": "62ca56465ec5741a1e83215a2220fa999fbf1cf08ef7f1cd2599debe14cdfb7e",
+    "fundingTransaction": "446e8c93586ea7a85458bd4cc1bedf37af85f0a6b8a337858e41c5f481281843"
+  }
+}

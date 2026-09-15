@@ -3,14 +3,17 @@ use aiken/collection/list
 use aiken/crypto.{VerificationKeyHash}
 use cardano/address
 use cardano/assets
-use cardano/assets.{AssetName, PolicyId, Value, quantity_of, from_asset, is_zero}
+use cardano/assets.{AssetName, PolicyId, Value, quantity_of, from_asset}
 use cardano/transaction
 use cardano/transaction.{Input, OutputReference, Transaction, Output, NoDatum, find_input, InlineDatum}
 
 // Datum for the vault UTxO that holds a single NFT and tracks its fractions.
 pub type VaultDatum {
-  // Admin key hash allowed to update total_fractions
-  admin: VerificationKeyHash,
+  // Original owner receives the NFT during an approved partial recovery.
+  owner: address.Address,
+
+  // Team key hash that authorizes emergency recovery when fractions are lost.
+  recovery_admin: VerificationKeyHash,
 
   // The NFT locked in this vault UTxO
   nft_policy: PolicyId,
@@ -27,10 +30,12 @@ pub type VaultDatum {
   seed: OutputReference,
 }
 
-// Actions: withdraw burns all fractions; update adjusts total_fractions only.
+// A normal withdrawal burns the full supply. Emergency recovery burns the
+// claimant's available fractions, requires the team key, and returns the NFT
+// only to the original owner recorded at fractionalization time.
 pub type VaultRedeemer {
   Withdraw
-  Update { new_total_fractions: Int }
+  EmergencyRecover { fractions_burned: Int }
 }
 
 // ---- helpers
@@ -57,35 +62,26 @@ fn nft_paid_to_pubkey(self: Transaction, d: VaultDatum) -> Bool {
   })
 }
 
+fn nft_paid_to_owner(self: Transaction, d: VaultDatum) -> Bool {
+  list.any(self.outputs, fn(o) {
+    o.address == d.owner && has_nft(o.value, d.nft_policy, d.nft_name)
+  })
+}
+
 fn signed_by(self: Transaction, admin: VerificationKeyHash) -> Bool {
   list.has(self.extra_signatories, admin)
 }
 
-fn find_continuing_output(self: Transaction, addr: address.Address) -> Option<Output> {
-  list.find(self.outputs, fn(o) { o.address == addr })
-}
-
-// Update keeps all fields identical except total_fractions, and keeps NFT locked.
-fn update_is_valid(self: Transaction, d: VaultDatum, input: Input, new_total: Int) -> Bool {
-  new_total > 0
-    && signed_by(self, d.admin)
-    && is_zero(self.mint)
-    && when find_continuing_output(self, input.output.address) is {
-      Some(out) -> {
-        expect has_nft(out.value, d.nft_policy, d.nft_name)
-        expect InlineDatum(out_datum) = out.datum
-        expect new_datum: VaultDatum = out_datum
-
-        new_datum.admin == d.admin
-          && new_datum.nft_policy == d.nft_policy
-          && new_datum.nft_name == d.nft_name
-          && new_datum.ft_policy == d.ft_policy
-          && new_datum.ft_name == d.ft_name
-          && new_datum.total_fractions == new_total
-          && new_datum.seed == d.seed
-      }
-      None -> False
-    }
+fn emergency_recovery_is_valid(
+  self: Transaction,
+  d: VaultDatum,
+  fractions_burned: Int,
+) -> Bool {
+  fractions_burned > 0
+    && fractions_burned < d.total_fractions
+    && signed_by(self, d.recovery_admin)
+    && self.mint == from_asset(d.ft_policy, d.ft_name, -fractions_burned)
+    && nft_paid_to_owner(self, d)
 }
 
 // ---- validator
@@ -106,8 +102,8 @@ validator vault {
       Withdraw ->
         burns_exactly_all_fractions(self, d)
           && nft_paid_to_pubkey(self, d)
-      Update { new_total_fractions } ->
-        update_is_valid(self, d, input, new_total_fractions)
+      EmergencyRecover { fractions_burned } ->
+        emergency_recovery_is_valid(self, d, fractions_burned)
     }
   }
 }
@@ -163,7 +159,8 @@ fn vault_value() -> Value {
 
 fn datum(total: Int) -> VaultDatum {
   VaultDatum {
-    admin,
+    owner: pubkey_address(),
+    recovery_admin: admin,
     nft_policy,
     nft_name,
     ft_policy,
@@ -248,108 +245,31 @@ test withdraw_fails_extra_mint_returns_false() {
   vault.spend(Some(d), Withdraw, vault_ref, tx) == False
 }
 
-test update_ok() {
+test emergency_recovery_ok() {
   let d = datum(1_000)
   let input = mk_input(vault_value(), d)
-  let new_d = datum(2_000)
+  let output = Output { address: pubkey_address(), value: vault_value(), datum: NoDatum, reference_script: None }
+  let tx = mk_tx([input], [output], from_asset(ft_policy, ft_name, -600), [admin])
 
-  let outputs =
-    [
-      Output {
-        address: script_address(),
-        value: vault_value(),
-        datum: InlineDatum(new_d),
-        reference_script: None,
-      },
-    ]
-
-  let tx =
-    mk_tx(
-      [input],
-      outputs,
-      assets.zero,
-      [admin],
-    )
-
-  vault.spend(Some(d), Update { new_total_fractions: 2_000 }, vault_ref, tx)
+  vault.spend(Some(d), EmergencyRecover { fractions_burned: 600 }, vault_ref, tx)
 }
 
-test update_fails_without_signature_returns_false() {
+test emergency_recovery_fails_without_team_signature() {
   let d = datum(1_000)
   let input = mk_input(vault_value(), d)
-  let new_d = datum(2_000)
+  let output = Output { address: pubkey_address(), value: vault_value(), datum: NoDatum, reference_script: None }
+  let tx = mk_tx([input], [output], from_asset(ft_policy, ft_name, -600), [])
 
-  let outputs =
-    [
-      Output {
-        address: script_address(),
-        value: vault_value(),
-        datum: InlineDatum(new_d),
-        reference_script: None,
-      },
-    ]
-
-  let tx = mk_tx([input], outputs, assets.zero, [])
-
-  vault.spend(Some(d), Update { new_total_fractions: 2_000 }, vault_ref, tx)
+  vault.spend(Some(d), EmergencyRecover { fractions_burned: 600 }, vault_ref, tx)
     == False
 }
 
-test update_fails_without_continuing_output_returns_false() {
+test emergency_recovery_rejects_full_supply() {
   let d = datum(1_000)
   let input = mk_input(vault_value(), d)
+  let output = Output { address: pubkey_address(), value: vault_value(), datum: NoDatum, reference_script: None }
+  let tx = mk_tx([input], [output], from_asset(ft_policy, ft_name, -1_000), [admin])
 
-  let outputs =
-    [
-      Output {
-        address: pubkey_address(),
-        value: vault_value(),
-        datum: NoDatum,
-        reference_script: None,
-      },
-    ]
-
-  let tx = mk_tx([input], outputs, assets.zero, [admin])
-
-  vault.spend(Some(d), Update { new_total_fractions: 2_000 }, vault_ref, tx)
+  vault.spend(Some(d), EmergencyRecover { fractions_burned: 1_000 }, vault_ref, tx)
     == False
-}
-
-test update_fails_without_inline_datum() fail {
-  let d = datum(1_000)
-  let input = mk_input(vault_value(), d)
-
-  let outputs =
-    [
-      Output {
-        address: script_address(),
-        value: vault_value(),
-        datum: NoDatum,
-        reference_script: None,
-      },
-    ]
-
-  let tx = mk_tx([input], outputs, assets.zero, [admin])
-
-  vault.spend(Some(d), Update { new_total_fractions: 2_000 }, vault_ref, tx)
-}
-
-test update_fails_without_nft_in_output() fail {
-  let d = datum(1_000)
-  let input = mk_input(vault_value(), d)
-  let new_d = datum(2_000)
-
-  let outputs =
-    [
-      Output {
-        address: script_address(),
-        value: assets.from_lovelace(2_000_000),
-        datum: InlineDatum(new_d),
-        reference_script: None,
-      },
-    ]
-
-  let tx = mk_tx([input], outputs, assets.zero, [admin])
-
-  vault.spend(Some(d), Update { new_total_fractions: 2_000 }, vault_ref, tx)
 }

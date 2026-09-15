@@ -7,13 +7,13 @@ import EternlWalletButton from "./eternl-wallet";
 const navigation = [
   ["/mint", "Mint RWA"],
   ["/fractionalize", "Fractionalize"],
-  ["/liquidate", "Liquidate"],
   ["/marketplace", "Marketplace"],
-  ["/dex", "DEX"],
-  ["/reserves", "Reserves"],
+  ["/dex", "Fraction DEX"],
   ["/my-assets", "My assets"],
   ["/assets", "Asset browser"],
-  ["/registry", "Registry"],
+  ["/team", "Team console"],
+  ["/registry", "Asset controls"],
+  ["/reserves", "Shared pool"],
   ["/wallets", "Wallets"],
 ] as const;
 

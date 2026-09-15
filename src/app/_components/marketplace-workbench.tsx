@@ -4,6 +4,7 @@ import { FormEvent, useCallback, useEffect, useMemo, useState } from "react";
 import Link from "next/link";
 import { useWallet } from "./wallet-context";
 import { readRegistry, registryConfigured } from "@/lib/asset-registry";
+import { marketplaceOrderbookAddress, marketplacePoolAddress } from "@/lib/protocol/marketplace-deployment";
 
 type Mode = "all" | "price" | "instant";
 type MarketplaceView = "all" | "p2p" | "pool" | "fractions";
@@ -105,10 +106,10 @@ async function loadFractionIndex(lucid: import("@lucid-evolution/lucid").LucidEv
     if (!utxo.datum) continue;
     try {
       const root = getConstr(tools.Data.from(utxo.datum), "vault");
-      if (root.index !== 0 || root.fields.length !== 7 || typeof root.fields[1] !== "string" || typeof root.fields[2] !== "string" || typeof root.fields[3] !== "string" || typeof root.fields[4] !== "string" || typeof root.fields[5] !== "bigint") continue;
-      const original = { policyId: root.fields[1], assetName: root.fields[2] };
-      const fraction = { policyId: root.fields[3], assetName: root.fields[4] };
-      index.set(unit(fraction), { fraction, original, totalFractions: root.fields[5] });
+      if (root.index !== 0 || root.fields.length !== 8 || typeof root.fields[2] !== "string" || typeof root.fields[3] !== "string" || typeof root.fields[4] !== "string" || typeof root.fields[5] !== "string" || typeof root.fields[6] !== "bigint") continue;
+      const original = { policyId: root.fields[2], assetName: root.fields[3] };
+      const fraction = { policyId: root.fields[4], assetName: root.fields[5] };
+      index.set(unit(fraction), { fraction, original, totalFractions: root.fields[6] });
     } catch {
       // Ignore unrelated or legacy vault outputs.
     }
@@ -182,8 +183,8 @@ export default function MarketplaceWorkbench() {
   const [loading, setLoading] = useState(false);
   const [loaded, setLoaded] = useState(false);
   const [message, setMessage] = useState<{ kind: "error" | "success"; text: string } | null>(null);
-  const orderbookAddress = process.env.NEXT_PUBLIC_SIMPLE_ORDERBOOK_ADDRESS ?? "";
-  const quotePoolAddress = process.env.NEXT_PUBLIC_QUOTE_POOL_ADDRESS ?? "";
+  const orderbookAddress = marketplaceOrderbookAddress;
+  const quotePoolAddress = marketplacePoolAddress;
 
   const refresh = useCallback(async () => {
     setMessage(null);

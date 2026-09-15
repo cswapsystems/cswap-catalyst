@@ -2,6 +2,7 @@
 
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { useWallet } from "./wallet-context";
+import { marketplaceOrderbookAddress, marketplacePoolAddress } from "@/lib/protocol/marketplace-deployment";
 
 type AssetClass = { policyId: string; assetName: string };
 type DataConstr = { index: number; fields: unknown[] };
@@ -91,8 +92,8 @@ export default function ReservesWorkbench() {
   const [loading, setLoading] = useState(false);
   const [loaded, setLoaded] = useState(false);
   const [message, setMessage] = useState<{ kind: "error" | "success"; text: string } | null>(null);
-  const quotePoolAddress = process.env.NEXT_PUBLIC_QUOTE_POOL_ADDRESS ?? "";
-  const orderbookAddress = process.env.NEXT_PUBLIC_SIMPLE_ORDERBOOK_ADDRESS ?? "";
+  const quotePoolAddress = marketplacePoolAddress;
+  const orderbookAddress = marketplaceOrderbookAddress;
 
   const refresh = useCallback(async () => {
     setMessage(null);

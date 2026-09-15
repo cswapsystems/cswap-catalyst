@@ -7,7 +7,8 @@ use cardano/transaction
 use cardano/transaction.{Input, OutputReference, Transaction, Output, NoDatum, InlineDatum}
 
 pub type VaultDatum {
-  admin: VerificationKeyHash,
+  owner: address.Address,
+  recovery_admin: VerificationKeyHash,
   nft_policy: PolicyId,
   nft_name: AssetName,
   ft_policy: PolicyId,
@@ -128,7 +129,8 @@ fn mk_vault_datum_with_seed(
   seed: OutputReference,
 ) -> VaultDatum {
   VaultDatum {
-    admin,
+    owner: dummy_address(),
+    recovery_admin: admin,
     nft_policy,
     nft_name,
     ft_policy: policy_id,
