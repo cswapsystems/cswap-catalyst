@@ -14,8 +14,15 @@ const allowed = new Set([
 ]);
 
 export async function GET(request: Request) {
-  const title = new URL(request.url).searchParams.get("validator") ?? "";
+  const params = new URL(request.url).searchParams;
+  const title = params.get("validator") ?? "";
   if (!allowed.has(title)) return Response.json({ error: "Unknown marketplace validator." }, { status: 400 });
+  const scriptHash = params.get("scriptHash") ?? "";
+  if (title === "p2p_listing_simple.p2p_listing_simple.spend" && scriptHash === "e8ec60e7c858bc7eadfc7e49cecd4acd970f15316c31dcb0cdef12fd") {
+    const legacy = JSON.parse(await readFile(path.join(process.cwd(), "contracts", "marketplace", "legacy-p2p-listing-simple.json"), "utf8")) as { compiledCode?: string };
+    if (!legacy.compiledCode) return Response.json({ error: "Legacy Marketplace validator is unavailable." }, { status: 500 });
+    return Response.json({ compiledCode: legacy.compiledCode });
+  }
   const blueprint = JSON.parse(await readFile(path.join(process.cwd(), "contracts", "marketplace", "plutus.json"), "utf8")) as { validators: { title: string; compiledCode: string }[] };
   const validator = blueprint.validators.find((item) => item.title === title);
   if (!validator) return Response.json({ error: "Marketplace validator is unavailable." }, { status: 500 });

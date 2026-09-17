@@ -1,5 +1,6 @@
 "use client";
 
+import Image from "next/image";
 import Link from "next/link";
 import { FormEvent, useEffect, useMemo, useState } from "react";
 import type { LucidEvolution } from "@lucid-evolution/lucid";
@@ -9,6 +10,32 @@ import PlatformHeader from "./platform-header";
 import { useWallet } from "./wallet-context";
 
 type LoadResult = { owner: string; wallet: LucidEvolution; revision: number; holdings: WalletHoldings | null; error: string };
+type AssetAttachment = { label: string; href: string };
+type AssetPreview = { image: string | null; description: string; facts: { label: string; value: string }[]; attachments: AssetAttachment[] };
+
+function metadataText(value: unknown): string {
+  return Array.isArray(value) ? value.filter((part): part is string => typeof part === "string").join("") : typeof value === "string" ? value : "";
+}
+function ipfsGatewayUrl(value: unknown): string | null {
+  const uri = metadataText(value);
+  const cid = uri.startsWith("ipfs://") ? uri.slice(7).split("/")[0] : "";
+  return /^(?:Qm[1-9A-HJ-NP-Za-km-z]{44}|b[a-z2-7]{20,120})$/.test(cid) ? "/api/ipfs/gateway/" + cid : null;
+}
+function attachmentUrl(value: unknown): string | null {
+  const uri = metadataText(value);
+  return ipfsGatewayUrl(uri) ?? (uri.startsWith("https://") ? uri : null);
+}
+function previewMetadata(value: unknown): AssetPreview {
+  const metadata = value && typeof value === "object" && !Array.isArray(value) ? value as Record<string, unknown> : {};
+  const factFields: { label: string; raw: unknown }[] = [{ label: "Category", raw: metadata.rwaCategory }, { label: "Property type", raw: metadata.propertyType }, { label: "Location", raw: metadata.publicLocation }, { label: "Valuation", raw: metadata.valuation }];
+  const facts = factFields.flatMap(({ label, raw }) => { const text = metadataText(raw); return text ? [{ label, value: text }] : []; });
+  const attachments = Array.isArray(metadata.files) ? metadata.files.flatMap((file) => {
+    const entry = file && typeof file === "object" && !Array.isArray(file) ? file as Record<string, unknown> : {};
+    const href = attachmentUrl(entry.src);
+    return href ? [{ label: metadataText(entry.name) || "Attachment", href }] : [];
+  }) : [];
+  return { image: ipfsGatewayUrl(metadata.image), description: metadataText(metadata.description), facts, attachments };
+}
 
 function addressData(tools: typeof import("@lucid-evolution/lucid"), address: string) {
   const details = tools.getAddressDetails(address);
@@ -31,6 +58,7 @@ export default function WalletAssets() {
   const [listingProceeds, setListingProceeds] = useState("");
   const [listingMessage, setListingMessage] = useState<{ kind: "error" | "success"; text: string } | null>(null);
   const [listingSubmitting, setListingSubmitting] = useState(false);
+  const [assetPreviews, setAssetPreviews] = useState<Record<string, AssetPreview>>({});
   const connected = status === "connected" && Boolean(address && lucid);
   const current = connected && result?.owner === address && result.wallet === lucid && result.revision === revision ? result : null;
   const loading = connected && !current;
@@ -57,6 +85,23 @@ export default function WalletAssets() {
     void load(lucid);
     return () => { cancelled = true; };
   }, [address, lucid, revision, status]);
+
+  useEffect(() => {
+    let cancelled = false;
+    const units = holdings?.assets.map((asset) => asset.unit) ?? [];
+    if (units.length === 0) { setAssetPreviews({}); return; }
+    void Promise.all(units.map(async (assetUnit) => {
+      try {
+        const response = await fetch("/api/blockfrost/assets/" + encodeURIComponent(assetUnit), { cache: "force-cache" });
+        if (!response.ok) return null;
+        const asset = await response.json() as { onchain_metadata?: unknown };
+        return [assetUnit, previewMetadata(asset.onchain_metadata)] as const;
+      } catch { return null; }
+    })).then((results) => {
+      if (!cancelled) setAssetPreviews(Object.fromEntries(results.filter((result): result is readonly [string, AssetPreview] => result !== null)));
+    });
+    return () => { cancelled = true; };
+  }, [holdings]);
 
   function openListing(asset: WalletAsset) {
     setListingAsset(asset);
@@ -134,11 +179,15 @@ export default function WalletAssets() {
         {holdings.assets.length > 0 && <label className="field wallet-assets-search"><span className="field-label">Search your tokens</span><input type="search" value={search} onChange={(event) => setSearch(event.target.value)} placeholder="Asset name, policy ID, or full asset ID" /></label>}
         {holdings.assets.length === 0 ? <div className="wallet-assets-empty"><h3>{holdings.utxoCount === 0 ? "This wallet has no unspent outputs" : "No native tokens in this wallet"}</h3><p>Tokens received or minted into this wallet will appear here after the wallet updates. Use Refresh assets to check again.</p></div> : visibleAssets.length === 0 ? <p className="wallet-assets-empty">No assets match your search.</p> : <>
           <p className="wallet-assets-count" role="status">Showing {visibleAssets.length.toLocaleString("en-US")} of {holdings.assets.length.toLocaleString("en-US")} assets</p>
-          <ul className="wallet-assets-list">{visibleAssets.map((asset) => <li className="wallet-asset-row" key={asset.unit}>
-            <div className="wallet-asset-info"><h3>{asset.name}</h3><span>Policy ID</span><code>{asset.policyId}</code><span>Asset name (hex)</span><code>{asset.nameHex || "Empty asset name"}</code></div>
-            <div className="wallet-asset-quantity"><span>Quantity · base units</span><strong>{new Intl.NumberFormat("en-US").format(asset.quantity)}</strong></div>
-            <div className="wallet-asset-actions"><Link className="wallet-asset-inspect" href={"/assets?asset=" + asset.unit} aria-label={"Inspect " + asset.name}>Inspect asset ↗</Link>{asset.quantity === BigInt(1) && <button className="text-button" type="button" onClick={() => openListing(asset)}>List</button>}</div>
-          </li>)}</ul>
+          <ul className="wallet-assets-list">{visibleAssets.map((asset) => {
+            const preview = assetPreviews[asset.unit];
+            return <li className="wallet-asset-row" key={asset.unit}>
+              <div className="wallet-asset-thumbnail">{preview?.image ? <Image src={preview.image} alt="" width={72} height={72} unoptimized /> : <span aria-hidden="true">RWA</span>}</div>
+              <div className="wallet-asset-info"><h3>{asset.name}</h3><span>Policy ID</span><code>{asset.policyId}</code><span>Asset name (hex)</span><code>{asset.nameHex || "Empty asset name"}</code>{preview?.description && <p className="wallet-asset-description">{preview.description}</p>}{preview?.facts.length ? <dl className="wallet-asset-facts">{preview.facts.map((fact) => <div key={fact.label}><dt>{fact.label}</dt><dd>{fact.value}</dd></div>)}</dl> : null}{preview?.attachments.length ? <div className="wallet-asset-attachments"><span>Attachments</span>{preview.attachments.map((attachment) => <a key={attachment.href} href={attachment.href} target="_blank" rel="noreferrer">{attachment.label} ↗</a>)}</div> : null}</div>
+              <div className="wallet-asset-quantity"><span>Quantity · base units</span><strong>{new Intl.NumberFormat("en-US").format(asset.quantity)}</strong></div>
+              <div className="wallet-asset-actions"><Link className="wallet-asset-inspect" href={"/assets?asset=" + asset.unit} aria-label={"Inspect " + asset.name}>Inspect asset ↗</Link>{asset.quantity === BigInt(1) && <button className="text-button" type="button" onClick={() => openListing(asset)}>List</button>}</div>
+            </li>;
+          })}</ul>
         </>}
       </>}
     </section>

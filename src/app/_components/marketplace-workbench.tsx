@@ -9,6 +9,7 @@ import { marketplaceOrderbookAddress, marketplacePoolAddress } from "@/lib/proto
 
 type Mode = "all" | "price" | "instant";
 type MarketplaceView = "all" | "p2p" | "pool" | "fractions";
+type ListingLayout = "card" | "list";
 type AssetClass = { policyId: string; assetName: string };
 type Constr = { index: number; fields: unknown[] };
 type FractionInfo = { fraction: AssetClass; original: AssetClass; totalFractions: bigint };
@@ -137,6 +138,16 @@ async function loadScript(title: string): Promise<import("@lucid-evolution/lucid
   if (!response.ok || !body.compiledCode) throw new Error(body.error ?? "Marketplace validator unavailable.");
   return { type: "PlutusV3", script: body.compiledCode };
 }
+async function loadListingScript(address: string, tools: typeof import("@lucid-evolution/lucid")): Promise<import("@lucid-evolution/lucid").Script> {
+  const details = tools.getAddressDetails(address);
+  const scriptHash = details?.paymentCredential?.type === "Script" ? details.paymentCredential.hash : "";
+  const response = await fetch("/api/marketplace-blueprint?validator=p2p_listing_simple.p2p_listing_simple.spend&scriptHash=" + encodeURIComponent(scriptHash), { cache: "no-store" });
+  const body = await response.json() as { compiledCode?: string; error?: string };
+  if (!response.ok || !body.compiledCode) throw new Error(body.error ?? "Marketplace listing validator unavailable.");
+  const script = { type: "PlutusV3" as const, script: body.compiledCode };
+  if (scriptHash && tools.validatorToScriptHash(script) !== scriptHash) throw new Error("Marketplace listing validator does not match the listing address.");
+  return script;
+}
 function encodeListing(tools: typeof import("@lucid-evolution/lucid"), form: FormState, address: string) {
   const policyId = validateHex(form.policyId, "Listed policy ID");
   const assetName = validateHex(form.assetName, "Listed asset name", true);
@@ -187,8 +198,10 @@ export default function MarketplaceWorkbench() {
   const [registeredAssets, setRegisteredAssets] = useState<Set<string> | null>(null);
   const [registryError, setRegistryError] = useState("");
   const [view, setView] = useState<MarketplaceView>("all");
+  const [listingLayout, setListingLayout] = useState<ListingLayout>("card");
   const [listings, setListings] = useState<Listing[]>([]);
   const [thumbnails, setThumbnails] = useState<Record<string, string>>({});
+  const [purchasedListingIds, setPurchasedListingIds] = useState<Set<string>>(() => new Set());
   const [sellRequests, setSellRequests] = useState<PoolSellRequest[]>([]);
   const [editing, setEditing] = useState<Listing | null>(null);
   const [editQuantity, setEditQuantity] = useState("");
@@ -324,9 +337,14 @@ export default function MarketplaceWorkbench() {
     try {
       const tools = await import("@lucid-evolution/lucid");
       const buyer = addressData(tools.Data, tools.AddressSchema, tools.getAddressDetails, address);
-      let tx = lucid.newTx().collectFrom([listing.utxo], tools.Data.to(new tools.Constr(0, [buyer]) as import("@lucid-evolution/lucid").Data)).attach.SpendingValidator(await loadScript("p2p_listing_simple.p2p_listing_simple.spend"));
+      let tx = lucid.newTx().collectFrom([listing.utxo], tools.Data.to(new tools.Constr(0, [buyer]) as import("@lucid-evolution/lucid").Data)).attach.SpendingValidator(await loadListingScript(listing.utxo.address, tools));
       if (listing.settlement === "direct") {
-        tx = tx.pay.ToAddress(listing.seller, listing.priceAsset.policyId ? { [unit(listing.priceAsset)]: listing.price } : { lovelace: listing.price + listing.lockedLovelace }).pay.ToAddress(listing.seller, listing.priceAsset.policyId ? { lovelace: listing.lockedLovelace } : {}).pay.ToAddress(address, { lovelace: BigInt(2000000), [unit(listing.rwa)]: listing.quantity });
+        if (listing.priceAsset.policyId) {
+          tx = tx.pay.ToAddress(listing.seller, { [unit(listing.priceAsset)]: listing.price }).pay.ToAddress(listing.seller, { lovelace: listing.lockedLovelace });
+        } else {
+          tx = tx.pay.ToAddress(listing.seller, { lovelace: listing.price + listing.lockedLovelace });
+        }
+        tx = tx.pay.ToAddress(address, { lovelace: BigInt(2000000), [unit(listing.rwa)]: listing.quantity });
       } else {
         if (!listing.poolToken) throw new Error("Pool inventory is missing its pool identity.");
         const poolUtxo = await lucid.utxoByUnit(unit(listing.poolToken));
@@ -364,6 +382,7 @@ export default function MarketplaceWorkbench() {
         tx = tx.collectFrom([poolUtxo], tools.Data.to(poolRedeemer as import("@lucid-evolution/lucid").Data)).mintAssets({ [unit(inventoryToken)]: -BigInt(1) }, tools.Data.to(new tools.Constr(1, []) as import("@lucid-evolution/lucid").Data)).attach.SpendingValidator(poolScript).attach.MintingPolicy(receiptPolicy).pay.ToContract(poolUtxo.address, { kind: "inline", value: tools.Data.to(nextDatum as import("@lucid-evolution/lucid").Data) }, nextAssets);
       }
       const hash = await (await (await tx.complete()).sign.withWallet().complete()).submit();
+      setPurchasedListingIds((current) => new Set(current).add(listing.id));
       setMessage({ kind: "success", text: "Buy submitted: " + hash }); await refresh();
     } catch (cause) { setMessage({ kind: "error", text: cause instanceof Error ? cause.message : "Purchase was cancelled or failed." }); }
     finally { setLoading(false); }
@@ -375,7 +394,7 @@ export default function MarketplaceWorkbench() {
     setLoading(true);
     try {
       const tools = await import("@lucid-evolution/lucid");
-      const tx = await lucid.newTx().collectFrom([listing.utxo], tools.Data.to(new tools.Constr(1, []) as import("@lucid-evolution/lucid").Data)).attach.SpendingValidator(await loadScript("p2p_listing_simple.p2p_listing_simple.spend")).pay.ToAddress(listing.seller, { ...listing.utxo.assets }).addSigner(address).complete();
+      const tx = await lucid.newTx().collectFrom([listing.utxo], tools.Data.to(new tools.Constr(1, []) as import("@lucid-evolution/lucid").Data)).attach.SpendingValidator(await loadListingScript(listing.utxo.address, tools)).pay.ToAddress(listing.seller, { ...listing.utxo.assets }).addSigner(address).complete();
       const hash = await (await tx.sign.withWallet().complete()).submit();
       setMessage({ kind: "success", text: "Cancellation submitted: " + hash }); await refresh();
     } catch (cause) { setMessage({ kind: "error", text: cause instanceof Error ? cause.message : "Cancellation was cancelled or failed." }); }
@@ -409,7 +428,7 @@ export default function MarketplaceWorkbench() {
       const root = getConstr(tools.Data.from(listing.utxo.datum ?? ""), "listing");
       const nextDatum = new tools.Constr(0, [root.fields[0], root.fields[1], root.fields[2], root.fields[3], quantity, root.fields[5], price]);
       const nextValue = { lovelace: listing.lockedLovelace, [unit(listing.rwa)]: quantity };
-      let tx = lucid.newTx().collectFrom([listing.utxo], tools.Data.to(new tools.Constr(2, [nextDatum]) as import("@lucid-evolution/lucid").Data)).attach.SpendingValidator(await loadScript("p2p_listing_simple.p2p_listing_simple.spend")).pay.ToContract(orderbookAddress, { kind: "inline", value: tools.Data.to(nextDatum as import("@lucid-evolution/lucid").Data) }, nextValue).addSigner(address);
+      let tx = lucid.newTx().collectFrom([listing.utxo], tools.Data.to(new tools.Constr(2, [nextDatum]) as import("@lucid-evolution/lucid").Data)).attach.SpendingValidator(await loadListingScript(listing.utxo.address, tools)).pay.ToContract(orderbookAddress, { kind: "inline", value: tools.Data.to(nextDatum as import("@lucid-evolution/lucid").Data) }, nextValue).addSigner(address);
       if (quantity < listing.quantity) tx = tx.pay.ToAddress(listing.seller, { [unit(listing.rwa)]: listing.quantity - quantity });
       const hash = await (await (await tx.complete()).sign.withWallet().complete()).submit();
       setEditing(null); setMessage({ kind: "success", text: "Update submitted: " + hash }); await refresh();
@@ -419,11 +438,12 @@ export default function MarketplaceWorkbench() {
 
   const renderListing = (listing: Listing) => {
     const owned = listing.managed;
+    const purchaseSubmitted = purchasedListingIds.has(listing.id);
     const tokenName = assetNameText(listing.rwa.assetName);
     const originalName = listing.fraction ? assetNameText(listing.fraction.original.assetName) : "";
-    return <article className="marketplace-listing" key={listing.id}>
+    return <article className={"marketplace-listing " + (listingLayout === "card" ? "marketplace-trading-card" : "")} key={listing.id}>
       <div className="marketplace-asset">
-        <>{thumbnails[unit(listing.rwa)] ? <Image className="marketplace-thumbnail" src={thumbnails[unit(listing.rwa)]} alt="" width={56} height={56} unoptimized /> : <span className={"marketplace-asset-mark " + (listing.fraction ? "fraction" : "")}>{listing.fraction ? "ƒ" : "RWA"}</span>}</>
+        <>{thumbnails[unit(listing.rwa)] ? <Image className="marketplace-thumbnail" src={thumbnails[unit(listing.rwa)]} alt={tokenName + " thumbnail"} width={56} height={56} unoptimized /> : <span className={"marketplace-asset-mark " + (listing.fraction ? "fraction" : "")}>{listing.fraction ? "ƒ" : "RWA"}</span>}</>
         <div>
           <strong>{tokenName} × {listing.quantity.toString()}</strong>
           <code>{listing.rwa.policyId}{listing.rwa.assetName}</code>
@@ -432,31 +452,29 @@ export default function MarketplaceWorkbench() {
         </div>
       </div>
       <div>
-        <span className="marketplace-listing-label">{listing.settlement === "pool" ? "Pool ask" : "Requested payout"}</span>
+        <span className="marketplace-listing-label">Price</span>
         <strong className="marketplace-listing-value">{listing.price.toString()} <small>{listing.priceAsset.policyId ? assetNameText(listing.priceAsset.assetName) : "ADA"}</small></strong>
       </div>
-      <div>
-        <span className="marketplace-listing-label">Escrow</span>
-        <strong className="marketplace-listing-value">{(Number(listing.lockedLovelace) / 1000000).toFixed(2)} ADA</strong>
-      </div>
       <div className="marketplace-actions">
-        {owned ? <><button type="button" className="primary" disabled title="This wallet created the listing">Your listing</button>{listing.settlement === "direct" && <><button type="button" onClick={() => beginEdit(listing)} disabled={loading}>Edit</button><button type="button" onClick={() => void cancelListing(listing)} disabled={loading}>Cancel</button></>}</> : !lucid || !address ? <button type="button" className="primary" onClick={() => void connect()} disabled={loading}>Connect wallet to buy</button> : <button type="button" className="primary" onClick={() => void buyListing(listing)} disabled={loading}>Buy</button>}
+        {purchaseSubmitted ? <button type="button" className="primary" disabled>Purchase submitted</button> : owned ? <><button type="button" className="primary" disabled title="This wallet created the listing">Your listing</button>{listing.settlement === "direct" && <><button type="button" onClick={() => beginEdit(listing)} disabled={loading}>Edit</button><button type="button" onClick={() => void cancelListing(listing)} disabled={loading}>Cancel</button></>}</> : !lucid || !address ? <button type="button" className="primary" onClick={() => void connect()} disabled={loading}>Connect wallet to buy</button> : <button type="button" className="primary" onClick={() => void buyListing(listing)} disabled={loading}>Buy</button>}
         {editing?.id === listing.id && owned && listing.settlement === "direct" && <div className="marketplace-edit"><label>Quantity<input inputMode="numeric" value={editQuantity} onChange={(event) => setEditQuantity(event.target.value)} /></label><label>Price<input inputMode="numeric" value={editPrice} onChange={(event) => setEditPrice(event.target.value)} /></label><button type="button" className="primary" onClick={() => void updateListing(listing)} disabled={loading}>Save</button></div>}
       </div>
     </article>;
   };
 
-  const renderSection = (title: string, kicker: string, items: Listing[], empty: string) => <section className="marketplace-book">
-    <div className="marketplace-book-head"><div><span className="section-kicker">{kicker}</span><h3>{title}</h3></div><span className="marketplace-count">{loaded ? items.length + " available" : "Connect to load"}</span></div>
-    {!orderbookAddress && <p className="marketplace-empty">Set <code>NEXT_PUBLIC_SIMPLE_ORDERBOOK_ADDRESS</code> to discover this book.</p>}
-    {orderbookAddress && !lucid && <p className="marketplace-empty">Connect Eternl to inspect the orderbook.</p>}
-    {orderbookAddress && lucid && loaded && items.length === 0 && <p className="marketplace-empty">{empty}</p>}
-    {orderbookAddress && lucid && items.length > 0 && <div className="marketplace-list">{items.map(renderListing)}</div>}
-  </section>;
+  const renderSection = (title: string, kicker: string, items: Listing[], empty: string) => {
+    const isListedTokens = kicker === "P2P orderbook";
+    return <section className="marketplace-book">
+      <div className="marketplace-book-head"><div><span className="section-kicker">{kicker}</span><h3>{title}</h3></div><div className="marketplace-book-controls">{isListedTokens && <div className="marketplace-layout-toggle" role="group" aria-label="Listed token layout"><button type="button" className={listingLayout === "card" ? "selected" : ""} onClick={() => setListingLayout("card")}>Card view</button><button type="button" className={listingLayout === "list" ? "selected" : ""} onClick={() => setListingLayout("list")}>List view</button></div>}<span className="marketplace-count">{loaded ? items.length + " available" : "Connect to load"}</span></div></div>
+      {!orderbookAddress && <p className="marketplace-empty">Set <code>NEXT_PUBLIC_SIMPLE_ORDERBOOK_ADDRESS</code> to discover this book.</p>}
+      {orderbookAddress && !lucid && <p className="marketplace-empty">Connect Eternl to inspect the orderbook.</p>}
+      {orderbookAddress && lucid && loaded && items.length === 0 && <p className="marketplace-empty">{empty}</p>}
+      {orderbookAddress && lucid && items.length > 0 && <div className={"marketplace-list " + (isListedTokens && listingLayout === "card" ? "marketplace-card-grid" : "")}>{items.map(renderListing)}</div>}
+    </section>;
+  };
   const renderRequest = (request: PoolSellRequest) => <article className="marketplace-listing" key={request.id}>
     <div className="marketplace-asset"><span className="marketplace-asset-mark">⇢</span><div><strong>{assetNameText(request.rwa.assetName)} × {request.quantity.toString()}</strong><code>{request.rwa.policyId}{request.rwa.assetName}</code><span className="marketplace-badge">Awaiting pool pickup</span></div></div>
-    <div><span className="marketplace-listing-label">Minimum payout</span><strong className="marketplace-listing-value">{request.minPayout.toString()} <small>{request.quoteAsset.policyId ? assetNameText(request.quoteAsset.assetName) : "ADA"}</small></strong></div>
-    <div><span className="marketplace-listing-label">Escrow</span><strong className="marketplace-listing-value">{(Number(request.lockedLovelace) / 1000000).toFixed(2)} ADA</strong></div>
+    <div><span className="marketplace-listing-label">Price</span><strong className="marketplace-listing-value">{request.minPayout.toString()} <small>{request.quoteAsset.policyId ? assetNameText(request.quoteAsset.assetName) : "ADA"}</small></strong></div>
     <div className="marketplace-actions">{request.managed ? <button type="button" onClick={() => void cancelPoolSellRequest(request)} disabled={loading}>Cancel request</button> : <span className="explorer-link muted-link">Pool batcher may settle</span>}</div>
   </article>;
 
