@@ -1,6 +1,7 @@
 "use client";
 
 import { FormEvent, useCallback, useEffect, useMemo, useState } from "react";
+import Image from "next/image";
 import Link from "next/link";
 import { useWallet } from "./wallet-context";
 import { readRegistry, registryConfigured } from "@/lib/asset-registry";
@@ -96,6 +97,14 @@ function assetNameText(assetName: string): string {
     return "Binary asset";
   }
 }
+function metadataText(value: unknown): string {
+  return Array.isArray(value) ? value.filter((part): part is string => typeof part === "string").join("") : typeof value === "string" ? value : "";
+}
+function ipfsGatewayUrl(value: unknown): string | null {
+  const uri = metadataText(value);
+  const cid = uri.startsWith("ipfs://") ? uri.slice(7).split("/")[0] : "";
+  return /^(?:Qm[1-9A-HJ-NP-Za-km-z]{44}|b[a-z2-7]{20,120})$/.test(cid) ? "/api/ipfs/gateway/" + cid : null;
+}
 async function loadFractionIndex(lucid: import("@lucid-evolution/lucid").LucidEvolution): Promise<Map<string, FractionInfo>> {
   const response = await fetch("/api/fractionalize-blueprint", { cache: "no-store" });
   const blueprint = await response.json() as { vaultCompiledCode?: string; error?: string };
@@ -170,7 +179,7 @@ function encodePoolSellRequest(tools: typeof import("@lucid-evolution/lucid"), f
 }
 
 export default function MarketplaceWorkbench() {
-  const { address, lucid } = useWallet();
+  const { address, lucid, connect } = useWallet();
   const [form, setForm] = useState<FormState>(initialForm);
   const [showListingForm, setShowListingForm] = useState(false);
   const [mode] = useState<Mode>("price");
@@ -179,6 +188,7 @@ export default function MarketplaceWorkbench() {
   const [registryError, setRegistryError] = useState("");
   const [view, setView] = useState<MarketplaceView>("all");
   const [listings, setListings] = useState<Listing[]>([]);
+  const [thumbnails, setThumbnails] = useState<Record<string, string>>({});
   const [sellRequests, setSellRequests] = useState<PoolSellRequest[]>([]);
   const [editing, setEditing] = useState<Listing | null>(null);
   const [editQuantity, setEditQuantity] = useState("");
@@ -252,6 +262,22 @@ export default function MarketplaceWorkbench() {
   }, [address, lucid, orderbookAddress, quotePoolAddress]);
 
   useEffect(() => { const timer = window.setTimeout(() => { void refresh(); }, 0); return () => window.clearTimeout(timer); }, [refresh]);
+  useEffect(() => {
+    let cancelled = false;
+    const units = [...new Set(listings.map((listing) => unit(listing.rwa)))];
+    if (units.length === 0) { setThumbnails({}); return; }
+    void Promise.all(units.map(async (assetUnit) => {
+      try {
+        const response = await fetch("/api/blockfrost/assets/" + encodeURIComponent(assetUnit), { cache: "force-cache" });
+        const asset = await response.json() as { onchain_metadata?: { image?: unknown } };
+        const thumbnail = ipfsGatewayUrl(asset.onchain_metadata?.image);
+        return thumbnail ? [assetUnit, thumbnail] as const : null;
+      } catch { return null; }
+    })).then((results) => {
+      if (!cancelled) setThumbnails(Object.fromEntries(results.filter((result): result is readonly [string, string] => result !== null)));
+    });
+    return () => { cancelled = true; };
+  }, [listings]);
   const visible = useMemo(() => listings
     .filter((listing) => !registeredOnly || registeredAssets?.has(unit(listing.rwa)))
     .filter((listing) => view === "all" || (view === "p2p" && listing.settlement === "direct") || (view === "pool" && listing.settlement === "pool") || (view === "fractions" && Boolean(listing.fraction))), [listings, view, registeredOnly, registeredAssets]);
@@ -293,6 +319,7 @@ export default function MarketplaceWorkbench() {
   async function buyListing(listing: Listing) {
     setMessage(null);
     if (!lucid || !address) { setMessage({ kind: "error", text: "Connect Eternl before buying." }); return; }
+    if (listing.managed) { setMessage({ kind: "error", text: "You cannot buy a listing created by this wallet." }); return; }
     setLoading(true);
     try {
       const tools = await import("@lucid-evolution/lucid");
@@ -396,7 +423,7 @@ export default function MarketplaceWorkbench() {
     const originalName = listing.fraction ? assetNameText(listing.fraction.original.assetName) : "";
     return <article className="marketplace-listing" key={listing.id}>
       <div className="marketplace-asset">
-        <span className={"marketplace-asset-mark " + (listing.fraction ? "fraction" : "")}>{listing.fraction ? "ƒ" : "RWA"}</span>
+        <>{thumbnails[unit(listing.rwa)] ? <Image className="marketplace-thumbnail" src={thumbnails[unit(listing.rwa)]} alt="" width={56} height={56} unoptimized /> : <span className={"marketplace-asset-mark " + (listing.fraction ? "fraction" : "")}>{listing.fraction ? "ƒ" : "RWA"}</span>}</>
         <div>
           <strong>{tokenName} × {listing.quantity.toString()}</strong>
           <code>{listing.rwa.policyId}{listing.rwa.assetName}</code>
@@ -413,8 +440,8 @@ export default function MarketplaceWorkbench() {
         <strong className="marketplace-listing-value">{(Number(listing.lockedLovelace) / 1000000).toFixed(2)} ADA</strong>
       </div>
       <div className="marketplace-actions">
-        {!owned || listing.settlement === "pool" ? <button type="button" className="primary" onClick={() => void buyListing(listing)} disabled={loading}>Buy</button> : <><button type="button" onClick={() => beginEdit(listing)} disabled={loading}>Edit</button><button type="button" onClick={() => void cancelListing(listing)} disabled={loading}>Cancel</button></>}
-        {editing?.id === listing.id && owned && <div className="marketplace-edit"><label>Quantity<input inputMode="numeric" value={editQuantity} onChange={(event) => setEditQuantity(event.target.value)} /></label><label>Price<input inputMode="numeric" value={editPrice} onChange={(event) => setEditPrice(event.target.value)} /></label><button type="button" className="primary" onClick={() => void updateListing(listing)} disabled={loading}>Save</button></div>}
+        {owned ? <><button type="button" className="primary" disabled title="This wallet created the listing">Your listing</button>{listing.settlement === "direct" && <><button type="button" onClick={() => beginEdit(listing)} disabled={loading}>Edit</button><button type="button" onClick={() => void cancelListing(listing)} disabled={loading}>Cancel</button></>}</> : !lucid || !address ? <button type="button" className="primary" onClick={() => void connect()} disabled={loading}>Connect wallet to buy</button> : <button type="button" className="primary" onClick={() => void buyListing(listing)} disabled={loading}>Buy</button>}
+        {editing?.id === listing.id && owned && listing.settlement === "direct" && <div className="marketplace-edit"><label>Quantity<input inputMode="numeric" value={editQuantity} onChange={(event) => setEditQuantity(event.target.value)} /></label><label>Price<input inputMode="numeric" value={editPrice} onChange={(event) => setEditPrice(event.target.value)} /></label><button type="button" className="primary" onClick={() => void updateListing(listing)} disabled={loading}>Save</button></div>}
       </div>
     </article>;
   };
@@ -444,6 +471,7 @@ export default function MarketplaceWorkbench() {
       <label><input type="checkbox" checked={registeredOnly} disabled={!registryConfigured} onChange={(event) => setRegisteredOnly(event.target.checked)} /> CSWAP-registered assets only</label>
       {!registryConfigured && <p>Configure the asset registry to enable approval filtering. <Link href="/registry">Open registry</Link></p>}
       {registryError && <p role="alert">{registryError}</p>}
+      {message && <p className={message.kind === "error" ? "marketplace-message marketplace-error" : "marketplace-message marketplace-success"} role={message.kind === "error" ? "alert" : "status"}>{message.text}</p>}
       <div className="marketplace-view-tabs" role="tablist" aria-label="Marketplace inventory">
         <button type="button" className={view === "all" ? "selected" : ""} onClick={() => setView("all")}>Overview</button>
         <button type="button" className={view === "p2p" ? "selected" : ""} onClick={() => setView("p2p")}>Listed tokens</button>

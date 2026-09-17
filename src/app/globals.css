@@ -291,3 +291,8 @@ footer b, footer a:hover { color: var(--moss); }
   .mint-form-section .field-grid { grid-template-columns: 1fr; }
   .mint-form-section legend { font-size: 13px; }
 }
+.listing-dialog-backdrop { position: fixed; z-index: 20; inset: 0; display: grid; place-items: center; padding: 24px; background: rgba(7, 12, 10, .72); }
+.listing-dialog { width: min(100%, 560px); max-height: calc(100vh - 48px); overflow: auto; padding: 26px; border: 1px solid var(--line); border-radius: 12px; background: var(--surface-deep); box-shadow: 0 24px 80px rgba(0, 0, 0, .35); }
+.listing-dialog-heading { display: flex; align-items: start; justify-content: space-between; gap: 16px; }.listing-dialog-heading h2 { margin-top: 4px; }.listing-dialog-close { min-width: 34px; min-height: 34px; padding: 0; border: 1px solid var(--line); border-radius: 50%; background: transparent; color: var(--ink); font-size: 25px; line-height: 1; }.listing-dialog > p { margin: 18px 0; color: var(--muted); line-height: 1.55; }.listing-dialog-actions { display: flex; justify-content: end; gap: 12px; margin-top: 6px; }.listing-dialog-actions > button:not(.primary-button) { padding: 10px 14px; border: 1px solid var(--line); border-radius: 7px; color: var(--ink); background: transparent; font-weight: 700; }
+@media (max-width: 560px) { .listing-dialog-backdrop { padding: 12px; }.listing-dialog { padding: 20px; }.listing-dialog-actions { flex-direction: column-reverse; }.listing-dialog-actions button { width: 100%; justify-content: center; } }
+.marketplace-thumbnail { width: 56px; height: 56px; flex: 0 0 56px; border: 1px solid var(--line); border-radius: 8px; object-fit: cover; background: var(--surface-deep); }
