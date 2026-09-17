@@ -59,7 +59,7 @@ export default function WalletAssets() {
           <ul className="wallet-assets-list">{visibleAssets.map((asset) => <li className="wallet-asset-row" key={asset.unit}>
             <div className="wallet-asset-info"><h3>{asset.name}</h3><span>Policy ID</span><code>{asset.policyId}</code><span>Asset name (hex)</span><code>{asset.nameHex || "Empty asset name"}</code></div>
             <div className="wallet-asset-quantity"><span>Quantity · base units</span><strong>{new Intl.NumberFormat("en-US").format(asset.quantity)}</strong></div>
-            <Link className="wallet-asset-inspect" href={`/assets?asset=${asset.unit}`} aria-label={`Inspect ${asset.name}`}>Inspect asset ↗</Link>
+            <div className="wallet-asset-actions"><Link className="wallet-asset-inspect" href={"/assets?asset=" + asset.unit} aria-label={"Inspect " + asset.name}>Inspect asset ↗</Link>{asset.quantity === BigInt(1) && <Link className="text-button" href={"/marketplace?asset=" + asset.unit}>List</Link>}</div>
           </li>)}</ul>
         </>}
       </>}
