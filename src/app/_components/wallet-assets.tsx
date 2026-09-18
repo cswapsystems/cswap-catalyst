@@ -55,9 +55,9 @@ export default function WalletAssets() {
   const [listingPaymentUnit, setListingPaymentUnit] = useState("lovelace");
   const [listingPaymentPolicyId, setListingPaymentPolicyId] = useState("");
   const [listingPaymentAssetName, setListingPaymentAssetName] = useState("");
-  const [listingProceeds, setListingProceeds] = useState("");
   const [listingMessage, setListingMessage] = useState<{ kind: "error" | "success"; text: string } | null>(null);
   const [listingSubmitting, setListingSubmitting] = useState(false);
+  const [listingToast, setListingToast] = useState<string | null>(null);
   const [assetPreviews, setAssetPreviews] = useState<Record<string, AssetPreview>>({});
   const connected = status === "connected" && Boolean(address && lucid);
   const current = connected && result?.owner === address && result.wallet === lucid && result.revision === revision ? result : null;
@@ -68,6 +68,12 @@ export default function WalletAssets() {
     return holdings?.assets.filter((asset) => !query || asset.name.toLowerCase().includes(query) || asset.unit.includes(query)) ?? [];
   }, [holdings, search]);
   const paymentAssets = useMemo(() => holdings?.assets.filter((asset) => asset.unit !== listingAsset?.unit) ?? [], [holdings, listingAsset]);
+
+  useEffect(() => {
+    if (!listingToast) return;
+    const timer = window.setTimeout(() => setListingToast(null), 8_000);
+    return () => window.clearTimeout(timer);
+  }, [listingToast]);
 
   useEffect(() => {
     if (!lucid || !address || status !== "connected") return;
@@ -109,7 +115,6 @@ export default function WalletAssets() {
     setListingPaymentUnit("lovelace");
     setListingPaymentPolicyId("");
     setListingPaymentAssetName("");
-    setListingProceeds(address ?? "");
     setListingMessage(null);
   }
 
@@ -141,9 +146,8 @@ export default function WalletAssets() {
       if (paymentAsset.policyId === listingAsset.policyId && paymentAsset.assetName === listingAsset.nameHex) throw new Error("The requested payment asset cannot be the listed NFT.");
       const owner = tools.getAddressDetails(address);
       if (!owner?.paymentCredential || owner.paymentCredential.type !== "Key") throw new Error("The connected wallet needs a payment-key address.");
-      const proceeds = listingProceeds.trim() || address;
       const datum = new tools.Constr(0, [
-        addressData(tools, proceeds),
+        addressData(tools, address),
         owner.paymentCredential.hash,
         new tools.Constr(0, []),
         new tools.Constr(0, [listingAsset.policyId, listingAsset.nameHex]),
@@ -156,7 +160,9 @@ export default function WalletAssets() {
         .pay.ToContract(marketplaceOrderbookAddress, { kind: "inline", value: tools.Data.to(datum as import("@lucid-evolution/lucid").Data) }, { lovelace: BigInt(2_000_000), [listingAsset.unit]: BigInt(1) })
         .complete();
       const hash = await (await tx.sign.withWallet().complete()).submit();
-      setListingMessage({ kind: "success", text: `Listing submitted: ${hash}. It will appear in the Marketplace after confirmation.` });
+      setListingAsset(null);
+      setListingMessage(null);
+      setListingToast(`Listing submitted: ${hash}. It will appear in the Marketplace after confirmation.`);
       setRevision((value) => value + 1);
     } catch (cause) {
       setListingMessage({ kind: "error", text: cause instanceof Error ? cause.message : "Listing creation was cancelled or failed." });
@@ -191,6 +197,7 @@ export default function WalletAssets() {
         </>}
       </>}
     </section>
+    {listingToast && <div className="listing-toast" role="status"><strong>Listing created</strong><span>{listingToast}</span><button type="button" onClick={() => setListingToast(null)} aria-label="Dismiss listing notification">×</button></div>}
     {listingAsset && <div className="listing-dialog-backdrop" role="presentation" onMouseDown={closeListing}><section className="listing-dialog" role="dialog" aria-modal="true" aria-labelledby="listing-dialog-title" onMouseDown={(event) => event.stopPropagation()}>
       <div className="listing-dialog-heading"><div><span className="section-kicker">Marketplace listing</span><h2 id="listing-dialog-title">List {listingAsset.name}</h2></div><button type="button" className="listing-dialog-close" onClick={closeListing} disabled={listingSubmitting} aria-label="Close listing dialog">×</button></div>
       <p>Set the requested payment asset and price for this one-unit NFT. The NFT and 2 ADA escrow deposit will move to the Marketplace contract when you approve the transaction in Eternl.</p>
@@ -198,7 +205,6 @@ export default function WalletAssets() {
         <label className="field"><span className="field-label">Requested payment asset</span><select value={listingPaymentUnit} onChange={(event) => setListingPaymentUnit(event.target.value)}><option value="lovelace">ADA</option>{paymentAssets.map((asset) => <option key={asset.unit} value={asset.unit}>{asset.name} · {asset.policyId.slice(0, 10)}…</option>)}<option value="custom">Custom native asset (for example, USDCx)</option></select></label>
         {listingPaymentUnit === "custom" && <div className="field-grid"><label className="field"><span className="field-label">Payment policy ID</span><input required value={listingPaymentPolicyId} onChange={(event) => setListingPaymentPolicyId(event.target.value)} placeholder="56-character policy ID" /></label><label className="field"><span className="field-label">Payment asset name (hex)</span><input value={listingPaymentAssetName} onChange={(event) => setListingPaymentAssetName(event.target.value)} placeholder="Hex asset name; may be empty" /></label></div>}
         <label className="field"><span className="field-label">Price in base units</span><input required inputMode="numeric" pattern="[0-9]+" min="1" value={listingPrice} onChange={(event) => setListingPrice(event.target.value)} placeholder="e.g. 100000" autoFocus /></label>
-        <label className="field"><span className="field-label">Proceeds address</span><input value={listingProceeds} onChange={(event) => setListingProceeds(event.target.value)} placeholder="Defaults to connected wallet" /></label>
         <p className="wallet-assets-note">Use the asset’s smallest units. ADA uses lovelace (1 ADA = 1,000,000 lovelace). Buyers pay the requested asset; the 2 ADA escrow deposit returns to you when the listing sells or is cancelled.</p>
         {listingMessage && <p className={listingMessage.kind === "error" ? "form-message error-message" : "form-message success-message"} role={listingMessage.kind === "error" ? "alert" : "status"}>{listingMessage.text}</p>}
         <div className="listing-dialog-actions"><button type="button" onClick={closeListing} disabled={listingSubmitting}>Cancel</button><button type="submit" className="primary-button" disabled={listingSubmitting}>{listingSubmitting ? "Awaiting Eternl…" : "Create listing"}</button></div>

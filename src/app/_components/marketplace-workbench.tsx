@@ -2,9 +2,7 @@
 
 import { FormEvent, useCallback, useEffect, useMemo, useState } from "react";
 import Image from "next/image";
-import Link from "next/link";
 import { useWallet } from "./wallet-context";
-import { readRegistry, registryConfigured } from "@/lib/asset-registry";
 import { marketplaceOrderbookAddress, marketplacePoolAddress } from "@/lib/protocol/marketplace-deployment";
 
 type Mode = "all" | "price" | "instant";
@@ -194,9 +192,6 @@ export default function MarketplaceWorkbench() {
   const [form, setForm] = useState<FormState>(initialForm);
   const [showListingForm, setShowListingForm] = useState(false);
   const [mode] = useState<Mode>("price");
-  const [registeredOnly, setRegisteredOnly] = useState(false);
-  const [registeredAssets, setRegisteredAssets] = useState<Set<string> | null>(null);
-  const [registryError, setRegistryError] = useState("");
   const [view, setView] = useState<MarketplaceView>("all");
   const [listingLayout, setListingLayout] = useState<ListingLayout>("card");
   const [listings, setListings] = useState<Listing[]>([]);
@@ -204,13 +199,19 @@ export default function MarketplaceWorkbench() {
   const [purchasedListingIds, setPurchasedListingIds] = useState<Set<string>>(() => new Set());
   const [sellRequests, setSellRequests] = useState<PoolSellRequest[]>([]);
   const [editing, setEditing] = useState<Listing | null>(null);
-  const [editQuantity, setEditQuantity] = useState("");
   const [editPrice, setEditPrice] = useState("");
   const [loading, setLoading] = useState(false);
   const [loaded, setLoaded] = useState(false);
   const [message, setMessage] = useState<{ kind: "error" | "success"; text: string } | null>(null);
+  const [marketplaceToast, setMarketplaceToast] = useState<string | null>(null);
   const orderbookAddress = marketplaceOrderbookAddress;
   const quotePoolAddress = marketplacePoolAddress;
+
+  useEffect(() => {
+    if (!marketplaceToast) return;
+    const timer = window.setTimeout(() => setMarketplaceToast(null), 8_000);
+    return () => window.clearTimeout(timer);
+  }, [marketplaceToast]);
 
   useEffect(() => {
     const asset = new URLSearchParams(window.location.search).get("asset") ?? "";
@@ -223,18 +224,10 @@ export default function MarketplaceWorkbench() {
     setMessage(null);
     if (!lucid || !orderbookAddress) { setListings([]); setLoaded(true); return; }
     setLoading(true);
-    setRegisteredAssets(null);
     try {
       const tools = await import("@lucid-evolution/lucid");
       let fractions = new Map<string, FractionInfo>();
       try { fractions = await loadFractionIndex(lucid); } catch { /* Fraction metadata is optional for generic listings. */ }
-      let approved: Set<string> | null = null;
-      let approvalError = "";
-      if (registryConfigured) {
-        try { approved = new Set((await readRegistry(lucid)).entries); }
-        catch { approvalError = "Registry verification unavailable. Registered-only results are hidden until a successful refresh."; }
-      }
-      setRegisteredAssets(approved); setRegistryError(approvalError);
       const found: Listing[] = [];
       const response = await fetch("/api/blockfrost/addresses/" + encodeURIComponent(orderbookAddress) + "/utxos?count=100", { cache: "no-store" });
       const outputs = await response.json().catch(() => []) as Array<{ tx_hash?: unknown; output_index?: unknown; inline_datum?: unknown; amount?: Array<{ unit?: unknown; quantity?: unknown }> }>;
@@ -292,8 +285,7 @@ export default function MarketplaceWorkbench() {
     return () => { cancelled = true; };
   }, [listings]);
   const visible = useMemo(() => listings
-    .filter((listing) => !registeredOnly || registeredAssets?.has(unit(listing.rwa)))
-    .filter((listing) => view === "all" || (view === "p2p" && listing.settlement === "direct") || (view === "pool" && listing.settlement === "pool") || (view === "fractions" && Boolean(listing.fraction))), [listings, view, registeredOnly, registeredAssets]);
+    .filter((listing) => view === "all" || (view === "p2p" && listing.settlement === "direct") || (view === "pool" && listing.settlement === "pool") || (view === "fractions" && Boolean(listing.fraction))), [listings, view]);
   const p2pListings = useMemo(() => visible.filter((listing) => listing.settlement === "direct"), [visible]);
   const poolListings = useMemo(() => visible.filter((listing) => listing.settlement === "pool"), [visible]);
   const update = (key: keyof FormState, value: string) => { setForm((current) => ({ ...current, [key]: value })); setMessage(null); };
@@ -396,7 +388,7 @@ export default function MarketplaceWorkbench() {
       const tools = await import("@lucid-evolution/lucid");
       const tx = await lucid.newTx().collectFrom([listing.utxo], tools.Data.to(new tools.Constr(1, []) as import("@lucid-evolution/lucid").Data)).attach.SpendingValidator(await loadListingScript(listing.utxo.address, tools)).pay.ToAddress(listing.seller, { ...listing.utxo.assets }).addSigner(address).complete();
       const hash = await (await tx.sign.withWallet().complete()).submit();
-      setMessage({ kind: "success", text: "Cancellation submitted: " + hash }); await refresh();
+      setMessage({ kind: "success", text: "Cancellation submitted: " + hash }); setMarketplaceToast("Listing cancellation submitted: " + hash); await refresh();
     } catch (cause) { setMessage({ kind: "error", text: cause instanceof Error ? cause.message : "Cancellation was cancelled or failed." }); }
     finally { setLoading(false); }
   }
@@ -412,26 +404,25 @@ export default function MarketplaceWorkbench() {
       const requestScript = { type: "PlutusV3" as const, script: tools.applyParamsToScript(requestCode.script, [addressData(tools.Data, tools.AddressSchema, tools.getAddressDetails, quotePoolAddress) as import("@lucid-evolution/lucid").Data]) };
       const tx = await lucid.newTx().collectFrom([request.utxo], tools.Data.to(new tools.Constr(1, []) as import("@lucid-evolution/lucid").Data)).attach.SpendingValidator(requestScript).pay.ToAddress(request.seller, { ...request.utxo.assets }).addSigner(address).complete();
       const hash = await (await tx.sign.withWallet().complete()).submit();
-      setMessage({ kind: "success", text: "Pool sell request cancelled: " + hash }); await refresh();
+      setMessage({ kind: "success", text: "Pool sell request cancelled: " + hash }); setMarketplaceToast("Pool request cancellation submitted: " + hash); await refresh();
     } catch (cause) { setMessage({ kind: "error", text: cause instanceof Error ? cause.message : "The pool sell request could not be cancelled." }); }
     finally { setLoading(false); }
   }
 
-  function beginEdit(listing: Listing) { setEditing(listing); setEditQuantity(listing.quantity.toString()); setEditPrice(listing.price.toString()); }
+  function beginEdit(listing: Listing) { setEditing(listing); setEditPrice(listing.price.toString()); }
   async function updateListing(listing: Listing) {
     if (!lucid || !address || !listing.managed) { setMessage({ kind: "error", text: "Connect the listing management wallet before updating." }); return; }
     setLoading(true);
     try {
-      const quantity = BigInt(editQuantity); const price = BigInt(editPrice);
-      if (quantity <= BigInt(0) || price <= BigInt(0)) throw new Error("Updated quantity and price must be greater than zero.");
+      const price = BigInt(editPrice);
+      if (price <= BigInt(0)) throw new Error("Updated price must be greater than zero.");
       const tools = await import("@lucid-evolution/lucid");
       const root = getConstr(tools.Data.from(listing.utxo.datum ?? ""), "listing");
-      const nextDatum = new tools.Constr(0, [root.fields[0], root.fields[1], root.fields[2], root.fields[3], quantity, root.fields[5], price]);
-      const nextValue = { lovelace: listing.lockedLovelace, [unit(listing.rwa)]: quantity };
-      let tx = lucid.newTx().collectFrom([listing.utxo], tools.Data.to(new tools.Constr(2, [nextDatum]) as import("@lucid-evolution/lucid").Data)).attach.SpendingValidator(await loadListingScript(listing.utxo.address, tools)).pay.ToContract(orderbookAddress, { kind: "inline", value: tools.Data.to(nextDatum as import("@lucid-evolution/lucid").Data) }, nextValue).addSigner(address);
-      if (quantity < listing.quantity) tx = tx.pay.ToAddress(listing.seller, { [unit(listing.rwa)]: listing.quantity - quantity });
+      const nextDatum = new tools.Constr(0, [root.fields[0], root.fields[1], root.fields[2], root.fields[3], listing.quantity, root.fields[5], price]);
+      const nextValue = { lovelace: listing.lockedLovelace, [unit(listing.rwa)]: listing.quantity };
+      const tx = lucid.newTx().collectFrom([listing.utxo], tools.Data.to(new tools.Constr(2, [nextDatum]) as import("@lucid-evolution/lucid").Data)).attach.SpendingValidator(await loadListingScript(listing.utxo.address, tools)).pay.ToContract(orderbookAddress, { kind: "inline", value: tools.Data.to(nextDatum as import("@lucid-evolution/lucid").Data) }, nextValue).addSigner(address);
       const hash = await (await (await tx.complete()).sign.withWallet().complete()).submit();
-      setEditing(null); setMessage({ kind: "success", text: "Update submitted: " + hash }); await refresh();
+      setEditing(null); setMessage({ kind: "success", text: "Update submitted: " + hash }); setMarketplaceToast("Listing update submitted: " + hash); await refresh();
     } catch (cause) { setMessage({ kind: "error", text: cause instanceof Error ? cause.message : "Listing update was cancelled or failed." }); }
     finally { setLoading(false); }
   }
@@ -457,7 +448,6 @@ export default function MarketplaceWorkbench() {
       </div>
       <div className="marketplace-actions">
         {purchaseSubmitted ? <button type="button" className="primary" disabled>Purchase submitted</button> : owned ? <><button type="button" className="primary" disabled title="This wallet created the listing">Your listing</button>{listing.settlement === "direct" && <><button type="button" onClick={() => beginEdit(listing)} disabled={loading}>Edit</button><button type="button" onClick={() => void cancelListing(listing)} disabled={loading}>Cancel</button></>}</> : !lucid || !address ? <button type="button" className="primary" onClick={() => void connect()} disabled={loading}>Connect wallet to buy</button> : <button type="button" className="primary" onClick={() => void buyListing(listing)} disabled={loading}>Buy</button>}
-        {editing?.id === listing.id && owned && listing.settlement === "direct" && <div className="marketplace-edit"><label>Quantity<input inputMode="numeric" value={editQuantity} onChange={(event) => setEditQuantity(event.target.value)} /></label><label>Price<input inputMode="numeric" value={editPrice} onChange={(event) => setEditPrice(event.target.value)} /></label><button type="button" className="primary" onClick={() => void updateListing(listing)} disabled={loading}>Save</button></div>}
       </div>
     </article>;
   };
@@ -486,9 +476,6 @@ export default function MarketplaceWorkbench() {
         <span className="wallet-assets-note">Assets for sale are listed below.</span>
         <button className="marketplace-refresh" type="button" onClick={() => void refresh()} disabled={loading}>{loading ? "Loading…" : "Refresh books"}</button>
       </div>
-      <label><input type="checkbox" checked={registeredOnly} disabled={!registryConfigured} onChange={(event) => setRegisteredOnly(event.target.checked)} /> CSWAP-registered assets only</label>
-      {!registryConfigured && <p>Configure the asset registry to enable approval filtering. <Link href="/registry">Open registry</Link></p>}
-      {registryError && <p role="alert">{registryError}</p>}
       {message && <p className={message.kind === "error" ? "marketplace-message marketplace-error" : "marketplace-message marketplace-success"} role={message.kind === "error" ? "alert" : "status"}>{message.text}</p>}
       <div className="marketplace-view-tabs" role="tablist" aria-label="Marketplace inventory">
         <button type="button" className={view === "all" ? "selected" : ""} onClick={() => setView("all")}>Overview</button>
@@ -504,6 +491,8 @@ export default function MarketplaceWorkbench() {
         <div className="marketplace-form-footer"><p><span className="status-dot" />{lucid ? " Eternl connected - ready to sign." : " Connect Eternl to prepare a transaction."}</p><button type="submit" className="primary-button" disabled={loading}>{loading ? "Awaiting wallet..." : mode === "instant" ? "Submit pool request" : "Create listing"} <span className="button-arrow">Go</span></button></div>
       </form>}
     </section>
+    {marketplaceToast && <div className="marketplace-toast" role="status"><strong>Marketplace updated</strong><span>{marketplaceToast}</span><button type="button" onClick={() => setMarketplaceToast(null)} aria-label="Dismiss Marketplace notification">×</button></div>}
+    {editing && <div className="marketplace-edit-backdrop" role="presentation" onMouseDown={() => !loading && setEditing(null)}><section className="marketplace-edit-dialog" role="dialog" aria-modal="true" aria-labelledby="marketplace-edit-title" onMouseDown={(event) => event.stopPropagation()}><div className="listing-dialog-heading"><div><span className="section-kicker">Marketplace listing</span><h2 id="marketplace-edit-title">Edit price</h2></div><button type="button" className="listing-dialog-close" onClick={() => setEditing(null)} disabled={loading} aria-label="Close edit dialog">×</button></div><p>Update the price for {assetNameText(editing.rwa.assetName)}. The listed quantity remains {editing.quantity.toString()}.</p><label className="field"><span className="field-label">Price in base units</span><input autoFocus inputMode="numeric" pattern="[0-9]+" min="1" value={editPrice} onChange={(event) => setEditPrice(event.target.value)} /></label><div className="marketplace-edit-dialog-actions"><button type="button" onClick={() => setEditing(null)} disabled={loading}>Cancel</button><button type="button" className="primary-button" onClick={() => void updateListing(editing)} disabled={loading}>{loading ? "Awaiting wallet…" : "Save price"}</button></div></section></div>}
     <section className="marketplace-listings">
       {sellRequests.length > 0 && <section className="marketplace-book"><div className="marketplace-book-head"><div><span className="section-kicker">Shared-pool requests</span><h3>Awaiting pool pickup</h3></div><span className="marketplace-count">{sellRequests.length} pending</span></div><p className="directory-intro">A batcher can settle a request only with the shared pool and only at or above its minimum payout. Request owners can cancel at any time.</p><div className="marketplace-list">{sellRequests.map(renderRequest)}</div></section>}
       {view !== "pool" && renderSection(view === "fractions" ? "Fraction P2P listings" : "Listed tokens", "P2P orderbook", p2pListings, view === "fractions" ? "No fraction tokens are currently listed by users." : "No direct user listings are currently open.")}
