@@ -73,7 +73,7 @@ Marketplace
                          +--> pool-owned inventory listings
 
 DEX
-  factory state -> pool NFT + LP token -> shared AMM address
+  bootstrap offer + factory state -> pool NFT + LP token -> shared AMM address
 ```
 
 The shared types used by the marketplace are in
@@ -502,12 +502,23 @@ This is a deliberately conservative settlement rule. It makes pool-owned
 inventory operationally simple: sell all open inventory before changing LP
 state or closing the pool.
 
+### 8.6 Operator console and client boundary
+
+`/team` combines the pricing queue and reserve controls with a read of the
+configured shared-pool datum. It is a transaction builder and state reader,
+not a privileged service: quote-pool and request validators still require the
+configured batcher/admin conditions and complete continuing outputs. The Team
+builder separately checks exact registry approval, but current shared-pool
+validators do not reference the registry. The console should be used with fresh UTxOs and an
+operator audit record; it does not make a price decision valid by itself.
+
 ## 9. Constant-product DEX
 
 The DEX is separate from the marketplace and is implemented by:
 
 - [`factory_state.ak`](../contracts/dex/validators/factory_state.ak)
 - [`factory_bootstrap.ak`](../contracts/dex/validators/factory_bootstrap.ak)
+- [`bootstrap_offer.ak`](../contracts/dex/validators/bootstrap_offer.ak)
 - [`pool_factory.ak`](../contracts/dex/validators/pool_factory.ak)
 - [`amm_pool.ak`](../contracts/dex/validators/amm_pool.ak)
 - [`lp_policy.ak`](../contracts/dex/validators/lp_policy.ak)
@@ -521,7 +532,13 @@ swap contend on the factory UTxO.
 
 `factory_bootstrap.ak` creates the factory NFT once from a seed UTxO.
 `factory_state.ak` lets the admin advance the pool ID or pause/unpause creation
-and trading.
+and trading. Its second parameter is the shared bootstrap-offer address.
+
+`Advance` and `SetPaused` require the factory-admin signature.
+`AdvanceBootstrap` skips that signature only when the transaction also spends
+an input at the configured bootstrap-offer script address. The offer validator
+must then independently pass, so this is a constrained pool creation path, not
+a general permissionless factory update.
 
 ### 9.2 Pool creation and identity
 
@@ -532,7 +549,21 @@ the same asset name under the LP policy.
 Every live pool is a different UTxO at one shared `amm_pool` script address.
 The pool NFT identifies which datum/value belongs to that pool.
 
-### 9.3 AMM rules
+### 9.3 Two-party FT bootstrap
+
+`BootstrapOfferDatum` locks the owner address/key, factory token, FT asset and
+quantity, quote asset/reserve, fixed ADA buffer, and owner LP share in basis
+points. The offer UTxO contains exactly the FT contribution plus its ADA
+buffer.
+
+Acceptance consumes the offer and factory state, creates the next deterministic
+pool, mints exactly the initial LP supply, and pays both declared participants.
+For tADA/FT, the provider supplies the amount needed to reach the final ADA
+reserve after the owner buffer. For USDCx/FT, the provider supplies the full
+USDCx reserve while the owner buffer stays as `pool_lovelace`. The owner can
+cancel an unaccepted offer with the owner payment-key signature.
+
+### 9.4 AMM rules
 
 `PoolDatum` stores two assets, reserves, fee ratio, LP supply, pool NFT, LP
 token, and locked lovelace. The AMM validator enforces:
@@ -547,7 +578,9 @@ token, and locked lovelace. The AMM validator enforces:
 
 This is fundamentally different from the marketplace quote pool. The DEX
 derives prices from reserves and the invariant; the marketplace quote pool
-uses external batcher prices and tracks open inventory obligations.
+uses external batcher prices and tracks open inventory obligations. The DEX
+workbench preserves `pool_lovelace` as a fixed buffer for token/token pools;
+for ADA pairs it follows the ADA reserve.
 
 ## 10. How to read a transaction
 
@@ -586,8 +619,8 @@ version:
 
 ```sh
 cd contracts/marketplace
-aiken check .
-aiken build .
+aiken check --deny .
+aiken build --out plutus.json
 
 cd ../minter
 aiken check .
@@ -607,9 +640,13 @@ npm run build
 
 The current repository also contains marketplace tests for exact pool-owned
 escrow, receipt authorization/burning, and blocking liquidity changes while
-inventory is open. These are validator-level simulations; they do not replace
-a network submission test with real UTxOs, min-UTxO values, wallet signing,
-datum encoding, and the target network's actual ledger behavior.
+inventory is open. The DEX unit suite currently exercises AMM arithmetic and
+exact token-pool lovelace handling. Before enabling the bootstrap on Preprod,
+add transaction-level cases for owner cancellation, unauthorized acceptance,
+wrong pair/reserve/buffer, wrong pool ID, wrong LP split, missing offer input,
+and legacy-deployment rejection. These checks do not replace a network
+submission test with real UTxOs, min-UTxO values, wallet signing, datum
+encoding, and the target network ledger behavior.
 
 ## 12. Important operational boundaries
 

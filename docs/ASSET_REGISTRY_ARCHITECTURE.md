@@ -1,5 +1,10 @@
 # Asset Registry Architecture
 
+> Status: proposed sharded-registry architecture. The current basic registry is
+> a single authenticated UTxO, and current shared-pool validators do not yet
+> consume either registry form as a reference input. See
+> [Asset registry](ASSET_REGISTRY.md) for the implemented boundary.
+
 ## Decision
 
 Use a **sharded on-chain registry**: multiple authenticated registry UTxOs, each containing a bounded list of supported assets in its inline datum.

@@ -1,24 +1,78 @@
 # CSWAP production architecture
 
-## User protocols
+## Protocol boundaries
 
-- **RWA minting** (`contracts/minter`, `/mint`) creates uniquely seeded native assets.
-- **Fraction vaults** (`ft_policy.ak`, `vault.ak`, `/fractionalize`) lock one original RWA and issue its fixed fraction supply. Normal combine burns the entire supply. Emergency recovery burns an available partial supply, requires the team recovery signature, and always returns the RWA to the owner recorded at vault creation. Unburned fractions become non-redeemable and must be removed from supported venues.
-- **P2P marketplace** (`p2p_listing_simple.ak`, `/marketplace`) lets owners choose direct escrow terms.
-- **Fraction DEX** (`contracts/dex`, `/dex`) provides create, destroy, add liquidity, remove liquidity, and swaps in both directions.
+CSWAP has three separate on-chain systems. Their assets, price authority, LP tokens, and deployment records must never be conflated.
 
-## Team-operated instant settlement
+| System | User surface | Price authority | State model |
+| --- | --- | --- | --- |
+| Fractionalization | `/mint`, `/fractionalize` | None | A vault holds one original asset while a fixed FT supply circulates. |
+| Marketplace shared pool | `/marketplace`, `/team`, `/reserves` | Team batcher sets bid and resale ask | A quote pool holds settlement cash, LP supply, protected reserve, and inventory value. |
+| Fraction DEX | `/dex` | AMM reserve ratio | A factory authenticates many pool UTxOs at one shared AMM address. |
 
-- **Exact-asset registry** (`asset_registry.ak`, `/registry`) is the on-chain allowlist. Entries are complete asset units, not policy-only approvals.
-- **Shared quote pool** (`quote_pool.ak`, `/reserves`) holds settlement cash and issues LP shares, with a protected minimum reserve.
-- **Sell requests** (`pool_sell_request.ak`, `/marketplace`) escrow assets with a cancellable minimum payout.
-- **Team console** (`/team`) verifies the connected key against the batcher key, admits only registered assets, chooses the actual buy price and inventory ask, pays the seller, and creates receipt-bound inventory atomically.
-- Any user may buy pool inventory at the team-set ask. Payment returns to the pool and the inventory receipt burns atomically.
+## Marketplace and shared-pool settlement
 
-The team controls prices for the shared instant-sell service. Direct P2P sellers retain control of their own listing terms.
+The Marketplace has two intentionally distinct seller experiences:
 
-## Deployment
+1. **Direct listing.** The seller escrows an exact asset and selects its fixed public price. A buyer pays that price directly to the seller.
+2. **Instant Sell.** The seller escrows an exact asset with a cancellable minimum payout. The asset is not publicly purchasable until the authorized batcher accepts it from the shared pool.
 
-`marketplace-deployment.preprod.json` is the public Preprod manifest consumed by the UI. `scripts/marketplace-preprod.mjs` atomically deploys the registry and pool, funds liquidity, and registers exact assets. Seed phrases and provider credentials remain operator secrets in `.env.local`; they must never enter client bundles or source control.
+The shared-pool path is a quoted settlement service, not an AMM:
 
-Production should run the batcher through an isolated signer with monitoring, idempotent transaction retries, registry audit logs, and multisig controls for admin and recovery roles.
+```text
+seller -> pool-sell request -> batcher settlement -> pool-owned inventory -> buyer
+                                      |                    |
+                                      +-- cash debit        +-- cash return on sale
+```
+
+The Team console reads the exact-asset registry before it builds an Instant Sell settlement, while direct listings remain registry-free. The current `quote_pool` and `pool_sell_request` validators do not consume a registry reference, so registry admission is a fail-closed client/operator control rather than an on-chain settlement guarantee. The batcher pays at least the seller minimum, chooses the actual bid and inventory ask, and mints one inventory receipt. The receipt and `inventory_value` bind the pool-owned listing to the pool. A later buyer burns that receipt and returns the listing payment to the pool.
+
+The quote-pool datum tracks the quote asset, total LP supply, protected minimum cash reserve, paused state, and aggregate ask value of open inventory. LP add, remove, and close are blocked while `inventory_value != 0`; this avoids changing LP claims while assets already purchased by the pool remain for sale.
+
+### Team roles and UI
+
+| Role | On-chain authority | Primary UI |
+| --- | --- | --- |
+| Registry administrator | Approves or revokes exact asset units used by the Team admission check | `/registry` |
+| Batcher | Settles Instant Sell requests and sets the pool resale ask | `/team` pricing queue |
+| Liquidity provider | Adds quote reserve or burns LP tokens for allowed withdrawals | `/team` or `/reserves` |
+| Marketplace user | Creates/cancels direct listings or Instant Sell requests; buys inventory | `/marketplace` |
+
+The Team console is an operator workspace, not an unrestricted admin override. The connected payment key must satisfy the batcher/admin conditions enforced by the transaction builders and validators. It displays pool cash, cash available above the protected reserve, open inventory value, and LP supply so pricing decisions have context.
+
+## Fraction DEX
+
+The DEX is a constant-product AMM separate from the shared quote pool. A factory-state NFT identifies a `FactoryDatum` containing the admin, deterministic pool-NFT policy, next pool ID, and paused flag. Each pool has a unique pool NFT and LP asset name but lives at the same `amm_pool` script address.
+
+### Standard admin creation
+
+The factory administrator can consume factory state with `Advance`, mint the next pool NFT and initial LP supply, and create a tADA/FT pool. This remains the regular controlled pool-creation route.
+
+### Interim two-party FT bootstrap
+
+The FT owner creates a `BootstrapOfferDatum` and locks:
+
+- the exact FT unit and quantity;
+- quote asset and final reserve: tADA or USDCx;
+- required ADA buffer for the escrow/pool UTxO;
+- owner LP share in basis points.
+
+A different LP address accepts. One transaction consumes the offer and factory state using `AdvanceBootstrap`, creates the deterministic AMM UTxO, mints the pool NFT and complete LP supply, and pays the fixed LP allocations to the owner and provider. The owner can cancel an unaccepted offer with its stored payment-key signature. The script enforces distinct addresses, not distinct legal identities.
+
+For a tADA pair, the owner buffer forms part of the final ADA reserve and the LP supplies the difference. For a USDCx/FT pair, the owner supplies the fixed ADA buffer while the LP supplies the full USDCx reserve. Token/token pools preserve that fixed ADA buffer across swaps, liquidity changes, and closure.
+
+`AdvanceBootstrap` does not need the factory-admin signature, but it is only valid alongside an input at the configured bootstrap-offer validator; that validator independently binds the asset pair, reserves, pool identity, and LP split.
+
+## Deployment and migration
+
+Marketplace and DEX deployments have independent public manifests. A manifest contains public addresses, policy IDs, and transaction identifiers; it must never contain wallet seeds, Blockfrost secrets, or batcher private keys.
+
+The two-party bootstrap changed the `factory_state` validator parameterization and factory-state action encoding. A deployed factory cannot be modified in place. A new Preprod deployment must be created with the reviewed blueprint and a manifest containing `bootstrapOfferAddress`. The UI rejects a legacy deployment rather than constructing a transaction against mismatched validators.
+
+## Operational controls
+
+- Use separate keys for registry admin, batcher, LP provider, factory admin, and recovery authority.
+- Re-read mutable UTxOs immediately before signing; a pool or factory transaction built from a stale input must be rebuilt.
+- Archive the submitted transaction hash, input references, expected datum transition, signer role, and source/approval for every operator price change.
+- Do not place signing secrets in client-side configuration or browser storage.
+- The contracts are not audited. Require transaction-level Preprod testing and independent review before mainnet or real-value use.

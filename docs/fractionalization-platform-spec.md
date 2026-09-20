@@ -8,6 +8,14 @@
 | **Target chain** | Cardano, Plutus V3 |
 | **Audience** | Engineering, security review, external audit |
 
+> **Implementation status — September 2026:** This remains a design draft, not
+> a deployment specification. The current source of truth for implemented
+> contracts is [Production architecture](PRODUCTION_ARCHITECTURE.md),
+> [Contract guide](CONTRACTS_GUIDE.md), and the DEX contract guides. In
+> particular, the repository contains an interim direct shared-address AMM and
+> two-party FT bootstrap that targets Preprod; it does not yet implement the order-batched
+> DEX described in §9.2–§9.4. No mainnet or audit readiness is implied.
+
 ---
 
 ## 1. Scope
@@ -93,6 +101,11 @@ Fraction tokens are plain native assets. They can trade on Minswap, SundaeSwap, 
 | **Build own DEX** (§9) | Months, plus batcher ops and a fresh audit of the highest-risk component in the system | Only if NAV-aware pricing, index-vault-specific mechanics, or bonding-curve launches are core to the product thesis. |
 
 **Recommendation:** Route to an existing DEX for v1. Specify our own DEX (§9) as v2, gated on demonstrated volume. §9 is written as a full specification so the option stays open, but it should not be built first.
+
+**Implementation note:** an interim own-DEX contract path now exists in source and
+targets Preprod: a shared-address AMM plus an FT-owner/LP bootstrap offer. It is not the batched
+architecture specified below and does not close D3 for mainnet. See
+[DEX architecture](../contracts/dex/docs/ARCHITECTURE.md).
 
 ### D4 — Royalty enforcement
 
@@ -429,7 +442,14 @@ Publishing listings in a format that existing storefronts index means platform a
 
 ## 9. Component: DEX for Fractions
 
-**Gated on D3.** Specified fully so the option remains open; recommended for v2, not v1.
+**Gated on D3.** The design below describes the proposed order-then-batch
+architecture, not the current interim implementation targeting Preprod. That path
+is a direct shared-address AMM with a two-party bootstrap offer: the FT owner
+locks the FT and terms, then a distinct LP provides tADA or USDCx to atomically
+create the pool and split initial LP tokens. It is documented in the
+[DEX architecture](../contracts/dex/docs/ARCHITECTURE.md).
+
+The order-then-batch design remains recommended for a production volume target.
 
 ### 9.1 The eUTxO contention problem
 
@@ -611,7 +631,7 @@ Test coverage of failure paths matters more than coverage of success paths. A va
 | **P3** | Buyout (§7) | MUST ship with or before P2 reaches meaningful volume — see S2 |
 | **P4** | Route fractions to an existing DEX (**D3**) | Trading capability at a fraction of the cost of building |
 | **P5** | NAV/spread surfacing (§10.3) | Differentiated feature, no new on-chain risk |
-| **P6** | Own DEX (§9) — conditional | Only on demonstrated volume |
+| **P6** | Production own DEX (§9) — conditional | The interim AMM/bootstrap does not satisfy batcher, audit, or mainnet requirements |
 | **P7** | Index vaults (§6.5, **D1**) — conditional | Only if per-asset liquidity proves inadequate |
 
 P3 is not optional and must not be deferred past P2's growth. Shipping fractionalization without a forced exit path creates permanently stranded assets and an unfixable support burden.
@@ -624,7 +644,7 @@ P3 is not optional and must not be deferred past P2's growth. Shipping fractiona
 |---|---|---|---|---|
 | D1 | Vault topology | Datum-discriminated; launch per-asset | Product | Open |
 | D2 | Forced exit mechanism | Buyout auction | Product / Legal | Open |
-| D3 | Build vs. route DEX | Route in v1 | Engineering / Product | Open |
+| D3 | Build vs. route DEX | Route in v1; evaluate the interim own DEX separately | Engineering / Product | Implementation complete; Preprod deployment pending |
 | D4 | Royalty enforcement | Enforce on own policies only | Product | Open |
 | D5 | Transfer restrictions | Legal opinion required before FT policy freeze | Legal | **Blocking** |
 

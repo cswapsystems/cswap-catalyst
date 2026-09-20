@@ -36,15 +36,17 @@ async function context() {
   return { lucid, walletAddress, admin: admin.hash, code: await blueprint() };
 }
 function scripts(code, admin, factoryToken) {
-  const factoryState = { type: "PlutusV3", script: applyParamsToScript(code["factory_state.factory_state.spend"], [admin]) };
+  const bootstrapOffer = { type: "PlutusV3", script: code["bootstrap_offer.bootstrap_offer.spend"] };
+  const bootstrapOfferAddress = validatorToAddress(NETWORK, bootstrapOffer);
+  const factoryState = { type: "PlutusV3", script: applyParamsToScript(code["factory_state.factory_state.spend"], [admin, addressData(bootstrapOfferAddress)]) };
   const factoryAddress = validatorToAddress(NETWORK, factoryState);
-  if (!factoryToken) return { factoryState, factoryAddress };
+  if (!factoryToken) return { factoryState, factoryAddress, bootstrapOffer, bootstrapOfferAddress };
   const amm = { type: "PlutusV3", script: applyParamsToScript(code["amm_pool.amm_pool.spend"], [assetData(factoryToken)]) };
   const ammAddress = validatorToAddress(NETWORK, amm);
   const lp = { type: "PlutusV3", script: applyParamsToScript(code["lp_policy.lp_policy.mint"], [assetData(factoryToken), addressData(ammAddress)]) };
   const lpPolicyId = mintingPolicyToId(lp);
   const poolFactory = { type: "PlutusV3", script: applyParamsToScript(code["pool_factory.pool_factory.mint"], [assetData(factoryToken), addressData(ammAddress), lpPolicyId]) };
-  return { factoryState, factoryAddress, amm, ammAddress, lp, lpPolicyId, poolFactory, poolPolicyId: mintingPolicyToId(poolFactory) };
+  return { factoryState, factoryAddress, bootstrapOffer, bootstrapOfferAddress, amm, ammAddress, lp, lpPolicyId, poolFactory, poolPolicyId: mintingPolicyToId(poolFactory) };
 }
 async function deploy(replace = false) {
   const existing = await readFile(DEPLOYMENT_FILE, "utf8").then(JSON.parse).catch(() => null);
@@ -59,7 +61,7 @@ async function deploy(replace = false) {
   const factoryToken = asset(mintingPolicyToId(bootstrap), tokenName);
   const derived = scripts(code, admin, factoryToken);
   const datum = new Constr(0, [assetData(factoryToken), admin, derived.poolPolicyId, 0n, new Constr(0, [])]);
-  const deployment = { network: "preprod", admin, factoryToken: unit(factoryToken), factoryAddress: derived.factoryAddress, ammAddress: derived.ammAddress, lpPolicyId: derived.lpPolicyId, poolPolicyId: derived.poolPolicyId, transaction: null, ...(replace && existing ? { supersedes: existing } : {}) };
+  const deployment = { network: "preprod", admin, factoryToken: unit(factoryToken), factoryAddress: derived.factoryAddress, ammAddress: derived.ammAddress, lpPolicyId: derived.lpPolicyId, poolPolicyId: derived.poolPolicyId, bootstrapOfferAddress: derived.bootstrapOfferAddress, transaction: null, ...(replace && existing ? { supersedes: existing } : {}) };
   await writeFile(DEPLOYMENT_FILE, JSON.stringify(deployment, null, 2) + "\n", "utf8");
   console.log("Building factory bootstrap transaction...");
   const tx = await lucid.newTx().collectFrom([seed]).mintAssets({ [unit(factoryToken)]: 1n }, Data.to(new Constr(0, []))).attach.MintingPolicy(bootstrap).pay.ToContract(derived.factoryAddress, { kind: "inline", value: Data.to(datum) }, { lovelace: 5_000_000n, [unit(factoryToken)]: 1n }).addSigner(walletAddress).complete();

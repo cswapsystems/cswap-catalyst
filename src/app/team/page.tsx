@@ -1,3 +1,3 @@
-import TeamWorkbench from "../_components/team-workbench";
+import TeamConsole from "../_components/team-console";
 
-export default function TeamPage() { return <TeamWorkbench />; }
+export default function TeamPage() { return <TeamConsole />; }

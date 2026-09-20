@@ -11,7 +11,8 @@ This design keeps the AMM address stable while the factory provides authenticate
 | Component | Parameter(s) | Responsibility |
 | --- | --- | --- |
 | `factory_bootstrap` | seed output reference, factory-state address, factory token name | One-time policy that mints the factory-state NFT only while consuming the selected seed UTxO. |
-| `factory_state` | admin verification-key hash | Holds `FactoryDatum`; authorizes and advances the pool sequence. |
+| `factory_state` | admin verification-key hash, bootstrap-offer address | Holds `FactoryDatum`; authorizes normal advances and permits a validated two-party bootstrap advance. |
+| `bootstrap_offer` | none | Escrows an FT owner’s exact contribution and fixed pool terms until a distinct LP accepts or the owner cancels. |
 | `amm_pool` | factory-state NFT | Shared spending validator for every pool. |
 | `lp_policy` | factory-state NFT, shared AMM address | Mints/burns each pool’s LP supply only for valid AMM transitions. |
 | `pool_factory` | factory-state NFT, shared AMM address, LP policy ID | Mints/burns pool NFTs for valid create/close flows. |
@@ -21,12 +22,13 @@ All scripts are Plutus V3 and are emitted in `plutus.json` by `aiken build`.
 ## Script derivation and deployment order
 
 1. Select a funded, wallet-owned seed UTxO.
-2. Derive `factory_state(admin)` and its script address.
-3. Derive `factory_bootstrap(seed, factory_state_address, token_name)`. Its policy ID plus the token name is the factory-state NFT.
-4. Derive `amm_pool(factory_state_nft)` once. Its address is the single address for every pool in this deployment.
-5. Derive `lp_policy(factory_state_nft, amm_address)` and obtain its policy ID.
-6. Derive `pool_factory(factory_state_nft, amm_address, lp_policy_id)` and obtain its policy ID.
-7. Mint the factory NFT with `factory_bootstrap` and place it in a `factory_state` UTxO with an inline `FactoryDatum`.
+2. Derive the unparameterized `bootstrap_offer` address.
+3. Derive `factory_state(admin, bootstrap_offer_address)` and its script address.
+4. Derive `factory_bootstrap(seed, factory_state_address, token_name)`. Its policy ID plus the token name is the factory-state NFT.
+5. Derive `amm_pool(factory_state_nft)` once. Its address is the single address for every pool in this deployment.
+6. Derive `lp_policy(factory_state_nft, amm_address)` and obtain its policy ID.
+7. Derive `pool_factory(factory_state_nft, amm_address, lp_policy_id)` and obtain its policy ID.
+8. Mint the factory NFT with `factory_bootstrap` and place it in a `factory_state` UTxO with an inline `FactoryDatum`.
 
 The bootstrap seed is consumed exactly once. Changing the seed, admin, factory-token name, or blueprint changes the derived deployment identifiers.
 
@@ -52,6 +54,13 @@ PoolDatum {
   total_liquidity,
   pool_lovelace,
 }
+
+BootstrapOfferDatum {
+  owner, owner_key, factory_token,
+  fraction_asset, fraction_amount,
+  quote_asset, quote_amount,
+  pool_lovelace, owner_share_bps,
+}
 ```
 
 The NFT and LP asset names are the 8-byte big-endian representation of `next_pool_id`. A creation transaction advances this counter exactly once and mints exactly one matching pool NFT.
@@ -72,6 +81,14 @@ The bootstrap policy requires the chosen seed input, exactly one factory NFT, an
 ### Create pool
 
 The transaction consumes the factory-state UTxO with `Advance`, carries its factory NFT to exactly one successor, increments `next_pool_id`, mints one pool NFT, mints initial LP supply, and creates one valid pool output at the shared AMM address. The state validator, pool-factory policy, and LP policy independently verify the same transition.
+
+### Two-party FT bootstrap
+
+An FT owner can lock the fraction asset and exact pool terms in `BootstrapOfferDatum`: the tADA or USDCx quote asset and final reserve, ADA buffer, and basis-point LP split. A different liquidity-provider address accepts with `AcceptBootstrap`. The single transaction consumes both the offer and factory state with `AdvanceBootstrap`, creates the deterministic pool UTxO, mints its pool NFT and full LP supply, and pays each party its declared LP allocation.
+
+For tADA/FT, the owner buffer is part of the final ADA reserve and the provider funds the remaining ADA. For USDCx/FT, the owner locks the exact ADA buffer while the provider funds the full USDCx reserve. Initial supply is `floor(sqrt(quote_reserve * FT_reserve))`; the owner receives `floor(total_lp * owner_share_bps / 10_000)` and the provider receives the remainder.
+
+The owner may cancel an unaccepted offer only with the stored payment-key signature. `AdvanceBootstrap` is allowed without the factory-admin signature only when an offer input at the configured validator address is spent; the offer validator independently enforces the pair, reserves, pool ID, buffer, and allocation.
 
 ### Swap
 
@@ -100,12 +117,13 @@ A transaction builder must:
 - encode asset names as bytes, not display text;
 - use inline datum encodings matching the blueprint;
 - include the factory state as a reference input for AMM/LP operations;
-- consume it, attach `factory_state`, and include the admin signer when creating a pool;
+- consume it, attach `factory_state`, and include the admin signer for a normal `Advance` pool creation;
+- for a two-party bootstrap, consume the matching offer and factory state with `AdvanceBootstrap`, attach both spending validators and both minting policies, ensure the provider funds the fixed quote side, and pay the exact initial LP split;
 - attach both minting policies for pool creation and closure;
 - update `pool_lovelace` with the ADA reserve for ADA pools, or calculate the complete output's required min-UTxO lovelace for token/token pools;
 - select fresh UTxOs after each confirmed factory advance.
 
-The companion `ebecca-dex-console` implements these flows and vendors the built `plutus.json`.
+The web DEX workbench implements these flows and derives its scripts from the built `plutus.json`. A factory created before `bootstrap_offer` was introduced cannot be migrated in place: redeploy it and update the deployment record before enabling the two-party UI.
 
 ## Validation and security
 
@@ -116,5 +134,7 @@ aiken fmt .
 aiken check --deny .
 aiken build --out plutus.json .
 ```
+
+The current Aiken unit suite exercises AMM arithmetic and exact token-pool value handling. Add full transaction-level bootstrap cases for owner cancellation, wrong pair/reserve/buffer, wrong pool ID, wrong LP allocation, unauthorized factory advance, and a legacy deployment record before enabling the flow on Preprod.
 
 This repository is not audited production code. Before real-value use, arrange independent audit, network-specific min-UTxO testing, key-management controls for the admin, monitoring for factory state/pool UTxOs, and a documented emergency pause/close process.

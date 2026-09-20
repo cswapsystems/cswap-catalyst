@@ -12,7 +12,8 @@ Detailed design, validator invariants, deployment sequencing, and operator guida
 | Validator | Role |
 | --- | --- |
 | `factory_bootstrap` | One-shot policy that consumes a deployment seed and mints the permanent factory-state NFT. |
-| `factory_state` | Holds the factory configuration, pool sequence, pause flag, and admin. It is consumed only to create a pool and read as a reference input for normal operations. |
+| `factory_state` | Holds the factory configuration, pool sequence, pause flag, and admin. Normal creation is admin-signed; a matching bootstrap offer enables the constrained `AdvanceBootstrap` path. |
+| `bootstrap_offer` | Escrows an FT owner’s exact contribution and immutable pair terms until a distinct LP accepts or the owner cancels. |
 | `amm_pool` | The one shared address for every pool. Validates swaps, proportional LP updates, and controlled full closure. |
 | `lp_policy` | One shared LP policy. Each pool’s LP asset name is its deterministic pool ID. |
 | `pool_factory` | One shared pool-NFT policy. It mints exactly one deterministic NFT for each factory-state advance. |
@@ -38,23 +39,25 @@ cannot be trapped in or extracted from a pool.
 
 ## Lifecycle
 
-1. Choose and fund one seed UTxO, then derive `factory_bootstrap` with that
-   seed, the `factory_state` address, and a fixed factory-token name.
-2. Derive the bootstrap policy ID. This gives the `factory_state_token`.
-3. Derive `amm_pool(factory_state_token)` once. This is the address shared by
+1. Derive the unparameterized `bootstrap_offer` address.
+2. Derive `factory_state(admin, bootstrap_offer_address)`, then derive
+   `factory_bootstrap` with that address, a funded seed UTxO, and a fixed
+   factory-token name.
+3. Derive the bootstrap policy ID. This gives the `factory_state_token`.
+4. Derive `amm_pool(factory_state_token)` once. This is the address shared by
    all pools.
-4. Derive `lp_policy(factory_state_token, amm_address)`, then derive
+5. Derive `lp_policy(factory_state_token, amm_address)`, then derive
    `pool_factory(factory_state_token, amm_address, lp_policy_id)`.
-5. Mint the factory-state NFT with `factory_bootstrap`, creating a
+6. Mint the factory-state NFT with `factory_bootstrap`, creating a
    `FactoryDatum` that records the pool-factory policy ID, admin key hash,
    `next_pool_id`, and pause state.
-6. Create a pool by consuming the factory-state UTxO with `Advance` while
-   minting the pool NFT and bootstrap LP supply. The pool NFT and LP token use
-   the 8-byte big-endian encoding of `next_pool_id` as their asset name.
+7. Create a standard admin pool with `Advance`, or create a two-party pool
+   with an accepted `BootstrapOfferDatum` and `AdvanceBootstrap`. Pool NFTs
+   and LP tokens use the 8-byte big-endian `next_pool_id` asset name.
 
-The initial-pool transaction is checked independently by `factory_state`,
+Every initial-pool transaction is checked independently by `factory_state`,
 `pool_factory`, and `lp_policy`, and must create a complete pool UTxO at the
-single AMM address.
+single AMM address. A two-party creation is also checked by `bootstrap_offer`.
 
 ## Operations
 
@@ -91,6 +94,8 @@ the full lifecycle:
 
 ```sh
 npm run dex:preprod -- status
+npm run dex:preprod -- deploy
+npm run dex:preprod -- redeploy
 npm run dex:preprod -- pool <fraction-unit>
 npm run dex:preprod -- collateral
 npm run dex:preprod -- create <fraction-unit> <lovelace> <fraction-units>
@@ -103,12 +108,49 @@ npm run dex:preprod -- close <fraction-unit>
 
 The public deployment addresses and confirmed lifecycle transaction IDs are
 recorded in `dex-deployment.preprod.json`; it contains no signing material.
-The `/dex` UI derives the same scripts from that deployment, reads live pools,
-and signs create, destroy, add, remove, and two-way swap transactions with the
-connected Eternl wallet.
+The admin script commands create and operate tADA/FT pools. The `/dex` UI derives the same scripts from the deployment record, reads live pools, signs normal operations with Eternl, and presents the two-party tADA/FT or USDCx/FT bootstrap flow. The deployment record must include `bootstrapOfferAddress` before the UI will enable it.
 
 ## Security boundary
 
 This is not audited production code. A deployment should have independent
 review, transaction-level integration tests, min-UTxO checks for the selected
 network, and an operational policy for the factory-admin key.
+
+## Two-party FT pool bootstrap
+
+The interim bootstrap path lets an FT owner and a separate liquidity provider
+launch a pair without handing either side to the other. The owner submits a
+`BootstrapOfferDatum` that locks the exact FT quantity and required ADA buffer.
+It also fixes the quote asset (tADA or USDCx), final quote reserve, and initial
+LP-share split in basis points. The contract requires a different provider
+address, but cannot establish that two addresses are controlled by different
+people; the owner may cancel until an acceptance transaction confirms.
+
+A provider accepts the offer in one transaction. It must create the matching
+AMM UTxO, advance the factory sequence, mint the matching pool NFT and every
+initial LP token, then pay the owner and provider their declared allocations.
+Initial LP supply is `floor(sqrt(quote_reserve * FT_reserve))`; the owner share
+is `floor(total_lp * owner_share_bps / 10_000)` and the provider receives the
+remainder. The offer validator rejects a different asset pair, reserve, ADA
+buffer, pool identity, or LP allocation. The owner can cancel an unaccepted
+offer with the owner payment-key signature.
+
+| Quote pair | FT owner locks | LP provider supplies |
+| --- | --- | --- |
+| tADA / FT | FT amount and ADA buffer | Final ADA reserve minus the locked buffer |
+| USDCx / FT | FT amount and the fixed pool ADA buffer | Full USDCx reserve |
+
+For a token/token pool, `pool_lovelace` remains the fixed ADA buffer through
+swaps, liquidity updates, and closure; it is not the USDCx reserve.
+
+factory_state keeps its admin signature requirement for normal Advance and
+SetPaused operations. Its AdvanceBootstrap branch is permissionless only when
+the transaction spends the shared bootstrap_offer validator. This makes the
+LP-provider flow usable from a normal wallet while retaining the factory admin
+boundary for ordinary pool creation and pausing.
+
+This changes the deployed factory-state validator, its address derivation, and
+its redeemer encoding. Build the contracts, review the new deployment record,
+and run `npm run dex:preprod -- redeploy` on Preprod before using this UI. The
+record must include `bootstrapOfferAddress`. Never use the new UI against a
+legacy factory; it cannot be upgraded in place.

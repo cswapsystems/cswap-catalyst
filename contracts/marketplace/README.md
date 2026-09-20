@@ -259,6 +259,25 @@ shared pool address. A seller locks an exact RWA asset and a minimum payout in
 that request rather than creating a publicly purchasable listing. The pool
 batcher later consumes the request together with the pool, pays at least the
 minimum, and creates the pool-owned inventory listing. The seller can cancel
-the request with its payment key. Batchers must be operated as a separate
-signing service; do not expose the batcher private key in a Next.js public
-environment variable or browser bundle.
+the request with its payment key.
+
+## Current application workflows
+
+The `/marketplace` seller control exposes both contract paths:
+
+- **List at my price** creates a public `Direct` listing.
+- **Instant sell to pool** creates a `pool_sell_request` with a seller-selected
+  minimum payout; it remains pending until the batcher settles or the seller
+  cancels.
+
+The `/team` console reads shared-pool cash, protected reserve, inventory value,
+and LP supply before presenting the instant-sell pricing queue and reserve
+controls. It also reads the exact-asset registry and fails closed for an
+unapproved request, but current shared-pool validators do not authenticate that
+registry reference. Batcher settlement still requires the configured batcher
+signer. An operator may connect that authorized wallet through the console or
+use a separate signing service, but the private key must never appear in
+browser storage, a client bundle, or a `NEXT_PUBLIC_` variable.
+
+See [Shared-pool Marketplace operations](../../docs/SHARED_POOL_OPERATIONS.md)
+for the operational sequence, reconciliation checks, and failure handling.

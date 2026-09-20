@@ -1,5 +1,10 @@
 # Operator Runbook: RWA / USDM Pool
 
+> Scope: this is the legacy oracle-priced RWA/USDM pool runbook. It does not
+> describe the registry-free shared quote pool surfaced by `/marketplace`,
+> `/team`, and `/reserves`. For that current flow, use
+> [Shared-pool Marketplace operations](../../docs/SHARED_POOL_OPERATIONS.md).
+
 This procedure is for the current single-pool MVP: one RWA policy/product
 bucket, USDM settlement, one registry UTxO, one oracle UTxO, and one pool UTxO.
 The pool is an oracle-priced inventory pool, not an AMM: sellers deposit RWA

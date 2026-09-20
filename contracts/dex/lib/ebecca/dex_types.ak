@@ -48,6 +48,8 @@ pub type PoolAction {
 
 pub type FactoryStateAction {
   Advance
+  /// Permissionless only when the factory also consumes bootstrap_offer.
+  AdvanceBootstrap
   SetPaused { paused: Bool }
 }
 
@@ -65,4 +67,27 @@ pub type LpAction {
   MintLp { pool_nft: AssetId }
   BurnLp { pool_nft: AssetId }
   CloseLp { pool_nft: AssetId }
+}
+
+/// An FT owner's invitation to bootstrap an AMM pool with a second liquidity
+/// provider. pool_lovelace is the exact ADA buffer locked with the FT. For ADA
+/// pairs it is part of the final ADA reserve; for token/token pairs it is the
+/// final pool UTxO's min-ADA buffer.
+pub type BootstrapOfferDatum {
+  BootstrapOfferDatum {
+    owner: Address,
+    owner_key: VerificationKeyHash,
+    factory_token: AssetId,
+    fraction_asset: AssetId,
+    fraction_amount: Int,
+    quote_asset: AssetId,
+    quote_amount: Int,
+    pool_lovelace: Int,
+    owner_share_bps: Int,
+  }
+}
+
+pub type BootstrapOfferAction {
+  AcceptBootstrap { liquidity_provider: Address }
+  CancelBootstrap
 }

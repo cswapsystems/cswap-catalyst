@@ -57,9 +57,10 @@ verification is not implemented in this basic version.
 
 The marketplace checkbox filters exact registered asset IDs at the time of the
 last successful refresh. It fails closed when registry reads fail. This is a
-browsing filter; the existing registry-free orderbook validator still permits
-unregistered listings and trades. Other applications can consume the registry
-UTxO as a reference input and enforce membership on-chain in future changes.
+browsing and Team-admission filter; the existing registry-free orderbook and
+current shared-pool settlement validators still permit unregistered assets at
+the validator level. Other applications can consume the registry UTxO as a
+reference input and enforce membership on-chain in future changes.
 
 ## Preprod deployment
 
