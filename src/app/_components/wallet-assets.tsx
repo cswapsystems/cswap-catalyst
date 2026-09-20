@@ -12,6 +12,9 @@ import { useWallet } from "./wallet-context";
 type LoadResult = { owner: string; wallet: LucidEvolution; revision: number; holdings: WalletHoldings | null; error: string };
 type AssetAttachment = { label: string; href: string };
 type AssetPreview = { image: string | null; description: string; facts: { label: string; value: string }[]; attachments: AssetAttachment[] };
+type DataConstr = { index: number; fields: unknown[] };
+type FractionVaultLink = { originalUnit: string; totalFractions: bigint; vaultAddress: string };
+type FractionAsset = { asset: WalletAsset; link: FractionVaultLink };
 
 function metadataText(value: unknown): string {
   return Array.isArray(value) ? value.filter((part): part is string => typeof part === "string").join("") : typeof value === "string" ? value : "";
@@ -45,6 +48,59 @@ function addressData(tools: typeof import("@lucid-evolution/lucid"), address: st
   return tools.Data.from(tools.Data.to({ addressCredential: payment, addressStakingCredential: staking } as never, tools.AddressSchema as never));
 }
 
+function asConstr(value: unknown): DataConstr {
+  if (typeof value !== "object" || value === null || !("index" in value) || !("fields" in value)) throw new Error("Malformed vault datum.");
+  const candidate = value as { index: unknown; fields: unknown };
+  if (typeof candidate.index !== "number" || !Array.isArray(candidate.fields)) throw new Error("Malformed vault datum.");
+  return { index: candidate.index, fields: candidate.fields };
+}
+
+async function loadFractionVaultLinks(lucid: LucidEvolution): Promise<Map<string, FractionVaultLink>> {
+  const response = await fetch("/api/fractionalize-blueprint", { cache: "no-store" });
+  const blueprint = await response.json() as { vaultCompiledCode?: string; error?: string };
+  if (!response.ok || !blueprint.vaultCompiledCode) throw new Error(blueprint.error ?? "Fractionalization validator unavailable.");
+  const tools = await import("@lucid-evolution/lucid");
+  const network = process.env.NEXT_PUBLIC_CARDANO_NETWORK === "mainnet" ? "Mainnet" as const : "Preprod" as const;
+  const vaultAddress = tools.validatorToAddress(network, { type: "PlutusV3", script: blueprint.vaultCompiledCode });
+  const links = new Map<string, FractionVaultLink>();
+  for (const utxo of await lucid.utxosAt(vaultAddress)) {
+    if (!utxo.datum) continue;
+    try {
+      const root = asConstr(tools.Data.from(utxo.datum));
+      if (root.index !== 0 || root.fields.length !== 8 || typeof root.fields[2] !== "string" || typeof root.fields[3] !== "string" || typeof root.fields[4] !== "string" || typeof root.fields[5] !== "string" || typeof root.fields[6] !== "bigint") continue;
+      links.set(root.fields[4] + root.fields[5], { originalUnit: root.fields[2] + root.fields[3], totalFractions: root.fields[6], vaultAddress });
+    } catch {
+      // Ignore unrelated or legacy outputs at the vault address.
+    }
+  }
+  return links;
+}
+
+function formatTokenQuantity(quantity: bigint): string { return new Intl.NumberFormat("en-US").format(quantity); }
+
+function WalletAssetRow({ asset, preview, fractionLink, onList }: { asset: WalletAsset; preview?: AssetPreview; fractionLink?: FractionVaultLink; onList: (asset: WalletAsset) => void }) {
+  return <li className="wallet-asset-row">
+    <div className="wallet-asset-thumbnail">{preview?.image ? <Image src={preview.image} alt="" width={72} height={72} unoptimized /> : <span aria-hidden="true">RWA</span>}</div>
+    <div className="wallet-asset-info">
+      <h3>{asset.name}</h3>
+      <span>Policy ID</span>
+      <code>{asset.policyId}</code>
+      <span>Asset name (hex)</span>
+      <code>{asset.nameHex || "Empty asset name"}</code>
+      {fractionLink && <div className="wallet-fraction-origin">
+        <span>Linked through active vault</span>
+        <Link href={"/assets?asset=" + encodeURIComponent(fractionLink.originalUnit)}>View original asset ↗</Link>
+        <small>{formatTokenQuantity(fractionLink.totalFractions)} total fractions · vault <code title={fractionLink.vaultAddress}>{fractionLink.vaultAddress.slice(0, 16)}…{fractionLink.vaultAddress.slice(-10)}</code></small>
+      </div>}
+      {preview?.description && <p className="wallet-asset-description">{preview.description}</p>}
+      {preview?.facts.length ? <dl className="wallet-asset-facts">{preview.facts.map((fact) => <div key={fact.label}><dt>{fact.label}</dt><dd>{fact.value}</dd></div>)}</dl> : null}
+      {preview?.attachments.length ? <div className="wallet-asset-attachments"><span>Attachments</span>{preview.attachments.map((attachment) => <a key={attachment.href} href={attachment.href} target="_blank" rel="noreferrer">{attachment.label} ↗</a>)}</div> : null}
+    </div>
+    <div className="wallet-asset-quantity"><span>Quantity · base units</span><strong>{formatTokenQuantity(asset.quantity)}</strong></div>
+    <div className="wallet-asset-actions"><Link className="wallet-asset-inspect" href={"/assets?asset=" + asset.unit} aria-label={"Inspect " + asset.name}>Inspect asset ↗</Link>{asset.quantity === BigInt(1) && <button className="text-button" type="button" onClick={() => onList(asset)}>List</button>}</div>
+  </li>;
+}
+
 export default function WalletAssets() {
   const { lucid, address, status, error: connectionError, connect } = useWallet();
   const [revision, setRevision] = useState(0);
@@ -59,6 +115,8 @@ export default function WalletAssets() {
   const [listingSubmitting, setListingSubmitting] = useState(false);
   const [listingToast, setListingToast] = useState<string | null>(null);
   const [assetPreviews, setAssetPreviews] = useState<Record<string, AssetPreview>>({});
+  const [fractionLinks, setFractionLinks] = useState<Map<string, FractionVaultLink>>(() => new Map());
+  const [fractionLinkStatus, setFractionLinkStatus] = useState<"idle" | "loading" | "ready" | "error">("idle");
   const connected = status === "connected" && Boolean(address && lucid);
   const current = connected && result?.owner === address && result.wallet === lucid && result.revision === revision ? result : null;
   const loading = connected && !current;
@@ -68,6 +126,43 @@ export default function WalletAssets() {
     return holdings?.assets.filter((asset) => !query || asset.name.toLowerCase().includes(query) || asset.unit.includes(query)) ?? [];
   }, [holdings, search]);
   const paymentAssets = useMemo(() => holdings?.assets.filter((asset) => asset.unit !== listingAsset?.unit) ?? [], [holdings, listingAsset]);
+  const groupedAssets = useMemo(() => {
+    const originals: WalletAsset[] = [];
+    const fractions: FractionAsset[] = [];
+    for (const asset of visibleAssets) {
+      const link = fractionLinks.get(asset.unit);
+      if (link) fractions.push({ asset, link });
+      else originals.push(asset);
+    }
+    return { originals, fractions };
+  }, [fractionLinks, visibleAssets]);
+  const assetCounts = useMemo(() => {
+    const assets = holdings?.assets ?? [];
+    const fractions = assets.filter((asset) => fractionLinks.has(asset.unit)).length;
+    return { originals: assets.length - fractions, fractions };
+  }, [fractionLinks, holdings]);
+
+  useEffect(() => {
+    if (!lucid || !address || status !== "connected") {
+      setFractionLinks(new Map());
+      setFractionLinkStatus("idle");
+      return;
+    }
+    let cancelled = false;
+    setFractionLinkStatus("loading");
+    void loadFractionVaultLinks(lucid).then((links) => {
+      if (!cancelled) {
+        setFractionLinks(links);
+        setFractionLinkStatus("ready");
+      }
+    }).catch(() => {
+      if (!cancelled) {
+        setFractionLinks(new Map());
+        setFractionLinkStatus("error");
+      }
+    });
+    return () => { cancelled = true; };
+  }, [address, lucid, revision, status]);
 
   useEffect(() => {
     if (!listingToast) return;
@@ -180,22 +275,29 @@ export default function WalletAssets() {
       {loading && <p className="wallet-assets-empty" role="status">Reading assets from Eternl…</p>}
       {current?.error && <p className="form-message error-message" role="alert">{current.error}</p>}
       {holdings && <>
-        <dl className="wallet-assets-summary"><div><dt>ADA in wallet</dt><dd>{formatWalletAda(holdings.lovelace)} <span>ADA</span></dd></div><div><dt>Distinct native assets</dt><dd>{holdings.assets.length.toLocaleString("en-US")}</dd></div></dl>
-        <p className="wallet-assets-note">Balances come from the wallet’s unspent outputs. Staking rewards and assets locked in vaults or marketplace listings are not included. Token quantities are shown in base units; a balance of one does not by itself identify an NFT.</p>
+        <dl className="wallet-assets-summary">
+          <div><dt>ADA in wallet</dt><dd>{formatWalletAda(holdings.lovelace)} <span>ADA</span></dd></div>
+          <div><dt>Original assets</dt><dd>{assetCounts.originals.toLocaleString("en-US")}</dd></div>
+          <div><dt>Fraction positions</dt><dd>{assetCounts.fractions.toLocaleString("en-US")}</dd></div>
+        </dl>
+        <p className="wallet-assets-note">Balances come from the wallet’s unspent outputs. Staking rewards and assets locked in vaults or marketplace listings are not included. Fraction positions are matched to active fractionalization vaults; token quantities are shown in base units.</p>
         {holdings.assets.length > 0 && <label className="field wallet-assets-search"><span className="field-label">Search your tokens</span><input type="search" value={search} onChange={(event) => setSearch(event.target.value)} placeholder="Asset name, policy ID, or full asset ID" /></label>}
-        {holdings.assets.length === 0 ? <div className="wallet-assets-empty"><h3>{holdings.utxoCount === 0 ? "This wallet has no unspent outputs" : "No native tokens in this wallet"}</h3><p>Tokens received or minted into this wallet will appear here after the wallet updates. Use Refresh assets to check again.</p></div> : visibleAssets.length === 0 ? <p className="wallet-assets-empty">No assets match your search.</p> : <>
+        {holdings.assets.length === 0 ? <div className="wallet-assets-empty"><h3>{holdings.utxoCount === 0 ? "This wallet has no unspent outputs" : "No native tokens in this wallet"}</h3><p>Tokens received or minted into this wallet will appear here after the wallet updates. Use Refresh assets to check again.</p></div> : visibleAssets.length === 0 ? <p className="wallet-assets-empty">No assets match your search.</p> : fractionLinkStatus === "loading" ? <p className="wallet-assets-empty" role="status">Matching token positions to active fractionalization vaults…</p> : <>
           <p className="wallet-assets-count" role="status">Showing {visibleAssets.length.toLocaleString("en-US")} of {holdings.assets.length.toLocaleString("en-US")} assets</p>
-          <ul className="wallet-assets-list">{visibleAssets.map((asset) => {
-            const preview = assetPreviews[asset.unit];
-            return <li className="wallet-asset-row" key={asset.unit}>
-              <div className="wallet-asset-thumbnail">{preview?.image ? <Image src={preview.image} alt="" width={72} height={72} unoptimized /> : <span aria-hidden="true">RWA</span>}</div>
-              <div className="wallet-asset-info"><h3>{asset.name}</h3><span>Policy ID</span><code>{asset.policyId}</code><span>Asset name (hex)</span><code>{asset.nameHex || "Empty asset name"}</code>{preview?.description && <p className="wallet-asset-description">{preview.description}</p>}{preview?.facts.length ? <dl className="wallet-asset-facts">{preview.facts.map((fact) => <div key={fact.label}><dt>{fact.label}</dt><dd>{fact.value}</dd></div>)}</dl> : null}{preview?.attachments.length ? <div className="wallet-asset-attachments"><span>Attachments</span>{preview.attachments.map((attachment) => <a key={attachment.href} href={attachment.href} target="_blank" rel="noreferrer">{attachment.label} ↗</a>)}</div> : null}</div>
-              <div className="wallet-asset-quantity"><span>Quantity · base units</span><strong>{new Intl.NumberFormat("en-US").format(asset.quantity)}</strong></div>
-              <div className="wallet-asset-actions"><Link className="wallet-asset-inspect" href={"/assets?asset=" + asset.unit} aria-label={"Inspect " + asset.name}>Inspect asset ↗</Link>{asset.quantity === BigInt(1) && <button className="text-button" type="button" onClick={() => openListing(asset)}>List</button>}</div>
-            </li>;
-          })}</ul>
+          {fractionLinkStatus === "error" && <p className="wallet-assets-vault-error" role="status">Vault links are temporarily unavailable. Refresh assets to verify fractional positions.</p>}
+          <div className="wallet-assets-groups">
+            <section className="wallet-assets-group" aria-labelledby="original-assets-title">
+              <div className="wallet-assets-group-heading"><div><span className="section-kicker">Direct holdings</span><h3 id="original-assets-title">Original assets</h3><p>Assets not matched to an active fractionalization vault.</p></div><span>{groupedAssets.originals.length.toLocaleString("en-US")}</span></div>
+              {groupedAssets.originals.length ? <ul className="wallet-assets-list">{groupedAssets.originals.map((asset) => <WalletAssetRow key={asset.unit} asset={asset} preview={assetPreviews[asset.unit]} onList={openListing} />)}</ul> : <p className="wallet-assets-empty wallet-assets-list-empty">No original assets match your search.</p>}
+            </section>
+            <section className="wallet-assets-group" aria-labelledby="fraction-assets-title">
+              <div className="wallet-assets-group-heading"><div><span className="section-kicker">Vault-linked holdings</span><h3 id="fraction-assets-title">Fractions</h3><p>Fraction tokens held in this wallet, with their original asset preserved through the vault.</p></div><span>{groupedAssets.fractions.length.toLocaleString("en-US")}</span></div>
+              {groupedAssets.fractions.length ? <ul className="wallet-assets-list">{groupedAssets.fractions.map(({ asset, link }) => <WalletAssetRow key={asset.unit} asset={asset} preview={assetPreviews[asset.unit]} fractionLink={link} onList={openListing} />)}</ul> : <p className="wallet-assets-empty wallet-assets-list-empty">No fractional positions match your search.</p>}
+            </section>
+          </div>
         </>}
       </>}
+
     </section>
     {listingToast && <div className="listing-toast" role="status"><strong>Listing created</strong><span>{listingToast}</span><button type="button" onClick={() => setListingToast(null)} aria-label="Dismiss listing notification">×</button></div>}
     {listingAsset && <div className="listing-dialog-backdrop" role="presentation" onMouseDown={closeListing}><section className="listing-dialog" role="dialog" aria-modal="true" aria-labelledby="listing-dialog-title" onMouseDown={(event) => event.stopPropagation()}>

@@ -167,6 +167,23 @@ footer { width: min(1180px, calc(100% - 48px)); padding: 28px 0; margin: 0 auto;
 .wallet-assets-empty { display: grid; justify-items: start; gap: 14px; margin-top: 24px; padding: 24px; border: 1px dashed var(--line); border-radius: 8px; }
 .wallet-assets-empty h3 { font-size: 20px; font-weight: 700; }
 .wallet-assets-empty p { color: var(--muted); font-size: 16px; }
+.wallet-assets-summary { grid-template-columns: repeat(3, minmax(0, 1fr)); }
+.wallet-assets-groups { display: grid; gap: 36px; margin-top: 28px; }
+.wallet-assets-group { min-width: 0; }
+.wallet-assets-group-heading { display: flex; align-items: flex-start; justify-content: space-between; gap: 20px; padding: 0 0 15px; border-bottom: 1px solid var(--line); }
+.wallet-assets-group-heading h3 { margin: 3px 0 0; font-size: 23px; letter-spacing: -0.02em; }
+.wallet-assets-group-heading p { max-width: 580px; margin: 6px 0 0; color: var(--muted); font-size: 15px; line-height: 1.5; }
+.wallet-assets-group-heading > span { display: grid; min-width: 38px; min-height: 38px; place-items: center; border: 1px solid var(--line); border-radius: 999px; color: var(--deep-moss); font-weight: 750; }
+.wallet-assets-group .wallet-assets-list { margin: 0; }
+.wallet-assets-group .wallet-asset-row:first-child { border-top: 0; }
+.wallet-assets-list-empty { margin-top: 0; }
+.wallet-assets-vault-error { margin: 16px 0 0; padding: 12px 14px; border-left: 3px solid #b7791f; color: var(--muted); background: #fff7e4; font-size: 15px; }
+.wallet-fraction-origin { display: grid; gap: 4px; margin: 14px 0 4px; padding: 12px; border-left: 3px solid var(--lime); background: var(--green-soft); }
+.wallet-fraction-origin > span { color: var(--moss); font-size: 12px; font-weight: 750; letter-spacing: .08em; text-transform: uppercase; }
+.wallet-fraction-origin a { width: fit-content; color: var(--deep-moss); font-weight: 750; text-decoration: underline; text-underline-offset: 3px; }
+.wallet-fraction-origin small { color: var(--muted); font-size: 13px; line-height: 1.5; }
+.wallet-fraction-origin code { display: inline; margin: 0; font-size: inherit; }
+@media (max-width: 600px) { .wallet-assets-group-heading { gap: 12px; }.wallet-assets-group-heading h3 { font-size: 21px; } }
 @media (max-width: 800px) { .wallet-assets-summary { grid-template-columns: 1fr; }.wallet-asset-row { grid-template-columns: minmax(0, 1fr); gap: 14px; }.wallet-assets-board .section-heading { flex-wrap: wrap; } }
 
 /* CSWAP DEX visual system -------------------------------------------------- */
