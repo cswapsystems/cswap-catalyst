@@ -6,6 +6,7 @@ import { FormEvent, useEffect, useMemo, useState } from "react";
 import type { LucidEvolution } from "@lucid-evolution/lucid";
 import { formatWalletAda, summarizeWalletAssets, type WalletAsset, type WalletHoldings } from "@/lib/wallet-assets";
 import { marketplaceOrderbookAddress } from "@/lib/protocol/marketplace-deployment";
+import FractionalizeForm from "./fractionalize-form";
 import PlatformHeader from "./platform-header";
 import { useWallet } from "./wallet-context";
 
@@ -15,6 +16,7 @@ type AssetPreview = { image: string | null; description: string; facts: { label:
 type DataConstr = { index: number; fields: unknown[] };
 type FractionVaultLink = { originalUnit: string; totalFractions: bigint; vaultAddress: string };
 type FractionAsset = { asset: WalletAsset; link: FractionVaultLink };
+type FractionalizeAction = { mode: "split" | "combine"; originalUnit: string; assetName: string };
 
 function metadataText(value: unknown): string {
   return Array.isArray(value) ? value.filter((part): part is string => typeof part === "string").join("") : typeof value === "string" ? value : "";
@@ -78,7 +80,8 @@ async function loadFractionVaultLinks(lucid: LucidEvolution): Promise<Map<string
 
 function formatTokenQuantity(quantity: bigint): string { return new Intl.NumberFormat("en-US").format(quantity); }
 
-function WalletAssetRow({ asset, preview, fractionLink, onList }: { asset: WalletAsset; preview?: AssetPreview; fractionLink?: FractionVaultLink; onList: (asset: WalletAsset) => void }) {
+function WalletAssetRow({ asset, preview, fractionLink, onList, onFractionalize, onCombine }: { asset: WalletAsset; preview?: AssetPreview; fractionLink?: FractionVaultLink; onList: (asset: WalletAsset) => void; onFractionalize: (asset: WalletAsset) => void; onCombine: (asset: WalletAsset, link: FractionVaultLink) => void }) {
+  const canCombine = Boolean(fractionLink && asset.quantity === fractionLink.totalFractions);
   return <li className="wallet-asset-row">
     <div className="wallet-asset-thumbnail">{preview?.image ? <Image src={preview.image} alt="" width={72} height={72} unoptimized /> : <span aria-hidden="true">RWA</span>}</div>
     <div className="wallet-asset-info">
@@ -97,7 +100,14 @@ function WalletAssetRow({ asset, preview, fractionLink, onList }: { asset: Walle
       {preview?.attachments.length ? <div className="wallet-asset-attachments"><span>Attachments</span>{preview.attachments.map((attachment) => <a key={attachment.href} href={attachment.href} target="_blank" rel="noreferrer">{attachment.label} ↗</a>)}</div> : null}
     </div>
     <div className="wallet-asset-quantity"><span>Quantity · base units</span><strong>{formatTokenQuantity(asset.quantity)}</strong></div>
-    <div className="wallet-asset-actions"><Link className="wallet-asset-inspect" href={"/assets?asset=" + asset.unit} aria-label={"Inspect " + asset.name}>Inspect asset ↗</Link>{asset.quantity === BigInt(1) && <button className="text-button" type="button" onClick={() => onList(asset)}>List</button>}</div>
+    <div className="wallet-asset-actions">
+      <Link className="wallet-asset-inspect" href={"/assets?asset=" + asset.unit} aria-label={"Inspect " + asset.name}>Inspect asset ↗</Link>
+      {fractionLink ? <>
+        <button className="text-button" type="button" disabled={!canCombine} onClick={() => onCombine(asset, fractionLink)}>Combine</button>
+        <span className={"wallet-combine-threshold" + (canCombine ? " ready" : "")}>{canCombine ? "Vault threshold met — ready to combine" : formatTokenQuantity(asset.quantity) + " of " + formatTokenQuantity(fractionLink.totalFractions) + " fractions required"}</span>
+      </> : <button className="text-button" type="button" onClick={() => onFractionalize(asset)}>Fractionalize</button>}
+      {asset.quantity === BigInt(1) && <button className="text-button" type="button" onClick={() => onList(asset)}>List</button>}
+    </div>
   </li>;
 }
 
@@ -107,6 +117,7 @@ export default function WalletAssets() {
   const [result, setResult] = useState<LoadResult | null>(null);
   const [search, setSearch] = useState("");
   const [listingAsset, setListingAsset] = useState<WalletAsset | null>(null);
+  const [fractionalizeAction, setFractionalizeAction] = useState<FractionalizeAction | null>(null);
   const [listingPrice, setListingPrice] = useState("");
   const [listingPaymentUnit, setListingPaymentUnit] = useState("lovelace");
   const [listingPaymentPolicyId, setListingPaymentPolicyId] = useState("");
@@ -219,6 +230,15 @@ export default function WalletAssets() {
     setListingMessage(null);
   }
 
+  function openFractionalize(asset: WalletAsset) {
+    setFractionalizeAction({ mode: "split", originalUnit: asset.unit, assetName: asset.name });
+  }
+
+  function openCombine(asset: WalletAsset, link: FractionVaultLink) {
+    if (asset.quantity !== link.totalFractions) return;
+    setFractionalizeAction({ mode: "combine", originalUnit: link.originalUnit, assetName: asset.name });
+  }
+
   async function submitListing(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
     setListingMessage(null);
@@ -267,7 +287,7 @@ export default function WalletAssets() {
   }
 
   return <div className="platform-shell"><PlatformHeader /><main className="page-main">
-    <section className="hero"><div><span className="eyebrow">Connected wallet · Preprod</span><h1>My assets</h1><p>See the ADA and native tokens held in your connected wallet. Inspect an asset to view its metadata and registry approval.</p></div></section>
+    <section className="hero"><div><span className="eyebrow">Connected wallet · Preprod</span><h1>My assets</h1><p>Manage the ADA and native tokens held in your connected wallet. Fractionalize an original asset here, or combine a fraction position when this wallet meets its vault threshold.</p></div></section>
     <section className="wallet-assets-board" aria-labelledby="wallet-assets-title">
       <div className="section-heading"><div><span className="section-kicker">Wallet holdings</span><h2 id="wallet-assets-title">Your ADA and tokens</h2></div>{connected && <button className="primary-button" type="button" disabled={loading} onClick={() => setRevision((value) => value + 1)}>{loading ? "Loading…" : "Refresh assets"}</button>}</div>
       {!connected && <div className="wallet-assets-empty"><h3>{status === "connecting" ? "Connecting to Eternl…" : "Connect your wallet to see its assets"}</h3><p>This page reads your wallet holdings. No transaction signature is requested.</p><button className="primary-button" type="button" disabled={status === "connecting"} onClick={() => void connect()}>{status === "connecting" ? "Connecting…" : "Connect Eternl"}</button>{connectionError && <p role="alert" className="form-message error-message">{connectionError}</p>}</div>}
@@ -288,17 +308,18 @@ export default function WalletAssets() {
           <div className="wallet-assets-groups">
             <section className="wallet-assets-group" aria-labelledby="original-assets-title">
               <div className="wallet-assets-group-heading"><div><span className="section-kicker">Direct holdings</span><h3 id="original-assets-title">Original assets</h3><p>Assets not matched to an active fractionalization vault.</p></div><span>{groupedAssets.originals.length.toLocaleString("en-US")}</span></div>
-              {groupedAssets.originals.length ? <ul className="wallet-assets-list">{groupedAssets.originals.map((asset) => <WalletAssetRow key={asset.unit} asset={asset} preview={assetPreviews[asset.unit]} onList={openListing} />)}</ul> : <p className="wallet-assets-empty wallet-assets-list-empty">No original assets match your search.</p>}
+              {groupedAssets.originals.length ? <ul className="wallet-assets-list">{groupedAssets.originals.map((asset) => <WalletAssetRow key={asset.unit} asset={asset} preview={assetPreviews[asset.unit]} onList={openListing} onFractionalize={openFractionalize} onCombine={openCombine} />)}</ul> : <p className="wallet-assets-empty wallet-assets-list-empty">No original assets match your search.</p>}
             </section>
             <section className="wallet-assets-group" aria-labelledby="fraction-assets-title">
               <div className="wallet-assets-group-heading"><div><span className="section-kicker">Vault-linked holdings</span><h3 id="fraction-assets-title">Fractions</h3><p>Fraction tokens held in this wallet, with their original asset preserved through the vault.</p></div><span>{groupedAssets.fractions.length.toLocaleString("en-US")}</span></div>
-              {groupedAssets.fractions.length ? <ul className="wallet-assets-list">{groupedAssets.fractions.map(({ asset, link }) => <WalletAssetRow key={asset.unit} asset={asset} preview={assetPreviews[asset.unit]} fractionLink={link} onList={openListing} />)}</ul> : <p className="wallet-assets-empty wallet-assets-list-empty">No fractional positions match your search.</p>}
+              {groupedAssets.fractions.length ? <ul className="wallet-assets-list">{groupedAssets.fractions.map(({ asset, link }) => <WalletAssetRow key={asset.unit} asset={asset} preview={assetPreviews[asset.unit]} fractionLink={link} onList={openListing} onFractionalize={openFractionalize} onCombine={openCombine} />)}</ul> : <p className="wallet-assets-empty wallet-assets-list-empty">No fractional positions match your search.</p>}
             </section>
           </div>
         </>}
       </>}
 
     </section>
+    {fractionalizeAction && <div className="listing-dialog-backdrop" role="presentation" onMouseDown={() => setFractionalizeAction(null)}><section className="asset-action-dialog" role="dialog" aria-modal="true" aria-label={(fractionalizeAction.mode === "split" ? "Fractionalize asset: " : "Combine fractions: ") + fractionalizeAction.assetName} onMouseDown={(event) => event.stopPropagation()}><button type="button" className="listing-dialog-close asset-action-dialog-close" onClick={() => setFractionalizeAction(null)} aria-label="Close asset action">×</button><FractionalizeForm key={fractionalizeAction.mode + fractionalizeAction.originalUnit} initialMode={fractionalizeAction.mode} initialAssetUnit={fractionalizeAction.originalUnit} /></section></div>}
     {listingToast && <div className="listing-toast" role="status"><strong>Listing created</strong><span>{listingToast}</span><button type="button" onClick={() => setListingToast(null)} aria-label="Dismiss listing notification">×</button></div>}
     {listingAsset && <div className="listing-dialog-backdrop" role="presentation" onMouseDown={closeListing}><section className="listing-dialog" role="dialog" aria-modal="true" aria-labelledby="listing-dialog-title" onMouseDown={(event) => event.stopPropagation()}>
       <div className="listing-dialog-heading"><div><span className="section-kicker">Marketplace listing</span><h2 id="listing-dialog-title">List {listingAsset.name}</h2></div><button type="button" className="listing-dialog-close" onClick={closeListing} disabled={listingSubmitting} aria-label="Close listing dialog">×</button></div>

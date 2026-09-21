@@ -35,6 +35,36 @@ and revocation require fees, and a larger datum can require additional ADA.
 A single state UTxO serializes updates; concurrent submissions must refresh and
 retry after one wins. Sharded registries are a future scaling option.
 
+## Asset-addition requests
+
+The basic registry supports RegisterMany: one issuer-approved transition can
+add a non-empty, duplicate-free batch of valid exact asset IDs. This permits
+a user request to name one or more assets without partial approval.
+
+The separate validators/asset_registry_request.ak validator is a permissionless
+ADA-only request escrow. Its inline datum stores the requester address and
+payment-key hash plus one to fifty exact asset IDs. The UI locks 3 tADA; the
+validator requires at least 2 tADA.
+
+| Action | Required signer | Required result |
+| --- | --- | --- |
+| Approve | Registry issuer | Consume the request and authenticated registry UTxOs together; create the exact next registry datum with every requested asset, then refund the full request deposit to its stored requester address. |
+| Reject | Registry issuer | Refund the full request deposit to its stored requester address. |
+| Cancel | Stored requester key | Refund the full request deposit to its stored requester address. |
+
+Approval is atomic. The request validator checks the registry identity,
+address, version increment, capacity, and entire batched transition while the
+registry validator independently requires the issuer signature and matching
+RegisterMany action. A request cannot be used to add only a subset of assets.
+
+The request is an intake record, not proof of mint provenance, legal
+ownership, compliance, or suitability. The Team UI verifies supported
+original-NFT mint provenance before approval as an operational control.
+
+This protocol changes the basic registry script hash. Existing basic
+registries must be redeployed with reviewed entries migrated before request
+approvals are enabled; a deployed legacy registry cannot be upgraded in place.
+
 ## Mint origin versus approval
 
 The management page checks an NFT's initial mint against the current

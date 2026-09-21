@@ -6,7 +6,6 @@ import EternlWalletButton from "./eternl-wallet";
 
 const navigation = [
   ["/mint", "Mint RWA"],
-  ["/fractionalize", "Fractionalize"],
   ["/marketplace", "Marketplace"],
   ["/dex", "Fraction DEX"],
   ["/my-assets", "My assets"],
@@ -19,7 +18,7 @@ const navigation = [
 
 export default function PlatformHeader() {
   const pathname = usePathname();
-  const activePath = pathname === "/" ? "/mint" : pathname;
+  const activePath = pathname === "/" ? "/marketplace" : pathname;
   const historyActive = activePath === "/history";
 
   return <header className="topbar">

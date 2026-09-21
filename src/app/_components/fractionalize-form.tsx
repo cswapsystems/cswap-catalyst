@@ -6,6 +6,7 @@ import { useWallet } from "./wallet-context";
 type WalletUtxo = { amount?: Array<{ unit?: string; quantity?: string }> };
 type WalletAsset = { unit: string; quantity: string; name: string; fractionUnit?: string; requiredFractions?: string; owner?: string; recoveryAdmin?: string };
 type Blueprint = { ftCompiledCode?: string; vaultCompiledCode?: string; recoveryAdmin?: string };
+type FractionalizeMode = "split" | "combine" | "recover";
 
 function decodeAssetName(unit: string) {
   const hex = unit.slice(56);
@@ -72,8 +73,9 @@ function decodeVaultDatum(value: unknown, tools: typeof import("@lucid-evolution
   else {
     const stake = asConstr(addressRoot.fields[1], "owner stake option");
     const stakeCredential = asConstr(stake.fields[0], "owner stake credential");
-    if (stakeCredential.fields.length !== 1 || typeof stakeCredential.fields[0] !== "string") throw new Error("Malformed owner stake credential.");
-    owner = tools.credentialToAddress("Preprod", payment, { type: stakeCredential.index === 0 ? "Key" : "Script", hash: stakeCredential.fields[0] });
+    const stakeCredentialHash = asConstr(stakeCredential.fields[0], "owner stake credential hash");
+    if (stakeCredentialHash.fields.length !== 1 || typeof stakeCredentialHash.fields[0] !== "string") throw new Error("Malformed owner stake credential.");
+    owner = tools.credentialToAddress("Preprod", payment, { type: stakeCredentialHash.index === 0 ? "Key" : "Script", hash: stakeCredentialHash.fields[0] });
   }
   asConstr(root.fields[7], "vault seed");
   return {
@@ -120,12 +122,12 @@ function Field({ label, placeholder, hint, value, onChange, readOnly, select, op
 
 function Arrow() { return <span aria-hidden="true" className="button-arrow">↗</span>; }
 
-export default function FractionalizeForm() {
+export default function FractionalizeForm({ initialMode = "split", initialAssetUnit = "" }: { initialMode?: FractionalizeMode; initialAssetUnit?: string }) {
   const { address, lucid, connect } = useWallet();
-  const [mode, setMode] = useState<"split" | "combine" | "recover">("split");
+  const [mode, setMode] = useState<FractionalizeMode>(initialMode);
   const [assets, setAssets] = useState<WalletAsset[]>([]);
   const [assetStatus, setAssetStatus] = useState<"idle" | "loading" | "ready" | "error">("idle");
-  const [selectedUnit, setSelectedUnit] = useState("");
+  const [selectedUnit, setSelectedUnit] = useState(initialAssetUnit);
   const [fractionCount, setFractionCount] = useState("");
   const [message, setMessage] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
@@ -143,11 +145,20 @@ export default function FractionalizeForm() {
     let cancelled = false;
     queueMicrotask(() => { if (!cancelled) setAssetStatus("loading"); });
     const load = mode !== "split" ? loadVaultAssets(lucid as import("@lucid-evolution/lucid").LucidEvolution) : loadWalletAssets(address);
-    void load.then((availableAssets) => { if (!cancelled) { setAssets(availableAssets); setAssetStatus("ready"); } }).catch(() => { if (!cancelled) { setAssets([]); setAssetStatus("error"); } });
+    void load.then((availableAssets) => { if (!cancelled) {
+      setAssets(availableAssets);
+      setAssetStatus("ready");
+    } }).catch(() => { if (!cancelled) { setAssets([]); setAssetStatus("error"); } });
     return () => { cancelled = true; };
   }, [address, lucid, mode]);
 
-  function changeMode(nextMode: "split" | "combine" | "recover") {
+  useEffect(() => {
+    if (mode !== "combine" || !selectedUnit) return;
+    const threshold = assets.find((asset) => asset.unit === selectedUnit)?.requiredFractions;
+    if (threshold) setFractionCount(threshold);
+  }, [assets, mode, selectedUnit]);
+
+  function changeMode(nextMode: FractionalizeMode) {
     setMode(nextMode);
     setSelectedUnit("");
     setFractionCount("");
@@ -205,7 +216,8 @@ export default function FractionalizeForm() {
           BigInt(0),
         );
         const burnAmount = mode === "combine" ? datum.totalFractions : requestedTotal;
-        if (walletFractionQuantity < burnAmount) throw new Error("This wallet does not hold the fractions required for this recovery.");
+        if (mode === "combine" && walletFractionQuantity !== datum.totalFractions) throw new Error("Combine requires this wallet to hold the vault threshold of exactly " + datum.totalFractions.toString() + " fractions. This wallet holds " + walletFractionQuantity.toString() + ".");
+        if (mode === "recover" && walletFractionQuantity < burnAmount) throw new Error("This wallet does not hold the fractions required for this recovery.");
         const signer = getAddressDetails(walletAddress).paymentCredential;
         if (mode === "recover" && (signer?.type !== "Key" || signer.hash !== datum.recoveryAdmin)) throw new Error("Connect the configured team recovery wallet for partial recovery.");
 
@@ -267,5 +279,5 @@ export default function FractionalizeForm() {
   const assetPlaceholder = !address ? "Connect Eternl first" : mode !== "split" && !lucid ? "Connect Eternl first" : assetStatus === "loading" ? "Loading vault assets…" : assets.length ? mode !== "split" ? "Choose a locked asset" : "Choose an asset" : mode !== "split" ? "No assets locked in vaults" : "No native assets found";
   const assetHint = mode !== "split" ? "Assets are read from active recovery vaults." : "Assets are read from the connected wallet.";
   const tokenToReceive = selectedAsset ? selectedAsset.name + " fractions" : "";
-  return <section className="work-card form-card"><div className="section-heading"><div><span className="section-kicker">01 / Position setup</span><h2>{mode === "split" ? "Create fractional ownership" : mode === "combine" ? "Combine your fractional units" : "Recover with missing fractions"}</h2></div><span className="step-badge">1 of 2</span></div><div className="segmented-control"><button type="button" className={mode === "split" ? "selected" : ""} onClick={() => changeMode("split")}>Fractionalize</button><button type="button" className={mode === "combine" ? "selected" : ""} onClick={() => changeMode("combine")}>Combine</button><button type="button" className={mode === "recover" ? "selected" : ""} onClick={() => changeMode("recover")}>Team recovery</button></div><div className="field-grid"><Field label="Select RWA asset" placeholder={assetPlaceholder} hint={assetHint} select options={assetOptions} value={selectedUnit} onChange={(value) => { setSelectedUnit(value); setMessage(null); setError(null); }} disabled={!address || assetStatus === "loading" || assets.length === 0} /><Field label={mode === "split" ? "Number of fractions" : mode === "combine" ? "Full fraction supply" : "Available fractions to burn"} placeholder={mode === "split" ? "e.g. 1,000" : mode === "combine" ? selectedAsset?.requiredFractions || "Full supply" : "Fewer than full supply"} value={fractionCount} onChange={(value) => { setFractionCount(value); setMessage(null); setError(null); }} /><Field label="Token you receive" placeholder="Created automatically" value={mode === "split" ? tokenToReceive : "Original RWA token"} hint={mode === "recover" ? "Emergency recovery sends the NFT only to its recorded original owner." : "A fungible token represents fractional ownership."} readOnly />{mode === "recover" && <Field label="Recorded owner" placeholder="Recorded in the vault" value={selectedAsset?.owner || ""} hint="The connected team recovery wallet authorizes this action." readOnly />}</div>{selectedAsset && <div className="asset-selection-note"><span>Selected asset name (UTF-8)</span><strong>{selectedAsset.name}</strong><code>{selectedAsset.unit}</code></div>}{error && <p className="form-message error-message" role="alert">{error}</p>}{message && <p className="form-message success-message" role="status">{message}</p>}<div className="calculation-card"><span>{mode === "split" ? "Fractionalization preview" : mode === "combine" ? "Combination preview" : "Emergency recovery preview"}</span><strong>{selectedAsset ? selectedAsset.name + " → " + fractionCount + " ownership units" : "Select an asset and enter a fraction amount"}</strong><p>{mode === "split" ? "The NFT will be locked in the vault and the newly minted fraction token will be sent to the connected wallet." : mode === "combine" ? "The full fraction supply will be burned and the original NFT will be returned to this wallet." : "The team recovery key must sign, the available fractions are burned, and the original NFT returns only to the owner recorded in the vault. Remaining tokens become non-redeemable and must be delisted."}</p></div><div className="form-footer"><p><span className="status-dot" /> {submitting ? "Awaiting Eternl signature…" : "Ready for review and signing."}</p><button type="button" className="primary-button" onClick={() => void reviewFractions()} disabled={submitting}>{submitting ? "Building transaction…" : mode === "split" ? "Review & fractionalize" : mode === "combine" ? "Review & combine" : "Authorize recovery"} <Arrow /></button></div></section>;
+  return <section className="work-card form-card"><div className="section-heading"><div><span className="section-kicker">01 / Position setup</span><h2>{mode === "split" ? "Create fractional ownership" : mode === "combine" ? "Combine your fractional units" : "Recover with missing fractions"}</h2></div><span className="step-badge">1 of 2</span></div><div className="segmented-control"><button type="button" className={mode === "split" ? "selected" : ""} onClick={() => changeMode("split")}>Fractionalize</button><button type="button" className={mode === "combine" ? "selected" : ""} onClick={() => changeMode("combine")}>Combine</button><button type="button" className={mode === "recover" ? "selected" : ""} onClick={() => changeMode("recover")}>Team recovery</button></div><div className="field-grid"><Field label="Select RWA asset" placeholder={assetPlaceholder} hint={assetHint} select options={assetOptions} value={selectedUnit} onChange={(value) => { setSelectedUnit(value); setFractionCount(mode === "combine" ? assets.find((asset) => asset.unit === value)?.requiredFractions ?? "" : ""); setMessage(null); setError(null); }} disabled={!address || assetStatus === "loading" || assets.length === 0} /><Field label={mode === "split" ? "Number of fractions" : mode === "combine" ? "Full fraction supply" : "Available fractions to burn"} placeholder={mode === "split" ? "e.g. 1,000" : mode === "combine" ? selectedAsset?.requiredFractions || "Full supply" : "Fewer than full supply"} value={fractionCount} onChange={(value) => { setFractionCount(value); setMessage(null); setError(null); }} hint={mode === "combine" ? "The vault fixes the full fraction threshold required for combining." : undefined} readOnly={mode === "combine"} /><Field label="Token you receive" placeholder="Created automatically" value={mode === "split" ? tokenToReceive : "Original RWA token"} hint={mode === "recover" ? "Emergency recovery sends the NFT only to its recorded original owner." : "A fungible token represents fractional ownership."} readOnly />{mode === "recover" && <Field label="Recorded owner" placeholder="Recorded in the vault" value={selectedAsset?.owner || ""} hint="The connected team recovery wallet authorizes this action." readOnly />}</div>{selectedAsset && <div className="asset-selection-note"><span>Selected asset name (UTF-8)</span><strong>{selectedAsset.name}</strong><code>{selectedAsset.unit}</code></div>}{error && <p className="form-message error-message" role="alert">{error}</p>}{message && <p className="form-message success-message" role="status">{message}</p>}<div className="calculation-card"><span>{mode === "split" ? "Fractionalization preview" : mode === "combine" ? "Combination preview" : "Emergency recovery preview"}</span><strong>{selectedAsset ? selectedAsset.name + " → " + fractionCount + " ownership units" : "Select an asset and enter a fraction amount"}</strong><p>{mode === "split" ? "The NFT will be locked in the vault and the newly minted fraction token will be sent to the connected wallet." : mode === "combine" ? "The full fraction supply will be burned and the original NFT will be returned to this wallet." : "The team recovery key must sign, the available fractions are burned, and the original NFT returns only to the owner recorded in the vault. Remaining tokens become non-redeemable and must be delisted."}</p></div><div className="form-footer"><p><span className="status-dot" /> {submitting ? "Awaiting Eternl signature…" : "Ready for review and signing."}</p><button type="button" className="primary-button" onClick={() => void reviewFractions()} disabled={submitting}>{submitting ? "Building transaction…" : mode === "split" ? "Review & fractionalize" : mode === "combine" ? "Review & combine" : "Authorize recovery"} <Arrow /></button></div></section>;
 }

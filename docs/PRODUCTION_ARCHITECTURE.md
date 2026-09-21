@@ -27,6 +27,28 @@ seller -> pool-sell request -> batcher settlement -> pool-owned inventory -> buy
 
 The Team console reads the exact-asset registry before it builds an Instant Sell settlement, while direct listings remain registry-free. The current `quote_pool` and `pool_sell_request` validators do not consume a registry reference, so registry admission is a fail-closed client/operator control rather than an on-chain settlement guarantee. The batcher pays at least the seller minimum, chooses the actual bid and inventory ask, and mints one inventory receipt. The receipt and `inventory_value` bind the pool-owned listing to the pool. A later buyer burns that receipt and returns the listing payment to the pool.
 
+### Permissionless asset-admission requests
+
+Any user may submit a cancellable UTxO containing one or more exact asset IDs
+to the shared-pool admission registry. The asset_registry_request validator
+binds the request to the basic registry address, identity token, and issuer
+key. Team approval consumes the request and registry UTxOs together, creates
+the only allowed batched registry transition, and refunds the request deposit.
+The Team may reject, and the requester may cancel. No request automatically
+admits an asset.
+
+    requester -> request UTxO (assets + refundable ADA)
+                           | Team issuer approves
+                           v
+              request UTxO + registry UTxO consumed together
+                           +--> next registry state contains all requested IDs
+                           +--> request deposit returns to requester
+
+This is an auditable intake/approval boundary, not a replacement for due
+diligence. Current shared-pool validators still do not reference the basic
+registry, so approval remains an on-chain-authenticated Team admission record
+and fail-closed operator check until those settlement validators are upgraded.
+
 The quote-pool datum tracks the quote asset, total LP supply, protected minimum cash reserve, paused state, and aggregate ask value of open inventory. LP add, remove, and close are blocked while `inventory_value != 0`; this avoids changing LP claims while assets already purchased by the pool remain for sale.
 
 ### Team roles and UI
@@ -34,6 +56,7 @@ The quote-pool datum tracks the quote asset, total LP supply, protected minimum 
 | Role | On-chain authority | Primary UI |
 | --- | --- | --- |
 | Registry administrator | Approves or revokes exact asset units used by the Team admission check | `/registry` |
+| Asset requester | Creates a cancellable one-or-more-asset admission request | `/registry` |
 | Batcher | Settles Instant Sell requests and sets the pool resale ask | `/team` pricing queue |
 | Liquidity provider | Adds quote reserve or burns LP tokens for allowed withdrawals | `/team` or `/reserves` |
 | Marketplace user | Creates/cancels direct listings or Instant Sell requests; buys inventory | `/marketplace` |
@@ -68,6 +91,8 @@ For a tADA pair, the owner buffer forms part of the final ADA reserve and the LP
 Marketplace and DEX deployments have independent public manifests. A manifest contains public addresses, policy IDs, and transaction identifiers; it must never contain wallet seeds, Blockfrost secrets, or batcher private keys.
 
 The two-party bootstrap changed the `factory_state` validator parameterization and factory-state action encoding. A deployed factory cannot be modified in place. A new Preprod deployment must be created with the reviewed blueprint and a manifest containing `bootstrapOfferAddress`. The UI rejects a legacy deployment rather than constructing a transaction against mismatched validators.
+
+The asset-admission request flow adds RegisterMany to the basic registry and a parameterized asset_registry_request validator. It changes the basic registry script hash, so existing basic-registry deployments require an intentional redeployment and reviewed-entry migration before this interface is enabled.
 
 ## Operational controls
 

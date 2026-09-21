@@ -6,6 +6,7 @@ import * as tools from "@lucid-evolution/lucid";
 const blueprint = JSON.parse(await readFile(new URL("../contracts/marketplace/plutus.json", import.meta.url), "utf8"));
 const code = (title) => blueprint.validators.find((v) => v.title === title).compiledCode;
 const registryCode = code("asset_registry.asset_registry.spend");
+const requestCode = code("asset_registry_request.asset_registry_request.spend");
 const identityCode = code("one_shot.one_shot.mint");
 const issuer = tools.generateEmulatorAccount({ lovelace: 1000000000n });
 const outsider = tools.generateEmulatorAccount({ lovelace: 1000000000n });
@@ -74,6 +75,51 @@ test("registry lifecycle: initialize, authenticate, register, reject outsider, r
   } finally { globalThis.fetch = originalFetch; }
 });
 
+
+
+test("request approval consumes the request and advances the registry as one transaction", async () => {
+  const priorFetch = globalThis.fetch;
+  globalThis.fetch = async () => Response.json({ registry: registryCode, request: requestCode, identity: identityCode });
+  try {
+    wallet.selectWallet.fromSeed(outsider.seedPhrase);
+    const current = await registry.readRegistry(wallet);
+    const requestScript = registry.registryRequestScript(tools, requestCode, current);
+    const requestAddress = tools.validatorToAddress("Preprod", requestScript);
+    const requesterKey = tools.getAddressDetails(outsider.address).paymentCredential.hash;
+    const unit = "56".repeat(28) + "03";
+    const requestDatum = registry.registryRequestDatum(tools, outsider.address, requesterKey, [unit]);
+    const create = await wallet.newTx().pay.ToContract(requestAddress, { kind: "inline", value: requestDatum }, { lovelace: registry.REGISTRY_REQUEST_DEPOSIT }).addSigner(outsider.address).complete();
+    await submit(create);
+    const submitted = await registry.readRegistryRequests(wallet, current);
+    assert.equal(submitted.requests.length, 1);
+
+    wallet.selectWallet.fromSeed(issuer.seedPhrase);
+    const fresh = await registry.readRegistry(wallet);
+    const queue = await registry.readRegistryRequests(wallet, fresh);
+    const request = queue.requests[0];
+    const approve = await wallet.newTx().collectFrom([fresh.utxo], tools.Data.to(new tools.Constr(2, [[registry.assetData(tools, unit)]]))).collectFrom([request.utxo], tools.Data.to(new tools.Constr(0, []))).attach.SpendingValidator(fresh.script).attach.SpendingValidator(queue.script)
+      .pay.ToContract(fresh.address, { kind: "inline", value: registry.registryDatum(tools, fresh.version + 1n, [unit, ...fresh.entries]) }, { ...fresh.utxo.assets }).pay.ToAddress(request.requester, { lovelace: request.lockedLovelace }).addSigner(issuer.address).complete();
+    await submit(approve);
+    const after = await registry.readRegistry(wallet);
+    assert.deepEqual(after.entries, [unit]);
+    assert.equal(after.version, fresh.version + 1n);
+    assert.equal((await registry.readRegistryRequests(wallet, after)).requests.length, 0);
+  } finally {
+    globalThis.fetch = priorFetch;
+    wallet.selectWallet.fromSeed(issuer.seedPhrase);
+  }
+});
+test("asset request datum preserves requester and every requested exact unit", () => {
+  const units = ["12".repeat(28) + "01", "34".repeat(28) + "02"];
+  const datum = registry.registryRequestDatum(tools, issuer.address, issuerKey, units);
+  const decoded = registry.decodeRegistryRequestDatum(tools, datum);
+  assert.equal(decoded.requester, issuer.address);
+  assert.equal(decoded.requesterKey, issuerKey);
+  assert.deepEqual(decoded.assets, units);
+  assert.throws(() => registry.registryRequestDatum(tools, issuer.address, issuerKey, [units[0], units[0]]), /unique/);
+  const request = registry.registryRequestScript(tools, requestCode, { address, token, issuer: issuerKey });
+  assert.match(tools.validatorToAddress("Preprod", request), /^addr_test1/);
+});
 test("mint provenance verifies parameterized policy and rejects unrelated assets", async () => {
   const minter = JSON.parse(await readFile(new URL("../contracts/minter/plutus.json", import.meta.url), "utf8"));
   const compiledCode = minter.validators.find((v) => v.title === "multi_nft_policy.multi_oneshot.mint").compiledCode;

@@ -172,6 +172,15 @@ pub type PoolSellRequestDatum {
   min_payout: Int,
 }
 
+
+// A permissionless proposal to add one or more exact units to the basic
+// Team-managed asset registry. The request validator binds approval to an
+// authenticated batched registry transition; this datum itself is not approval.
+pub type AssetRegistryRequestDatum {
+  requester: Address,
+  requester_key: VerificationKeyHash,
+  assets: List<AssetClass>,
+}
 pub type QuotePoolDatum {
   admin: VerificationKeyHash,
   batcher: VerificationKeyHash,

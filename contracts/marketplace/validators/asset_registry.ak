@@ -17,6 +17,7 @@ pub type RegistryDatum {
 pub type RegistryAction {
   Register { asset: AssetClass }
   Revoke { asset: AssetClass }
+  RegisterMany { assets: List<AssetClass> }
 }
 
 fn valid_asset(asset: AssetClass) -> Bool {
@@ -29,6 +30,13 @@ fn valid_entries(entries: List<AssetClass>) -> Bool {
   ) == list.length(entries)
 }
 
+
+fn prepend_all(new_entries: List<AssetClass>, entries: List<AssetClass>) -> List<AssetClass> {
+  when new_entries is {
+    [] -> entries
+    [entry, ..rest] -> [entry, ..prepend_all(rest, entries)]
+  }
+}
 validator asset_registry(
   registry_token: AssetClass,
   issuer: VerificationKeyHash,
@@ -58,6 +66,13 @@ validator asset_registry(
         Revoke { asset } -> {
           expect list.has(current.entries, asset)
           list.filter(current.entries, fn(entry) { entry != asset })
+        }
+        RegisterMany { assets } -> {
+          expect list.length(assets) > 0
+          expect list.all(assets, valid_asset)
+          expect list.length(list.unique(assets)) == list.length(assets)
+          expect list.all(assets, fn(asset) { !list.has(current.entries, asset) })
+          prepend_all(assets, current.entries)
         }
       }
     and {
@@ -151,6 +166,29 @@ fn run(tx: Transaction) -> Bool {
 
 test register_ok() {
   run(fixture(empty(), registered()))
+}
+
+test register_many_ok() {
+  let next = RegistryDatum { version: 1, entries: [asset_a, asset_b] }
+  asset_registry.spend(
+    identity,
+    issuer_key,
+    Some(empty()),
+    RegisterMany { assets: [asset_a, asset_b] },
+    own_ref,
+    fixture(empty(), next),
+  )
+}
+
+test empty_batch_rejected() fail {
+  asset_registry.spend(
+    identity,
+    issuer_key,
+    Some(empty()),
+    RegisterMany { assets: [] },
+    own_ref,
+    fixture(empty(), empty()),
+  )
 }
 
 test revoke_ok() {
