@@ -80,7 +80,7 @@ async function loadFractionVaultLinks(lucid: LucidEvolution): Promise<Map<string
 
 function formatTokenQuantity(quantity: bigint): string { return new Intl.NumberFormat("en-US").format(quantity); }
 
-function WalletAssetRow({ asset, preview, fractionLink, onList, onFractionalize, onCombine }: { asset: WalletAsset; preview?: AssetPreview; fractionLink?: FractionVaultLink; onList: (asset: WalletAsset) => void; onFractionalize: (asset: WalletAsset) => void; onCombine: (asset: WalletAsset, link: FractionVaultLink) => void }) {
+function WalletAssetRow({ asset, preview, fractionLink, onList, onFractionalize, onCombine }: { asset: WalletAsset; preview?: AssetPreview; fractionLink?: FractionVaultLink; onList: (asset: WalletAsset) => void; onFractionalize?: (asset: WalletAsset) => void; onCombine: (asset: WalletAsset, link: FractionVaultLink) => void }) {
   const canCombine = Boolean(fractionLink && asset.quantity === fractionLink.totalFractions);
   return <li className="wallet-asset-row">
     <div className="wallet-asset-thumbnail">{preview?.image ? <Image src={preview.image} alt="" width={72} height={72} unoptimized /> : <span aria-hidden="true">RWA</span>}</div>
@@ -105,7 +105,7 @@ function WalletAssetRow({ asset, preview, fractionLink, onList, onFractionalize,
       {fractionLink ? <>
         <button className="text-button" type="button" disabled={!canCombine} onClick={() => onCombine(asset, fractionLink)}>Combine</button>
         <span className={"wallet-combine-threshold" + (canCombine ? " ready" : "")}>{canCombine ? "Vault threshold met — ready to combine" : formatTokenQuantity(asset.quantity) + " of " + formatTokenQuantity(fractionLink.totalFractions) + " fractions required"}</span>
-      </> : <button className="text-button" type="button" onClick={() => onFractionalize(asset)}>Fractionalize</button>}
+      </> : onFractionalize ? <button className="text-button" type="button" onClick={() => onFractionalize(asset)}>Fractionalize</button> : null}
       {asset.quantity === BigInt(1) && <button className="text-button" type="button" onClick={() => onList(asset)}>List</button>}
     </div>
   </li>;
@@ -231,6 +231,7 @@ export default function WalletAssets() {
   }
 
   function openFractionalize(asset: WalletAsset) {
+    if (fractionLinkStatus !== "ready" || fractionLinks.has(asset.unit)) return;
     setFractionalizeAction({ mode: "split", originalUnit: asset.unit, assetName: asset.name });
   }
 
@@ -286,6 +287,10 @@ export default function WalletAssets() {
     }
   }
 
+  useEffect(() => {
+    if (fractionalizeAction?.mode === "split" && fractionLinks.has(fractionalizeAction.originalUnit)) setFractionalizeAction(null);
+  }, [fractionLinks, fractionalizeAction]);
+
   return <div className="platform-shell"><PlatformHeader /><main className="page-main">
     <section className="hero"><div><span className="eyebrow">Connected wallet · Preprod</span><h1>My assets</h1><p>Manage the ADA and native tokens held in your connected wallet. Fractionalize an original asset here, or combine a fraction position when this wallet meets its vault threshold.</p></div></section>
     <section className="wallet-assets-board" aria-labelledby="wallet-assets-title">
@@ -304,15 +309,15 @@ export default function WalletAssets() {
         {holdings.assets.length > 0 && <label className="field wallet-assets-search"><span className="field-label">Search your tokens</span><input type="search" value={search} onChange={(event) => setSearch(event.target.value)} placeholder="Asset name, policy ID, or full asset ID" /></label>}
         {holdings.assets.length === 0 ? <div className="wallet-assets-empty"><h3>{holdings.utxoCount === 0 ? "This wallet has no unspent outputs" : "No native tokens in this wallet"}</h3><p>Tokens received or minted into this wallet will appear here after the wallet updates. Use Refresh assets to check again.</p></div> : visibleAssets.length === 0 ? <p className="wallet-assets-empty">No assets match your search.</p> : fractionLinkStatus === "loading" ? <p className="wallet-assets-empty" role="status">Matching token positions to active fractionalization vaults…</p> : <>
           <p className="wallet-assets-count" role="status">Showing {visibleAssets.length.toLocaleString("en-US")} of {holdings.assets.length.toLocaleString("en-US")} assets</p>
-          {fractionLinkStatus === "error" && <p className="wallet-assets-vault-error" role="status">Vault links are temporarily unavailable. Refresh assets to verify fractional positions.</p>}
+          {fractionLinkStatus === "error" && <p className="wallet-assets-vault-error" role="status">Vault links are temporarily unavailable. Fractionalize is disabled until the links can be verified. Refresh assets to retry.</p>}
           <div className="wallet-assets-groups">
             <section className="wallet-assets-group" aria-labelledby="original-assets-title">
               <div className="wallet-assets-group-heading"><div><span className="section-kicker">Direct holdings</span><h3 id="original-assets-title">Original assets</h3><p>Assets not matched to an active fractionalization vault.</p></div><span>{groupedAssets.originals.length.toLocaleString("en-US")}</span></div>
-              {groupedAssets.originals.length ? <ul className="wallet-assets-list">{groupedAssets.originals.map((asset) => <WalletAssetRow key={asset.unit} asset={asset} preview={assetPreviews[asset.unit]} onList={openListing} onFractionalize={openFractionalize} onCombine={openCombine} />)}</ul> : <p className="wallet-assets-empty wallet-assets-list-empty">No original assets match your search.</p>}
+              {groupedAssets.originals.length ? <ul className="wallet-assets-list">{groupedAssets.originals.map((asset) => <WalletAssetRow key={asset.unit} asset={asset} preview={assetPreviews[asset.unit]} onList={openListing} onFractionalize={fractionLinkStatus === "ready" ? openFractionalize : undefined} onCombine={openCombine} />)}</ul> : <p className="wallet-assets-empty wallet-assets-list-empty">No original assets match your search.</p>}
             </section>
             <section className="wallet-assets-group" aria-labelledby="fraction-assets-title">
               <div className="wallet-assets-group-heading"><div><span className="section-kicker">Vault-linked holdings</span><h3 id="fraction-assets-title">Fractions</h3><p>Fraction tokens held in this wallet, with their original asset preserved through the vault.</p></div><span>{groupedAssets.fractions.length.toLocaleString("en-US")}</span></div>
-              {groupedAssets.fractions.length ? <ul className="wallet-assets-list">{groupedAssets.fractions.map(({ asset, link }) => <WalletAssetRow key={asset.unit} asset={asset} preview={assetPreviews[asset.unit]} fractionLink={link} onList={openListing} onFractionalize={openFractionalize} onCombine={openCombine} />)}</ul> : <p className="wallet-assets-empty wallet-assets-list-empty">No fractional positions match your search.</p>}
+              {groupedAssets.fractions.length ? <ul className="wallet-assets-list">{groupedAssets.fractions.map(({ asset, link }) => <WalletAssetRow key={asset.unit} asset={asset} preview={assetPreviews[asset.unit]} fractionLink={link} onList={openListing} onCombine={openCombine} />)}</ul> : <p className="wallet-assets-empty wallet-assets-list-empty">No fractional positions match your search.</p>}
             </section>
           </div>
         </>}

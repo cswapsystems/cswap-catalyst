@@ -1,6 +1,7 @@
 use aiken/collection/list
+use aiken/crypto.{VerificationKeyHash}
 use aiken/primitive/bytearray
-use cardano/address.{Address}
+use cardano/address
 use cardano/assets
 use cardano/transaction.{InlineDatum, Input, OutputReference, Transaction}
 use ebecca/amm_helpers.{ada, has_one, total_paid}
@@ -9,12 +10,13 @@ use ebecca/dex_types.{
   CancelBootstrap, FactoryDatum, PoolDatum,
 }
 
-/// Escrows the FT side of a two-party pool bootstrap.
+/// Escrows the FT side of a Team-approved, three-party pool bootstrap.
 ///
-/// A liquidity provider completes the
-/// same transaction. The factory, pool-NFT policy and LP policy authenticate
-/// pool creation; this validator additionally binds the escrowed FT, quoted
-/// reserve, and initial LP-token allocation to the offer.
+/// The FT owner first locks the asset and terms. A distinct liquidity provider
+/// then funds and signs the quote side. The factory Team creator must also
+/// sign before the same transaction can create the pool. The factory,
+/// pool-NFT policy and LP policy authenticate pool creation; this validator
+/// additionally binds the escrowed FT, quoted reserve, and LP allocation.
 validator bootstrap_offer {
   spend(
     datum_opt: Option<BootstrapOfferDatum>,
@@ -36,8 +38,14 @@ validator bootstrap_offer {
           total_paid(tx.outputs, offer.owner, offer.fraction_asset) >= offer.fraction_amount,
           total_paid(tx.outputs, offer.owner, ada) >= offer.pool_lovelace,
         }
-      AcceptBootstrap { liquidity_provider } ->
-        valid_accept(offer, own_input.output.value, liquidity_provider, tx)
+      AcceptBootstrap { liquidity_provider, liquidity_provider_key } ->
+        valid_accept(
+          offer,
+          own_input.output.value,
+          liquidity_provider,
+          liquidity_provider_key,
+          tx,
+        )
     }
   }
 
@@ -58,6 +66,7 @@ fn expected_offer_value(offer: BootstrapOfferDatum) -> assets.Value {
 fn valid_offer(offer: BootstrapOfferDatum, value: assets.Value) -> Bool {
   and {
     offer.owner_key != "",
+    owner_matches_key(offer.owner, offer.owner_key),
     offer.factory_token != ada,
     offer.fraction_asset != ada,
     offer.quote_asset != offer.fraction_asset,
@@ -78,7 +87,8 @@ fn valid_offer(offer: BootstrapOfferDatum, value: assets.Value) -> Bool {
 fn valid_accept(
   offer: BootstrapOfferDatum,
   offer_value: assets.Value,
-  liquidity_provider: Address,
+  liquidity_provider: address.Address,
+  liquidity_provider_key: VerificationKeyHash,
   tx: Transaction,
 ) -> Bool {
   expect [factory_input] =
@@ -103,7 +113,13 @@ fn valid_accept(
   and {
     valid_offer(offer, offer_value),
     liquidity_provider != offer.owner,
+    owner_matches_key(liquidity_provider, liquidity_provider_key),
+    liquidity_provider_key != offer.owner_key,
     factory.factory_token == offer.factory_token,
+    factory.admin != offer.owner_key,
+    factory.admin != liquidity_provider_key,
+    list.has(tx.extra_signatories, liquidity_provider_key),
+    list.has(tx.extra_signatories, factory.admin),
     pool.pool_nft == pool_nft,
     pool.asset_a == offer.quote_asset,
     pool.asset_b == offer.fraction_asset,
@@ -118,5 +134,12 @@ fn valid_accept(
     provider_lp > 0,
     total_paid(tx.outputs, offer.owner, pool.lp_token) >= owner_lp,
     total_paid(tx.outputs, liquidity_provider, pool.lp_token) >= provider_lp,
+  }
+}
+
+fn owner_matches_key(owner: address.Address, key: VerificationKeyHash) -> Bool {
+  when owner.payment_credential is {
+    address.VerificationKey(owner_key) -> owner_key == key
+    _ -> False
   }
 }

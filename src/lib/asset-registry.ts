@@ -132,7 +132,9 @@ export async function readRegistry(lucid?: LucidEvolution): Promise<RegistryStat
   const address = tools.validatorToAddress("Preprod", script);
   const provider = lucid ?? await registryReader();
   const utxo = await provider.utxoByUnit(registryToken);
-  if (!utxo || utxo.address !== address || utxo.assets[registryToken] !== BigInt(1) || !utxo.datum) throw new Error("Authenticated registry state was not found at its expected script address.");
+  if (!utxo) throw new Error("The configured registry identity token was not found on Preprod.");
+  if (utxo.address !== address) throw new Error("The configured registry identity token is at " + utxo.address + ", but the current request-enabled registry validator expects " + address + ". This is an older registry deployment; deploy a replacement registry and update the public registry token.");
+  if (utxo.assets[registryToken] !== BigInt(1) || !utxo.datum) throw new Error("The registry identity output is missing its required token or inline datum.");
   return { ...decodeRegistryDatum(tools, utxo.datum), utxo, address, script, token: registryToken, issuer: registryIssuer };
 }
 

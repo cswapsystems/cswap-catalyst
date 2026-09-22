@@ -2,6 +2,8 @@
 
 This guide covers the registry-free shared quote pool used by `/marketplace`, `/team`, and `/reserves`. It does not replace the legacy oracle/USDM procedure in `contracts/marketplace/OPERATOR_RUNBOOK.md`.
 
+For the complete lifecycle map, see [the end-to-end flow diagram](END_TO_END_FLOW.md).
+
 ## Scope and roles
 
 | Role | Key requirement | Responsibility |

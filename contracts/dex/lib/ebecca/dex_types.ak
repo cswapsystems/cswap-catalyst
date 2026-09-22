@@ -88,6 +88,9 @@ pub type BootstrapOfferDatum {
 }
 
 pub type BootstrapOfferAction {
-  AcceptBootstrap { liquidity_provider: Address }
+  AcceptBootstrap {
+    liquidity_provider: Address,
+    liquidity_provider_key: VerificationKeyHash,
+  }
   CancelBootstrap
 }

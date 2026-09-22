@@ -4,6 +4,7 @@ import { FormEvent, useCallback, useEffect, useMemo, useState } from "react";
 import Image from "next/image";
 import { useWallet } from "./wallet-context";
 import { marketplaceOrderbookAddress, marketplacePoolAddress } from "@/lib/protocol/marketplace-deployment";
+import { formatAda } from "@/lib/ada";
 
 type Mode = "all" | "price" | "instant";
 type MarketplaceView = "all" | "p2p" | "pool" | "fractions";
@@ -444,7 +445,7 @@ export default function MarketplaceWorkbench() {
       </div>
       <div>
         <span className="marketplace-listing-label">Price</span>
-        <strong className="marketplace-listing-value">{listing.price.toString()} <small>{listing.priceAsset.policyId ? assetNameText(listing.priceAsset.assetName) : "ADA"}</small></strong>
+        <strong className="marketplace-listing-value">{listing.priceAsset.policyId ? listing.price.toString() : formatAda(listing.price)} <small>{listing.priceAsset.policyId ? assetNameText(listing.priceAsset.assetName) : "ADA"}</small></strong>
       </div>
       <div className="marketplace-actions">
         {purchaseSubmitted ? <button type="button" className="primary" disabled>Purchase submitted</button> : owned ? <><button type="button" className="primary" disabled title="This wallet created the listing">Your listing</button>{listing.settlement === "direct" && <><button type="button" onClick={() => beginEdit(listing)} disabled={loading}>Edit</button><button type="button" onClick={() => void cancelListing(listing)} disabled={loading}>Cancel</button></>}</> : !lucid || !address ? <button type="button" className="primary" onClick={() => void connect()} disabled={loading}>Connect wallet to buy</button> : <button type="button" className="primary" onClick={() => void buyListing(listing)} disabled={loading}>Buy</button>}
@@ -464,7 +465,7 @@ export default function MarketplaceWorkbench() {
   };
   const renderRequest = (request: PoolSellRequest) => <article className="marketplace-listing" key={request.id}>
     <div className="marketplace-asset"><span className="marketplace-asset-mark">⇢</span><div><strong>{assetNameText(request.rwa.assetName)} × {request.quantity.toString()}</strong><code>{request.rwa.policyId}{request.rwa.assetName}</code><span className="marketplace-badge">Awaiting pool pickup</span></div></div>
-    <div><span className="marketplace-listing-label">Price</span><strong className="marketplace-listing-value">{request.minPayout.toString()} <small>{request.quoteAsset.policyId ? assetNameText(request.quoteAsset.assetName) : "ADA"}</small></strong></div>
+    <div><span className="marketplace-listing-label">Price</span><strong className="marketplace-listing-value">{request.quoteAsset.policyId ? request.minPayout.toString() : formatAda(request.minPayout)} <small>{request.quoteAsset.policyId ? assetNameText(request.quoteAsset.assetName) : "ADA"}</small></strong></div>
     <div className="marketplace-actions">{request.managed ? <button type="button" onClick={() => void cancelPoolSellRequest(request)} disabled={loading}>Cancel request</button> : <span className="explorer-link muted-link">Pool batcher may settle</span>}</div>
   </article>;
 

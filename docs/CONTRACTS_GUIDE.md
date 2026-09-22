@@ -146,9 +146,8 @@ validator proves that the full supply was burned before releasing the NFT.
   mints a declared set of one-shot NFTs. Minting consumes a seed and rejects
   duplicate names or extra assets. Burns must be negative for every asset in
   the policy's mint field.
-- [`stt_one_shot.ak`](../contracts/minter/validators/stt_one_shot.ak) mints a
-  single one-shot token by consuming a seed and burns it only when an input
-  contains that token.
+`stt_one_shot` is archived source history, not part of the current build or
+deployment set. See [Validator inventory](VALIDATOR_INVENTORY.md).
 
 ## 4. Marketplace shared data types
 
@@ -208,15 +207,22 @@ QuotePoolDatum {
 pool-owned inventory listing. `inventory_value` is the sum of the ask prices
 of those open listings.
 
-## 5. Registry and oracle path
+## 5. Retired registry/oracle path
+
+The registry/oracle/sharded marketplace families below are archived source
+history. They are retained in the guide only to explain old artifacts; they
+are not compiled, exposed through the application, or eligible for new
+deployments. The active Marketplace uses the asset registry, `quote_pool`,
+`pool_sell_request`, and `p2p_listing_simple` listed in the
+[validator inventory](VALIDATOR_INVENTORY.md).
 
 This path is implemented by:
 
-- [`registry.ak`](../contracts/marketplace/validators/registry.ak)
-- [`oracle.ak`](../contracts/marketplace/validators/oracle.ak)
-- [`marketplace.ak`](../contracts/marketplace/validators/marketplace.ak)
+- [`registry.ak`](../contracts/marketplace/retired-validators/registry.ak.disabled)
+- [`oracle.ak`](../contracts/marketplace/retired-validators/oracle.ak.disabled)
+- [`marketplace.ak`](../contracts/marketplace/retired-validators/marketplace.ak.disabled)
 - [`lp_policy.ak`](../contracts/marketplace/validators/lp_policy.ak)
-- [`p2p_listing.ak`](../contracts/marketplace/validators/p2p_listing.ak)
+- [`p2p_listing.ak`](../contracts/marketplace/retired-validators/p2p_listing.ak.disabled)
 
 ### 5.1 Legacy registry
 
@@ -260,7 +266,7 @@ updated or expires.
 
 ### 5.3 Oracle-priced marketplace pool
 
-[`marketplace.ak`](../contracts/marketplace/validators/marketplace.ak) uses a
+[`marketplace.ak`](../contracts/marketplace/retired-validators/marketplace.ak.disabled) uses a
 `VaultDatum` containing authentication NFTs for the pool, registry, oracle,
 and LP token, plus settlement asset, fees, exposure accounting, cash reserve,
 treasury, and pause state.
@@ -301,19 +307,19 @@ The LP policy only permits positive or negative LP minting when an input
 containing the configured pool token participates. The marketplace validator
 then checks the exact LP amount and pool transition.
 
-## 6. Sharded registry path
+## 6. Retired sharded registry path
 
 The V2 path separates registry state into small authenticated UTxOs:
 
-- [`registry_root.ak`](../contracts/marketplace/validators/registry_root.ak)
+- [`registry_root.ak`](../contracts/marketplace/retired-validators/registry_root.ak.disabled)
   stores admin, root NFT, version, pause state, quote assets, and the two shard
   policy IDs.
-- [`policy_shard.ak`](../contracts/marketplace/validators/policy_shard.ak)
+- [`policy_shard.ak`](../contracts/marketplace/retired-validators/policy_shard.ak.disabled)
   stores one `PolicyConfig`.
-- [`asset_shard.ak`](../contracts/marketplace/validators/asset_shard.ak)
+- [`asset_shard.ak`](../contracts/marketplace/retired-validators/asset_shard.ak.disabled)
   stores one optional exact `AssetConfig`.
 - The two `*_shard_policy.ak` files mint identity NFTs for those shards.
-- [`marketplace_sharded.ak`](../contracts/marketplace/validators/marketplace_sharded.ak)
+- [`marketplace_sharded.ak`](../contracts/marketplace/retired-validators/marketplace_sharded.ak.disabled)
   is the pool validator using `ShardedVaultDatum`.
 
 The marketplace takes the root as a reference input, then selects the policy
@@ -327,9 +333,9 @@ V1 registry datum cannot accidentally satisfy the V2 marketplace.
 
 ## 7. Orderbook validators
 
-### 7.1 Registry-dependent orderbook
+### 7.1 Retired registry-dependent orderbook
 
-[`p2p_listing.ak`](../contracts/marketplace/validators/p2p_listing.ak) is
+[`p2p_listing.ak`](../contracts/marketplace/retired-validators/p2p_listing.ak.disabled) is
 parameterized by the registry script address. Its `ListingDatum` contains:
 
 ```text
@@ -535,10 +541,11 @@ swap contend on the factory UTxO.
 and trading. Its second parameter is the shared bootstrap-offer address.
 
 `Advance` and `SetPaused` require the factory-admin signature.
-`AdvanceBootstrap` skips that signature only when the transaction also spends
-an input at the configured bootstrap-offer script address. The offer validator
-must then independently pass, so this is a constrained pool creation path, not
-a general permissionless factory update.
+`AdvanceBootstrap` also requires that Team-admin signature plus an input at
+the configured bootstrap-offer script address. The offer validator must then
+independently pass and requires the distinct LP signer, so this is a
+three-party constrained pool creation path, not a general permissionless
+factory update.
 
 ### 9.2 Pool creation and identity
 
@@ -549,19 +556,22 @@ the same asset name under the LP policy.
 Every live pool is a different UTxO at one shared `amm_pool` script address.
 The pool NFT identifies which datum/value belongs to that pool.
 
-### 9.3 Two-party FT bootstrap
+### 9.3 Three-party FT bootstrap
 
 `BootstrapOfferDatum` locks the owner address/key, factory token, FT asset and
 quantity, quote asset/reserve, fixed ADA buffer, and owner LP share in basis
 points. The offer UTxO contains exactly the FT contribution plus its ADA
 buffer.
 
-Acceptance consumes the offer and factory state, creates the next deterministic
-pool, mints exactly the initial LP supply, and pays both declared participants.
-For tADA/FT, the provider supplies the amount needed to reach the final ADA
-reserve after the owner buffer. For USDCx/FT, the provider supplies the full
-USDCx reserve while the owner buffer stays as `pool_lovelace`. The owner can
-cancel an unaccepted offer with the owner payment-key signature.
+The FT provider signs the offer-creation transaction. A distinct LP prepares
+and signs acceptance, and the configured factory Team creator/admin must sign
+the same complete transaction. Acceptance consumes the offer and factory
+state, creates the next deterministic pool, mints exactly the initial LP
+supply, and pays both declared participants. For tADA/FT, the LP supplies the
+amount needed to reach the final ADA reserve after the owner buffer. For
+USDCx/FT, the LP supplies the full USDCx reserve while the owner buffer stays
+as `pool_lovelace`. The FT provider can cancel an unaccepted offer with its
+payment-key signature. All three payment-key hashes must be different.
 
 ### 9.4 AMM rules
 
@@ -642,9 +652,10 @@ The current repository also contains marketplace tests for exact pool-owned
 escrow, receipt authorization/burning, and blocking liquidity changes while
 inventory is open. The DEX unit suite currently exercises AMM arithmetic and
 exact token-pool lovelace handling. Before enabling the bootstrap on Preprod,
-add transaction-level cases for owner cancellation, unauthorized acceptance,
-wrong pair/reserve/buffer, wrong pool ID, wrong LP split, missing offer input,
-and legacy-deployment rejection. These checks do not replace a network
+add transaction-level cases for FT-provider cancellation, unauthorized
+acceptance, missing LP or Team signature, reused role key, wrong
+pair/reserve/buffer, wrong pool ID, wrong LP split, missing offer input, and
+legacy-deployment rejection. These checks do not replace a network
 submission test with real UTxOs, min-UTxO values, wallet signing, datum
 encoding, and the target network ledger behavior.
 

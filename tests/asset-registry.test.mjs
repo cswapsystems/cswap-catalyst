@@ -68,8 +68,8 @@ test("registry lifecycle: initialize, authenticate, register, reject outsider, r
     assert.deepEqual(state.entries, []);
     assert.equal(state.version, 2n);
 
-    await assert.rejects(registry.readRegistry({ utxoByUnit: async () => ({ ...state.utxo, address: outsider.address }) }), /expected script/);
-    await assert.rejects(registry.readRegistry({ utxoByUnit: async () => ({ ...state.utxo, assets: { lovelace: 5000000n } }) }), /expected script/);
+    await assert.rejects(registry.readRegistry({ utxoByUnit: async () => ({ ...state.utxo, address: outsider.address }) }), /current request-enabled registry validator expects/);
+    await assert.rejects(registry.readRegistry({ utxoByUnit: async () => ({ ...state.utxo, assets: { lovelace: 5000000n } }) }), /missing its required token or inline datum/);
     assert.throws(() => registry.decodeRegistryDatum(tools, registry.registryDatum(tools, 1n, [unit, unit])), /Duplicate/);
     assert.throws(() => registry.decodeRegistryDatum(tools, registry.registryDatum(tools, -1n, [])), /Invalid/);
   } finally { globalThis.fetch = originalFetch; }

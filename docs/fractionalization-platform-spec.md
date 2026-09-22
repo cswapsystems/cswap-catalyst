@@ -13,7 +13,7 @@
 > contracts is [Production architecture](PRODUCTION_ARCHITECTURE.md),
 > [Contract guide](CONTRACTS_GUIDE.md), and the DEX contract guides. In
 > particular, the repository contains an interim direct shared-address AMM and
-> two-party FT bootstrap that targets Preprod; it does not yet implement the order-batched
+> three-party FT bootstrap that targets Preprod; it does not yet implement the order-batched
 > DEX described in §9.2–§9.4. No mainnet or audit readiness is implied.
 
 ---
@@ -444,9 +444,10 @@ Publishing listings in a format that existing storefronts index means platform a
 
 **Gated on D3.** The design below describes the proposed order-then-batch
 architecture, not the current interim implementation targeting Preprod. That path
-is a direct shared-address AMM with a two-party bootstrap offer: the FT owner
-locks the FT and terms, then a distinct LP provides tADA or USDCx to atomically
-create the pool and split initial LP tokens. It is documented in the
+is a direct shared-address AMM with a three-party bootstrap offer: the FT provider
+locks the FT and terms, a distinct LP provides tADA or USDCx, and the configured
+factory Team creator co-signs before the transaction atomically creates the pool
+and splits initial LP tokens. It is documented in the
 [DEX architecture](../contracts/dex/docs/ARCHITECTURE.md).
 
 The order-then-batch design remains recommended for a production volume target.

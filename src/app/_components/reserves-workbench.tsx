@@ -2,6 +2,7 @@
 
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { useWallet } from "./wallet-context";
+import { formatAdaWithUnit } from "@/lib/ada";
 import { marketplaceOrderbookAddress, marketplacePoolAddress } from "@/lib/protocol/marketplace-deployment";
 
 type AssetClass = { policyId: string; assetName: string };
@@ -31,9 +32,16 @@ function asAsset(value: unknown, label: string): AssetClass {
   return { policyId: asset.fields[0], assetName: asset.fields[1] };
 }
 
+function asBool(value: unknown, label: string): boolean {
+  if (typeof value === "boolean") return value;
+  const bool = asConstr(value, label);
+  if (bool.fields.length !== 0 || (bool.index !== 0 && bool.index !== 1)) throw new Error("Malformed " + label + " Boolean.");
+  return bool.index === 1;
+}
+
 function decodePoolDatum(value: unknown): Omit<PoolState, "utxo"> {
   const datum = asConstr(value, "quote pool");
-  if (datum.index !== 0 || datum.fields.length !== 10 || typeof datum.fields[6] !== "bigint" || typeof datum.fields[7] !== "bigint" || typeof datum.fields[8] !== "boolean" || typeof datum.fields[9] !== "bigint") throw new Error("Malformed quote pool datum.");
+  if (datum.index !== 0 || datum.fields.length !== 10 || typeof datum.fields[6] !== "bigint" || typeof datum.fields[7] !== "bigint" || typeof datum.fields[9] !== "bigint") throw new Error("Malformed quote pool datum.");
   return {
     datum,
     poolToken: asAsset(datum.fields[2], "pool token"),
@@ -41,7 +49,7 @@ function decodePoolDatum(value: unknown): Omit<PoolState, "utxo"> {
     quoteAsset: asAsset(datum.fields[5], "quote asset"),
     totalLpSupply: datum.fields[6],
     minCashReserve: datum.fields[7],
-    paused: datum.fields[8],
+    paused: asBool(datum.fields[8], "pool paused"),
     inventoryValue: datum.fields[9],
   };
 }
@@ -52,6 +60,10 @@ function unit(asset: AssetClass): string {
 
 function assetLabel(asset: AssetClass): string {
   return asset.policyId ? asset.policyId.slice(0, 12) + "…" + asset.assetName : "ADA";
+}
+
+function formatQuoteAmount(asset: AssetClass, amount: bigint): string {
+  return asset.policyId ? amount.toString() + " " + assetLabel(asset) : formatAdaWithUnit(amount);
 }
 
 function addAsset(assets: import("@lucid-evolution/lucid").Assets, asset: AssetClass, amount: bigint): import("@lucid-evolution/lucid").Assets {
@@ -217,7 +229,7 @@ export default function ReservesWorkbench() {
   }
 
   const configured = Boolean(quotePoolAddress && orderbookAddress);
-  return <section className="work-card form-card"><div className="section-heading"><div><span className="section-kicker">Liquidity / instant sell reserves</span><h2>Manage shared settlement reserves</h2></div><span className="step-badge">{configured ? pool ? "Pool ready" : loaded ? "Pool unavailable" : "Loading" : "Addresses needed"}</span></div><p className="mint-intro">Add or withdraw the quote asset used to settle Instant Sell orders. LP shares track each provider’s claim on the withdrawable reserve.</p><div className="segmented-control"><button type="button" className={mode === "add" ? "selected" : ""} onClick={() => selectMode("add")}>Add reserves</button><button type="button" className={mode === "remove" ? "selected" : ""} onClick={() => selectMode("remove")}>Remove reserves</button></div><div className="calculation-card"><span>Active quote pool</span><strong>{pool ? assetLabel(pool.quoteAsset) + " reserve · " + cash.toString() : configured ? "Connect Eternl to load the pool" : "Configure the pool and orderbook addresses"}</strong><p>{pool ? "LP supply: " + pool.totalLpSupply.toString() + " · Minimum reserve: " + pool.minCashReserve.toString() + " · Pool token: " + assetLabel(pool.poolToken) + " · Open inventory: " + pool.inventoryValue.toString() : "The pool must contain an inline QuotePoolDatum."}</p></div><div className="field-grid">{mode === "add" ? <Field label={pool ? "Reserve amount (" + assetLabel(pool.quoteAsset) + ")" : "Reserve amount"} value={amount} onChange={setAmount} placeholder="Smallest quote-asset units" hint="The quote asset is added to the shared pool." /> : <Field label="LP tokens to burn" value={lpAmount} onChange={setLpAmount} placeholder="LP token quantity" hint={pool ? "Withdrawable reserve: " + withdrawable.toString() + " " + assetLabel(pool.quoteAsset) : "Load the pool first."} />}</div>{message && <p className={message.kind === "error" ? "form-message error-message" : "form-message success-message"} role={message.kind === "error" ? "alert" : "status"}>{message.text}</p>}<div className="form-footer"><p><span className="status-dot" />{lucid ? " Eternl connected - ready to sign." : " Connect Eternl to manage reserves."}</p><button type="button" className="primary-button" onClick={() => void submitLiquidity()} disabled={loading || !pool || pool.inventoryValue !== BigInt(0)}>{loading ? "Awaiting wallet…" : mode === "add" ? "Add reserves" : "Remove reserves"} <span className="button-arrow">Go</span></button></div></section>;
+  return <section className="work-card form-card"><div className="section-heading"><div><span className="section-kicker">Liquidity / instant sell reserves</span><h2>Manage shared settlement reserves</h2></div><span className="step-badge">{configured ? pool ? "Pool ready" : loaded ? "Pool unavailable" : "Loading" : "Addresses needed"}</span></div><p className="mint-intro">Add or withdraw the quote asset used to settle Instant Sell orders. LP shares track each provider’s claim on the withdrawable reserve.</p><div className="segmented-control"><button type="button" className={mode === "add" ? "selected" : ""} onClick={() => selectMode("add")}>Add reserves</button><button type="button" className={mode === "remove" ? "selected" : ""} onClick={() => selectMode("remove")}>Remove reserves</button></div><div className="calculation-card"><span>Active quote pool</span><strong>{pool ? assetLabel(pool.quoteAsset) + " reserve · " + formatQuoteAmount(pool.quoteAsset, cash) : configured ? "Connect Eternl to load the pool" : "Configure the pool and orderbook addresses"}</strong><p>{pool ? "LP supply: " + pool.totalLpSupply.toString() + " · Minimum reserve: " + formatQuoteAmount(pool.quoteAsset, pool.minCashReserve) + " · Pool token: " + assetLabel(pool.poolToken) + " · Open inventory: " + formatQuoteAmount(pool.quoteAsset, pool.inventoryValue) : "The pool must contain an inline QuotePoolDatum."}</p></div><div className="field-grid">{mode === "add" ? <Field label={pool ? "Reserve amount (" + (pool.quoteAsset.policyId ? assetLabel(pool.quoteAsset) + ", base units" : "lovelace") + ")" : "Reserve amount"} value={amount} onChange={setAmount} placeholder={pool?.quoteAsset.policyId ? "Smallest quote-asset units" : "Lovelace"} hint={pool?.quoteAsset.policyId ? "The quote asset is added to the shared pool." : "ADA is displayed in ADA, but this transaction input uses lovelace."} /> : <Field label="LP tokens to burn" value={lpAmount} onChange={setLpAmount} placeholder="LP token quantity" hint={pool ? "Withdrawable reserve: " + formatQuoteAmount(pool.quoteAsset, withdrawable) : "Load the pool first."} />}</div>{message && <p className={message.kind === "error" ? "form-message error-message" : "form-message success-message"} role={message.kind === "error" ? "alert" : "status"}>{message.text}</p>}<div className="form-footer"><p><span className="status-dot" />{lucid ? " Eternl connected - ready to sign." : " Connect Eternl to manage reserves."}</p><button type="button" className="primary-button" onClick={() => void submitLiquidity()} disabled={loading || !pool || pool.inventoryValue !== BigInt(0)}>{loading ? "Awaiting wallet…" : mode === "add" ? "Add reserves" : "Remove reserves"} <span className="button-arrow">Go</span></button></div></section>;
 }
 
 function Field({ label, placeholder, hint, value, onChange }: { label: string; placeholder: string; hint?: string; value: string; onChange: (value: string) => void }) {

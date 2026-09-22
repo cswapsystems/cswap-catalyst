@@ -12,8 +12,8 @@ Detailed design, validator invariants, deployment sequencing, and operator guida
 | Validator | Role |
 | --- | --- |
 | `factory_bootstrap` | One-shot policy that consumes a deployment seed and mints the permanent factory-state NFT. |
-| `factory_state` | Holds the factory configuration, pool sequence, pause flag, and admin. Normal creation is admin-signed; a matching bootstrap offer enables the constrained `AdvanceBootstrap` path. |
-| `bootstrap_offer` | Escrows an FT owner’s exact contribution and immutable pair terms until a distinct LP accepts or the owner cancels. |
+| `factory_state` | Holds the factory configuration, pool sequence, pause flag, and Team creator/admin. Normal creation and the constrained `AdvanceBootstrap` path both require that Team signature. |
+| `bootstrap_offer` | Escrows an FT provider’s exact contribution and immutable pair terms until a distinct LP and the Team creator approve the same settlement transaction, or the provider cancels. |
 | `amm_pool` | The one shared address for every pool. Validates swaps, proportional LP updates, and controlled full closure. |
 | `lp_policy` | One shared LP policy. Each pool’s LP asset name is its deterministic pool ID. |
 | `pool_factory` | One shared pool-NFT policy. It mints exactly one deterministic NFT for each factory-state advance. |
@@ -51,13 +51,13 @@ cannot be trapped in or extracted from a pool.
 6. Mint the factory-state NFT with `factory_bootstrap`, creating a
    `FactoryDatum` that records the pool-factory policy ID, admin key hash,
    `next_pool_id`, and pause state.
-7. Create a standard admin pool with `Advance`, or create a two-party pool
+7. Create a standard admin pool with `Advance`, or create a three-party pool
    with an accepted `BootstrapOfferDatum` and `AdvanceBootstrap`. Pool NFTs
    and LP tokens use the 8-byte big-endian `next_pool_id` asset name.
 
 Every initial-pool transaction is checked independently by `factory_state`,
 `pool_factory`, and `lp_policy`, and must create a complete pool UTxO at the
-single AMM address. A two-party creation is also checked by `bootstrap_offer`.
+single AMM address. A three-party creation is also checked by `bootstrap_offer`.
 
 ## Operations
 
@@ -108,7 +108,7 @@ npm run dex:preprod -- close <fraction-unit>
 
 The public deployment addresses and confirmed lifecycle transaction IDs are
 recorded in `dex-deployment.preprod.json`; it contains no signing material.
-The admin script commands create and operate tADA/FT pools. The `/dex` UI derives the same scripts from the deployment record, reads live pools, signs normal operations with Eternl, and presents the two-party tADA/FT or USDCx/FT bootstrap flow. The deployment record must include `bootstrapOfferAddress` before the UI will enable it.
+The admin script commands create and operate tADA/FT pools. The `/dex` UI derives the same scripts from the deployment record, reads live pools, signs normal operations with Eternl, and presents the three-party tADA/FT or USDCx/FT bootstrap flow. The deployment record must include `bootstrapOfferAddress` before the UI will enable it.
 
 ## Security boundary
 
@@ -116,26 +116,30 @@ This is not audited production code. A deployment should have independent
 review, transaction-level integration tests, min-UTxO checks for the selected
 network, and an operational policy for the factory-admin key.
 
-## Two-party FT pool bootstrap
+## Three-party FT pool bootstrap
 
-The interim bootstrap path lets an FT owner and a separate liquidity provider
-launch a pair without handing either side to the other. The owner submits a
-`BootstrapOfferDatum` that locks the exact FT quantity and required ADA buffer.
-It also fixes the quote asset (tADA or USDCx), final quote reserve, and initial
-LP-share split in basis points. The contract requires a different provider
-address, but cannot establish that two addresses are controlled by different
-people; the owner may cancel until an acceptance transaction confirms.
+The interim bootstrap path lets an FT provider, a separate liquidity provider,
+and the configured Team creator launch a pair without handing either side to
+the other. The FT provider submits a `BootstrapOfferDatum` that locks the exact
+FT quantity and required ADA buffer. It also fixes the quote asset (tADA or
+USDCx), final quote reserve, and initial LP-share split in basis points. The
+contract requires three distinct payment-key hashes (FT provider, LP, and Team
+creator), but cannot establish that those addresses are controlled by different
+people; the FT provider may cancel until an approval transaction confirms.
 
-A provider accepts the offer in one transaction. It must create the matching
+A liquidity provider prepares the acceptance transaction, funds the quote side,
+and signs it. The configured Team creator/admin reviews the immutable complete
+transaction and adds the required second witness. It must create the matching
 AMM UTxO, advance the factory sequence, mint the matching pool NFT and every
-initial LP token, then pay the owner and provider their declared allocations.
+initial LP token, then pay the FT provider and LP their declared allocations.
 Initial LP supply is `floor(sqrt(quote_reserve * FT_reserve))`; the owner share
-is `floor(total_lp * owner_share_bps / 10_000)` and the provider receives the
+is `floor(total_lp * owner_share_bps / 10_000)` and the LP receives the
 remainder. The offer validator rejects a different asset pair, reserve, ADA
-buffer, pool identity, or LP allocation. The owner can cancel an unaccepted
-offer with the owner payment-key signature.
+buffer, pool identity, LP allocation, missing LP signature, missing Team
+signature, or reused FT-provider/LP/Team payment key. The FT provider can
+cancel an unaccepted offer with its payment-key signature.
 
-| Quote pair | FT owner locks | LP provider supplies |
+| Quote pair | FT provider locks | LP provider supplies |
 | --- | --- | --- |
 | tADA / FT | FT amount and ADA buffer | Final ADA reserve minus the locked buffer |
 | USDCx / FT | FT amount and the fixed pool ADA buffer | Full USDCx reserve |
@@ -143,14 +147,13 @@ offer with the owner payment-key signature.
 For a token/token pool, `pool_lovelace` remains the fixed ADA buffer through
 swaps, liquidity updates, and closure; it is not the USDCx reserve.
 
-factory_state keeps its admin signature requirement for normal Advance and
-SetPaused operations. Its AdvanceBootstrap branch is permissionless only when
-the transaction spends the shared bootstrap_offer validator. This makes the
-LP-provider flow usable from a normal wallet while retaining the factory admin
-boundary for ordinary pool creation and pausing.
+`factory_state` keeps its Team-admin signature requirement for normal Advance
+and SetPaused operations. Its `AdvanceBootstrap` branch also requires that
+Team signature and a matching bootstrap-offer input. This preserves the factory
+approval boundary while the distinct LP funds the quote-side contribution.
 
 This changes the deployed factory-state validator, its address derivation, and
-its redeemer encoding. Build the contracts, review the new deployment record,
+its bootstrap-offer redeemer encoding. Build the contracts, review the new deployment record,
 and run `npm run dex:preprod -- redeploy` on Preprod before using this UI. The
 record must include `bootstrapOfferAddress`. Never use the new UI against a
 legacy factory; it cannot be upgraded in place.

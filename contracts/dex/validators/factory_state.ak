@@ -14,7 +14,7 @@ use ebecca/dex_types.{
 /// This UTxO is consumed only when a new pool is created. It is otherwise a
 /// reference input, so swaps and LP operations do not contend on it.
 /// The shared offer validator address is supplied at deployment. Its script
-/// controls the only permissionless pool-creation path.
+/// binds the Team-approved bootstrap-pool creation path.
 validator factory_state(
   admin: VerificationKeyHash,
   bootstrap_offer_address: Address,
@@ -43,11 +43,15 @@ validator factory_state(
 
     and {
       when action is {
-        AdvanceBootstrap ->
-          list.any(
-            self.inputs,
-            fn(input: Input) { input.output.address == bootstrap_offer_address },
-          )
+        AdvanceBootstrap -> and {
+            list.has(self.extra_signatories, admin),
+            list.any(
+              self.inputs,
+              fn(input: Input) {
+                input.output.address == bootstrap_offer_address
+              },
+            ),
+          }
         _ -> list.has(self.extra_signatories, admin)
       },
       before.admin == admin,

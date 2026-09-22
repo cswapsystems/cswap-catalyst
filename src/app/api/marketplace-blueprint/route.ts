@@ -6,7 +6,6 @@ export const runtime = "nodejs";
 
 const allowed = new Set([
   "p2p_listing_simple.p2p_listing_simple.spend",
-  "p2p_listing.p2p_listing.spend",
   "quote_pool.quote_pool.spend",
   "lp_policy.lp_policy.mint",
   "inventory_policy.inventory_policy.mint",

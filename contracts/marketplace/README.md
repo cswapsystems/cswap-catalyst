@@ -1,10 +1,14 @@
-# ebecca-marketplace-contracts-v2
+# ebecca marketplace contracts
 
-Aiken contracts for an oracle-priced Cardano RWA liquidity pool.
+## Current contract status
 
-## Production registry sharding (V2)
+The currently supported Marketplace is the registry-free shared quote-pool path plus the separate asset-admission registry. Its active validator sources are `asset_registry`, `asset_registry_request`, `one_shot`, `quote_pool`, `lp_policy`, `inventory_policy`, `pool_sell_request`, and `p2p_listing_simple`. See the repository-wide [validator inventory](../../docs/VALIDATOR_INVENTORY.md) before deriving any script.
 
-The V1 `registry` and `marketplace` validators are retained unchanged for a controlled migration. The V2 path is separate and cannot decode or accept a V1 `RegistryDatum`:
+The legacy oracle/registry and sharded validator families have been moved to `retired-validators/*.ak.disabled`. They are source history only: Aiken does not build them and the application does not load them for new transactions.
+
+## Archived registry sharding (V2)
+
+The former V1 `registry` and `marketplace` validators and V2 sharded path are archived. The following notes describe the retired design only; do not deploy it:
 
 - `registry_root` authenticates the small global root: admin, root NFT, version, pause state, quote assets, and the two shard-policy IDs.
 - `policy_shard` stores one `PolicyConfig` per policy ID; `asset_shard` stores an optional, exact-asset `AssetConfig`. Each update consumes only that shard.
@@ -16,7 +20,7 @@ Shard updates and shard creation require only a reference input to the root, so 
 
 The pool is not a constant-product AMM. It uses authenticated oracle prices and a registry-controlled asset permission model. Sellers can sell approved RWA tokens into a shared settlement reserve, buyers can buy RWA inventory from the pool, liquidity providers can deposit or withdraw the settlement asset through LP shares, and an authorized operator can settle inventory out of the pool only by depositing NAV value.
 
-## Contract Set
+## Archived oracle/registry contract set
 
 ### `validators/one_shot.ak`
 
@@ -31,7 +35,7 @@ Use it to create unique authentication tokens for:
 
 The policy requires a configured seed `OutputReference` to be spent and mints exactly one token with the configured name.
 
-### `validators/registry.ak`
+### Archived `registry.ak`
 
 Maintains the asset registry and risk controls.
 
@@ -47,7 +51,7 @@ The registry datum contains:
 
 Registry updates require the admin signature, preserve the registry NFT, recreate a continuing output, and increase `sequence`.
 
-### `validators/oracle.ak`
+### Archived `oracle.ak`
 
 Maintains authenticated bid/ask/NAV pricing.
 
@@ -62,7 +66,7 @@ The oracle datum contains:
 
 The pool resolves prices by checking an active asset override first, then the policy default. Oracle updates require the operator signature, preserve the oracle NFT and quote asset, increase `sequence`, set a future `valid_until`, and pass sanity checks: positive denominators, positive bid/ask/NAV, and `bid <= nav <= ask`.
 
-### `validators/marketplace.ak`
+### Archived `marketplace.ak`
 
 Main pool validator.
 
@@ -95,7 +99,7 @@ LP token minting policy.
 
 The policy allows LP minting or burning only when a pool input containing the configured `vault_token` participates in the transaction. The pool validator then checks the exact LP mint or burn amount for liquidity actions.
 
-### `validators/p2p_listing.ak`
+### Archived `p2p_listing.ak`
 
 Fixed-price orderbook validator for one asset class and any positive quantity.
 
@@ -109,7 +113,7 @@ Fixed-price orderbook validator for one asset class and any positive quantity.
 
 Registry-free fixed-price orderbook variant. It keeps the same exact escrow, buy, cancel, and update behavior, but has no registry datum, registry NFT, registry reference input, or asset allowlist. The requested payment asset is accepted directly from the listing datum.
 
-## Pricing Model
+## Archived pricing model
 
 Quotes use integer ratios:
 
@@ -216,7 +220,7 @@ Run full validator scenario coverage in the Lucid emulator:
 npm run test:full-scenarios
 ```
 
-The smoke test runs `aiken build`, checks that all expected validators are present in `plutus.json`, and verifies that the JavaScript encoders can serialize registry, oracle, and pool datums.
+The active smoke checks must target only the active validator set in the validator inventory. The registry/oracle encoders in the archived sections are historical reference material, not a supported deployment path.
 
 
 ### Registry-free shared quote pool

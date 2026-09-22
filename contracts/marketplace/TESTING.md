@@ -56,11 +56,11 @@ Run the offchain smoke test:
 npm run offchain:smoke
 ```
 
-A passing smoke test proves that `plutus.json` can be generated, expected validators exist, and the offchain encoders can serialize the registry, oracle, and pool datums. It does not prove that every transaction branch validates.
+A passing smoke test proves that the active blueprint can be generated and its supported encoders serialize successfully. It does not prove that every transaction branch validates. The historical oracle/registry validators are archived; see the [validator inventory](../../docs/VALIDATOR_INVENTORY.md).
 
-## 2.1 V2 sharding coverage
+## Archived 2.1 V2 sharding coverage
 
-The sharded contracts add the following invariants, which should be exercised by the V2 emulator deployment harness before Preprod use:
+The sharded contracts below are archived source history. Do not use this checklist for a new deployment:
 
 - root, Policy-shard, and Asset-shard references must each carry their configured identity NFT and matching inline datum;
 - every trade requires the root and exactly matching Policy shard; a V1 registry datum fails to decode in `marketplace_sharded`;
@@ -76,9 +76,9 @@ npm run test:full-scenarios
 
 This harness exercises positive validator paths and expected-failure cases without submitting failing transactions to a public testnet.
 
-## 3. What Proper Validator Tests Must Cover
+## 3. Active validator tests to add
 
-Use a Cardano emulator, Lucid transaction tests, or testnet scripts to build full transactions for every redeemer path. Each test should spend the pool UTxO, attach the required reference inputs, recreate the continuing pool output with the expected inline datum, and verify the transaction either validates or fails for the expected reason.
+Use a Cardano emulator, Lucid transaction tests, or testnet scripts to build full transactions for every active redeemer path. The detailed oracle/registry cases below are historical reference; prioritize the active registry, quote-pool, Instant Sell, and direct-listing paths in the validator inventory. Each test should spend the pool UTxO, attach the required reference inputs, recreate the continuing pool output with the expected inline datum, and verify the transaction either validates or fails for the expected reason.
 
 Required positive tests:
 

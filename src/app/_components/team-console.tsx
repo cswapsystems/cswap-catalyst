@@ -6,13 +6,17 @@ import PlatformHeader from "./platform-header";
 import ReservesWorkbench from "./reserves-workbench";
 import TeamWorkbench from "./team-workbench";
 import { marketplaceDeployment } from "@/lib/protocol/marketplace-deployment";
+import { formatAda } from "@/lib/ada";
 import { useWallet } from "./wallet-context";
 
 type PoolHealth = { cash: bigint; minimumReserve: bigint; inventoryValue: bigint; totalLpSupply: bigint; paused: boolean };
 
-function formatAda(value: bigint) {
-  return new Intl.NumberFormat("en-US", { maximumFractionDigits: 6 }).format(Number(value) / 1_000_000);
+function datumBool(tools: typeof import("@lucid-evolution/lucid"), value: unknown): boolean {
+  if (typeof value === "boolean") return value;
+  if (!(value instanceof tools.Constr) || value.fields.length !== 0 || (value.index !== 0 && value.index !== 1)) throw new Error("The configured shared pool paused flag is invalid.");
+  return value.index === 1;
 }
+
 
 export default function TeamConsole() {
   const { address, lucid, connect } = useWallet();
@@ -29,8 +33,8 @@ export default function TeamConsole() {
       const utxo = await lucid.utxoByUnit(marketplaceDeployment.pool.token);
       if (!utxo.datum) throw new Error("The configured shared pool has no inline datum.");
       const datum = tools.Data.from(utxo.datum);
-      if (!(datum instanceof tools.Constr) || datum.index !== 0 || datum.fields.length !== 10 || typeof datum.fields[6] !== "bigint" || typeof datum.fields[7] !== "bigint" || typeof datum.fields[8] !== "boolean" || typeof datum.fields[9] !== "bigint") throw new Error("The configured shared pool datum is invalid.");
-      setHealth({ cash: utxo.assets.lovelace ?? BigInt(0), totalLpSupply: datum.fields[6], minimumReserve: datum.fields[7], paused: datum.fields[8], inventoryValue: datum.fields[9] });
+      if (!(datum instanceof tools.Constr) || datum.index !== 0 || datum.fields.length !== 10 || typeof datum.fields[6] !== "bigint" || typeof datum.fields[7] !== "bigint" || typeof datum.fields[9] !== "bigint") throw new Error("The configured shared pool datum is invalid.");
+      setHealth({ cash: utxo.assets.lovelace ?? BigInt(0), totalLpSupply: datum.fields[6], minimumReserve: datum.fields[7], paused: datumBool(tools, datum.fields[8]), inventoryValue: datum.fields[9] });
     } catch (cause) {
       setHealth(null);
       setError(cause instanceof Error ? cause.message : "Unable to read shared-pool health.");

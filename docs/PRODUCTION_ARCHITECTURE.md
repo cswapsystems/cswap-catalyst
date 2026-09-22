@@ -71,7 +71,7 @@ The DEX is a constant-product AMM separate from the shared quote pool. A factory
 
 The factory administrator can consume factory state with `Advance`, mint the next pool NFT and initial LP supply, and create a tADA/FT pool. This remains the regular controlled pool-creation route.
 
-### Interim two-party FT bootstrap
+### Interim three-party FT bootstrap
 
 The FT owner creates a `BootstrapOfferDatum` and locks:
 
@@ -80,17 +80,17 @@ The FT owner creates a `BootstrapOfferDatum` and locks:
 - required ADA buffer for the escrow/pool UTxO;
 - owner LP share in basis points.
 
-A different LP address accepts. One transaction consumes the offer and factory state using `AdvanceBootstrap`, creates the deterministic AMM UTxO, mints the pool NFT and complete LP supply, and pays the fixed LP allocations to the owner and provider. The owner can cancel an unaccepted offer with its stored payment-key signature. The script enforces distinct addresses, not distinct legal identities.
+A different LP address prepares and signs the acceptance transaction, funding the quote side. The configured factory Team creator/admin must review and co-sign that exact completed transaction before submission. It consumes the offer and factory state using `AdvanceBootstrap`, creates the deterministic AMM UTxO, mints the pool NFT and complete LP supply, and pays the fixed LP allocations to the FT provider and LP. The FT provider can cancel an unaccepted offer with its stored payment-key signature. The script enforces distinct payment-key hashes, not distinct legal identities.
 
 For a tADA pair, the owner buffer forms part of the final ADA reserve and the LP supplies the difference. For a USDCx/FT pair, the owner supplies the fixed ADA buffer while the LP supplies the full USDCx reserve. Token/token pools preserve that fixed ADA buffer across swaps, liquidity changes, and closure.
 
-`AdvanceBootstrap` does not need the factory-admin signature, but it is only valid alongside an input at the configured bootstrap-offer validator; that validator independently binds the asset pair, reserves, pool identity, and LP split.
+`AdvanceBootstrap` requires the factory-admin/Team signature and an input at the configured bootstrap-offer validator. That validator independently binds the asset pair, reserves, pool identity, LP split, LP signer, and Team signer.
 
 ## Deployment and migration
 
 Marketplace and DEX deployments have independent public manifests. A manifest contains public addresses, policy IDs, and transaction identifiers; it must never contain wallet seeds, Blockfrost secrets, or batcher private keys.
 
-The two-party bootstrap changed the `factory_state` validator parameterization and factory-state action encoding. A deployed factory cannot be modified in place. A new Preprod deployment must be created with the reviewed blueprint and a manifest containing `bootstrapOfferAddress`. The UI rejects a legacy deployment rather than constructing a transaction against mismatched validators.
+The three-party bootstrap changes the `factory_state` and bootstrap-offer validator scripts and the offer-action encoding. A deployed factory cannot be modified in place. A new Preprod deployment must be created with the reviewed blueprint and a manifest containing `bootstrapOfferAddress`. Until that migration, the UI keeps factory creation and three-party bootstrap unavailable, but active pools whose AMM address and policy IDs match the reviewed blueprint remain swappable and support normal LP transitions.
 
 The asset-admission request flow adds RegisterMany to the basic registry and a parameterized asset_registry_request validator. It changes the basic registry script hash, so existing basic-registry deployments require an intentional redeployment and reviewed-entry migration before this interface is enabled.
 

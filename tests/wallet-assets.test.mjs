@@ -1,6 +1,7 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 import { formatWalletAda, summarizeWalletAssets, walletAssetName } from "../src/lib/wallet-assets.ts";
+import { formatAda, formatAdaWithUnit } from "../src/lib/ada.ts";
 
 const policy = "ab".repeat(28);
 
@@ -37,4 +38,6 @@ test("ADA formatting retains all six fractional digits and very large balances",
   assert.equal(formatWalletAda(1n), "0.000001");
   assert.equal(formatWalletAda(1234500n), "1.2345");
   assert.equal(formatWalletAda(9007199254740993123456n), "9,007,199,254,740,993.123456");
+  assert.equal(formatAda(-120000001n), "-120.000001");
+  assert.equal(formatAdaWithUnit(120000000n), "120 ADA");
 });
