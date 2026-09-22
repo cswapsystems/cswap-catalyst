@@ -1,104 +1,23 @@
 "use client";
 
+import { confirmTransaction } from "@/lib/transaction-confirmation";
+
 import { FormEvent, useCallback, useEffect, useMemo, useState } from "react";
 import { useWallet } from "./wallet-context";
-import DexBootstrapWorkbench from "./dex-bootstrap-workbench";
 import { formatAda } from "@/lib/ada";
-import { parseAdaToLovelace, quoteConstantProduct } from "@/lib/dex";
+import { parseAdaToLovelace, quoteConstantProduct, quoteLiquidityDeposit, quoteLiquidityWithdrawal, priceImpactBps } from "@/lib/dex";
+import { type Deployment, type Scripts, type Pool, type Action, actions, assetData, assetUnit, parseUnit, parseIntegerAmount, addressData, poolName, integerSqrt, asConstr, decodePool, isAuthenticatedPool, nextDatum, poolValue, reservePayout, displayName, format, loadDex } from "@/lib/protocol/dex-client";
 
-type Tools = typeof import("@lucid-evolution/lucid");
-type AssetClass = { policyId: string; assetName: string };
-type Deployment = { network: "preprod"; admin: string; factoryToken: string; factoryAddress: string; ammAddress: string; lpPolicyId: string; poolPolicyId: string; bootstrapOfferAddress?: string; transaction: string };
-type Scripts = { factoryState?: import("@lucid-evolution/lucid").Script; amm: import("@lucid-evolution/lucid").Script; lp: import("@lucid-evolution/lucid").Script; poolFactory: import("@lucid-evolution/lucid").Script };
-type Pool = { id: string; utxo: import("@lucid-evolution/lucid").UTxO; raw: import("@lucid-evolution/lucid").Constr<import("@lucid-evolution/lucid").Data>; poolNft: AssetClass; assetA: AssetClass; assetB: AssetClass; lpToken: AssetClass; feeN: bigint; feeD: bigint; reserveA: bigint; reserveB: bigint; liquidity: bigint; poolLovelace: bigint };
-type Action = "create" | "swap-a" | "swap-b" | "add" | "remove" | "destroy";
-
-const actions: { id: Action; label: string }[] = [
-  { id: "swap-a", label: "Buy fractions" }, { id: "swap-b", label: "Sell fractions" },
-  { id: "add", label: "Add liquidity" }, { id: "remove", label: "Remove liquidity" },
-  { id: "create", label: "Create pool" }, { id: "destroy", label: "Destroy pool" },
-];
-
-function assetData(tools: Tools, asset: AssetClass) { return new tools.Constr(0, [asset.policyId, asset.assetName]); }
-function assetUnit(asset: AssetClass) { return asset.policyId ? asset.policyId + asset.assetName : "lovelace"; }
-function parseUnit(value: string): AssetClass {
-  const normalized = value.trim().toLowerCase();
-  if (!/^[0-9a-f]+$/.test(normalized) || normalized.length < 56 || normalized.length % 2 !== 0) throw new Error("The fraction asset unit must be policy ID + asset name in hexadecimal.");
-  return { policyId: normalized.slice(0, 56), assetName: normalized.slice(56) };
-}
-function parseIntegerAmount(value: string, label: string) {
-  const normalized = value.trim();
-  if (!/^[1-9]\d*$/.test(normalized)) throw new Error(label + " must be a positive whole number of base units.");
-  return BigInt(normalized);
-}
-function addressData(tools: Tools, address: string) {
-  const details = tools.getAddressDetails(address);
-  if (!details.paymentCredential) throw new Error("Address has no payment credential.");
-  const credential = (item: { type: "Key" | "Script"; hash: string }) => item.type === "Key" ? { PubKeyCredential: [item.hash] } : { ScriptCredential: [item.hash] };
-  return tools.Data.from(tools.Data.to({ addressCredential: credential(details.paymentCredential), addressStakingCredential: details.stakeCredential ? { StakingHash: [credential(details.stakeCredential)] } : null } as never, tools.AddressSchema as never));
-}
-function poolName(id: bigint) { return id.toString(16).padStart(16, "0"); }
-function integerSqrt(value: bigint) { if (value < BigInt(0)) throw new Error("Negative square root."); if (value < BigInt(2)) return value; let x = value; let y = (x + BigInt(1)) / BigInt(2); while (y < x) { x = y; y = (x + value / x) / BigInt(2); } return x; }
-function gcd(a: bigint, b: bigint) { while (b !== BigInt(0)) { const next = a % b; a = b; b = next; } return a; }
-function asConstr(value: unknown, label: string): import("@lucid-evolution/lucid").Constr<import("@lucid-evolution/lucid").Data> {
-  if (!(value && typeof value === "object" && "index" in value && "fields" in value && Array.isArray((value as { fields: unknown }).fields))) throw new Error(`Malformed ${label} datum.`);
-  return value as import("@lucid-evolution/lucid").Constr<import("@lucid-evolution/lucid").Data>;
-}
-function asAsset(value: unknown, label: string): AssetClass {
-  const item = asConstr(value, label);
-  if (item.fields.length !== 2 || typeof item.fields[0] !== "string" || typeof item.fields[1] !== "string") throw new Error(`Malformed ${label}.`);
-  return { policyId: item.fields[0], assetName: item.fields[1] };
-}
-function decodePool(tools: Tools, utxo: import("@lucid-evolution/lucid").UTxO): Pool {
-  if (!utxo.datum) throw new Error("Pool datum is missing.");
-  const raw = asConstr(tools.Data.from(utxo.datum), "pool");
-  if (raw.fields.length !== 10 || !raw.fields.slice(4, 10).every((value) => typeof value === "bigint")) throw new Error("Malformed pool datum.");
-  return { id: `${utxo.txHash}#${utxo.outputIndex}`, utxo, raw, poolNft: asAsset(raw.fields[0], "pool NFT"), assetA: asAsset(raw.fields[1], "quote asset"), assetB: asAsset(raw.fields[2], "fraction asset"), lpToken: asAsset(raw.fields[3], "LP token"), feeN: raw.fields[4] as bigint, feeD: raw.fields[5] as bigint, reserveA: raw.fields[6] as bigint, reserveB: raw.fields[7] as bigint, liquidity: raw.fields[8] as bigint, poolLovelace: raw.fields[9] as bigint };
-}
-function nextDatum(tools: Tools, pool: Pool, reserveA: bigint, reserveB: bigint, liquidity: bigint) {
-  return new tools.Constr(0, [pool.raw.fields[0], pool.raw.fields[1], pool.raw.fields[2], pool.raw.fields[3], pool.feeN, pool.feeD, reserveA, reserveB, liquidity, pool.assetA.policyId ? pool.poolLovelace : reserveA]);
-}
-function poolValue(pool: Pool, reserveA: bigint, reserveB: bigint) {
-  return pool.assetA.policyId ? { lovelace: pool.poolLovelace, [assetUnit(pool.assetA)]: reserveA, [assetUnit(pool.assetB)]: reserveB, [assetUnit(pool.poolNft)]: BigInt(1) } : { lovelace: reserveA, [assetUnit(pool.assetB)]: reserveB, [assetUnit(pool.poolNft)]: BigInt(1) };
-}
-function reservePayout(pool: Pool) {
-  return pool.assetA.policyId ? { lovelace: pool.poolLovelace, [assetUnit(pool.assetA)]: pool.reserveA, [assetUnit(pool.assetB)]: pool.reserveB } : { lovelace: pool.reserveA, [assetUnit(pool.assetB)]: pool.reserveB };
-}
-function displayName(asset: AssetClass) {
-  try { const pairs = asset.assetName.match(/.{2}/g) ?? []; return new TextDecoder("utf-8", { fatal: true }).decode(Uint8Array.from(pairs, (byte) => Number.parseInt(byte, 16))) || "Fraction token"; }
-  catch { return "Fraction token"; }
-}
-function format(value: bigint) { return new Intl.NumberFormat("en-US").format(value); }
-
-async function loadDex(tools: Tools) {
-  const response = await fetch("/api/dex-blueprint", { cache: "no-store" });
-  const body = await response.json() as { validators?: Record<string, string>; deployment?: Deployment; error?: string };
-  if (!response.ok || !body.validators || !body.deployment) throw new Error(body.error ?? "DEX deployment is unavailable.");
-  const deployment = body.deployment;
-  const factoryToken = parseUnit(deployment.factoryToken);
-  const amm = { type: "PlutusV3" as const, script: tools.applyParamsToScript(body.validators["amm_pool.amm_pool.spend"], [assetData(tools, factoryToken)]) };
-  const lp = { type: "PlutusV3" as const, script: tools.applyParamsToScript(body.validators["lp_policy.lp_policy.mint"], [assetData(tools, factoryToken), addressData(tools, deployment.ammAddress)]) };
-  const poolFactory = { type: "PlutusV3" as const, script: tools.applyParamsToScript(body.validators["pool_factory.pool_factory.mint"], [assetData(tools, factoryToken), addressData(tools, deployment.ammAddress), deployment.lpPolicyId]) };
-  if (tools.validatorToAddress("Preprod", amm) !== deployment.ammAddress || tools.mintingPolicyToId(lp) !== deployment.lpPolicyId || tools.mintingPolicyToId(poolFactory) !== deployment.poolPolicyId) throw new Error("The AMM deployment record does not match the current DEX contracts.");
-  const offerCode = body.validators["bootstrap_offer.bootstrap_offer.spend"];
-  const factoryCode = body.validators["factory_state.factory_state.spend"];
-  let factoryState: import("@lucid-evolution/lucid").Script | undefined;
-  if (offerCode && factoryCode) {
-    const offer = { type: "PlutusV3" as const, script: offerCode };
-    const offerAddress = tools.validatorToAddress("Preprod", offer);
-    const candidate = { type: "PlutusV3" as const, script: tools.applyParamsToScript(factoryCode, [deployment.admin, addressData(tools, offerAddress) as import("@lucid-evolution/lucid").Data]) };
-    if (deployment.bootstrapOfferAddress === offerAddress && tools.validatorToAddress("Preprod", candidate) === deployment.factoryAddress) factoryState = candidate;
-  }
-  return { deployment, scripts: { factoryState, amm, lp, poolFactory } satisfies Scripts, canCreatePool: Boolean(factoryState) };
-}
-
-export default function DexWorkbench() {
+export default function DexWorkbench({ mode = "swap" }: { mode?: "swap" | "liquidity" | "admin" }) {
   const { lucid, address } = useWallet();
   const [deployment, setDeployment] = useState<Deployment | null>(null);
   const [scripts, setScripts] = useState<Scripts | null>(null);
   const [pools, setPools] = useState<Pool[]>([]);
   const [selected, setSelected] = useState("");
-  const [action, setAction] = useState<Action>("swap-a");
+  const [action, setAction] = useState<Action>(mode === "liquidity" ? "add" : mode === "admin" ? "create" : "swap-a");
+  const [balances, setBalances] = useState<Record<string, bigint>>({});
+  const [isAdmin, setIsAdmin] = useState(false);
+  const [pendingHash, setPendingHash] = useState("");
   const [asset, setAsset] = useState("");
   const [ada, setAda] = useState("10");
   const [amount, setAmount] = useState("1");
@@ -107,17 +26,22 @@ export default function DexWorkbench() {
   const [message, setMessage] = useState<{ kind: "error" | "success"; text: string } | null>(null);
   const [canCreatePool, setCanCreatePool] = useState(false);
   const pool = useMemo(() => pools.find((item) => item.id === selected) ?? pools[0], [pools, selected]);
-  const availableActions = canCreatePool ? actions : actions.filter((item) => item.id !== "create");
+  const availableActions = actions.filter((item) => mode === "swap" ? item.id.startsWith("swap") : mode === "liquidity" ? ["add", "remove"].includes(item.id) : ["create", "destroy"].includes(item.id));
 
   const refresh = useCallback(async () => {
     setLoading(true); setMessage(null);
     try {
       const tools = await import("@lucid-evolution/lucid");
       const loaded = await loadDex(tools); setDeployment(loaded.deployment); setScripts(loaded.scripts); setCanCreatePool(loaded.canCreatePool);
-      if (!lucid) { setPools([]); return; }
+      if (!lucid) { setPools([]); setBalances({}); setIsAdmin(false); return; }
+      const credential = tools.getAddressDetails(await lucid.wallet().address()).paymentCredential;
+      setIsAdmin(credential?.type === "Key" && credential.hash === loaded.deployment.admin);
+      const holdings: Record<string, bigint> = {};
+      for (const utxo of await lucid.wallet().getUtxos()) for (const [unit, quantity] of Object.entries(utxo.assets)) holdings[unit] = (holdings[unit] ?? BigInt(0)) + quantity;
+      setBalances(holdings);
       const found: Pool[] = [];
-      for (const utxo of await lucid.utxosAt(loaded.deployment.ammAddress)) { try { found.push(decodePool(tools, utxo)); } catch { /* Ignore unrelated outputs. */ } }
-      setPools(found); setSelected((current) => found.some((item) => item.id === current) ? current : (found[0]?.id ?? ""));
+      for (const utxo of await lucid.utxosAt(loaded.deployment.ammAddress)) { try { const candidate = decodePool(tools, utxo); if (isAuthenticatedPool(candidate, loaded.deployment)) found.push(candidate); } catch { /* Ignore unrelated outputs. */ } }
+      setPools(found); setSelected((current) => { const preferred = current || new URLSearchParams(window.location.search).get("pool"); return found.find((item) => item.id === preferred)?.id ?? found[0]?.id ?? ""; });
     } catch (cause) { setMessage({ kind: "error", text: cause instanceof Error ? cause.message : "Unable to load pools." }); }
     finally { setLoading(false); }
   }, [lucid]);
@@ -126,7 +50,9 @@ export default function DexWorkbench() {
 
   async function signSubmit(builder: ReturnType<NonNullable<typeof lucid>["newTx"]>) {
     const completed = await builder.complete();
-    return (await completed.sign.withWallet().complete()).submit();
+    const hash = await (await completed.sign.withWallet().complete()).submit();
+    setPendingHash(hash);
+    return hash;
   }
 
   async function submit(event: FormEvent) {
@@ -154,6 +80,8 @@ export default function DexWorkbench() {
         builder = lucid.newTx().collectFrom([state], tools.Data.to(new tools.Constr(0, []))).mintAssets({ [assetUnit(poolNft)]: BigInt(1) }, tools.Data.to(new tools.Constr(0, []))).mintAssets({ [assetUnit(lpToken)]: liquidity }, tools.Data.to(new tools.Constr(1, [assetData(tools, poolNft)]))).attach.SpendingValidator(factoryStateScript).attach.MintingPolicy(scripts.poolFactory).attach.MintingPolicy(scripts.lp).pay.ToContract(deployment.factoryAddress, { kind: "inline", value: tools.Data.to(after) }, { ...state.assets }).pay.ToContract(deployment.ammAddress, { kind: "inline", value: tools.Data.to(datum) }, { lovelace: reserveA, [assetUnit(fraction)]: reserveB, [assetUnit(poolNft)]: BigInt(1) }).pay.ToAddress(address, { [assetUnit(lpToken)]: liquidity }).addSigner(address);
       } else {
         if (!pool) throw new Error("Select an active pool first.");
+        const currentPool = await lucid.utxoByUnit(assetUnit(pool.poolNft));
+        if (currentPool.txHash !== pool.utxo.txHash || currentPool.outputIndex !== pool.utxo.outputIndex) throw new Error("This pool changed since the quote was shown. Refresh and review the new amounts before signing.");
         let a = pool.reserveA; let b = pool.reserveB; let liquidity = pool.liquidity; let redeemer; let mint = BigInt(0); let lpRedeemer; let swapPayout: Record<string, bigint> | null = null;
         if (action === "swap-a") {
           const input = pool.assetA.policyId ? parseIntegerAmount(amount, "Quote amount") : parseAdaToLovelace(amount);
@@ -164,35 +92,60 @@ export default function DexWorkbench() {
           const output = quoteConstantProduct(input, b, a, pool.feeN, pool.feeD);
           b += input; a -= output; redeemer = new tools.Constr(0, [output]); swapPayout = { [assetUnit(pool.assetA)]: output };
         } else if (action === "add") {
-          const requestedA = BigInt(ada) * (pool.assetA.policyId ? BigInt(1) : BigInt(1_000_000)); const divisor = gcd(a, b); const ratioA = a / divisor; const ratioB = b / divisor; const multiplier = (requestedA + ratioA - BigInt(1)) / ratioA; const addA = ratioA * multiplier; const addB = ratioB * multiplier; mint = addA * liquidity / a; if (mint <= BigInt(0)) throw new Error("Liquidity output rounds to zero."); a += addA; b += addB; liquidity += mint; redeemer = new tools.Constr(1, [mint]); lpRedeemer = new tools.Constr(1, [assetData(tools, pool.poolNft)]);
+          const requestedA = pool.assetA.policyId ? parseIntegerAmount(ada, "Quote amount") : parseAdaToLovelace(ada);
+          const quote = quoteLiquidityDeposit(requestedA, a, b, liquidity);
+          mint = quote.lp; a += quote.amountA; b += quote.amountB; liquidity += mint; redeemer = new tools.Constr(1, [mint]); lpRedeemer = new tools.Constr(1, [assetData(tools, pool.poolNft)]);
         } else if (action === "remove") {
-          const burn = BigInt(amount); if (burn <= BigInt(0) || burn >= liquidity) throw new Error("Burn must be positive and smaller than total liquidity; use Destroy pool for the full supply."); const outA = burn * a / liquidity; const outB = burn * b / liquidity; a -= outA; b -= outB; liquidity -= burn; mint = -burn; redeemer = new tools.Constr(2, [outA, outB]); lpRedeemer = new tools.Constr(2, [assetData(tools, pool.poolNft)]);
+          const burn = parseIntegerAmount(amount, "LP amount"); const quote = quoteLiquidityWithdrawal(burn, a, b, liquidity); a -= quote.amountA; b -= quote.amountB; liquidity -= burn; mint = -burn; redeemer = new tools.Constr(2, [quote.amountA, quote.amountB]); lpRedeemer = new tools.Constr(2, [assetData(tools, pool.poolNft)]);
         } else {
           const details = tools.getAddressDetails(address);
           if (details.paymentCredential?.type !== "Key" || details.paymentCredential.hash !== deployment.admin) throw new Error("Only the factory admin can destroy a pool.");
           builder = lucid.newTx().collectFrom([pool.utxo], tools.Data.to(new tools.Constr(3, [addressData(tools, address)]))).readFrom([state]).mintAssets({ [assetUnit(pool.poolNft)]: -BigInt(1) }, tools.Data.to(new tools.Constr(1, []))).mintAssets({ [assetUnit(pool.lpToken)]: -pool.liquidity }, tools.Data.to(new tools.Constr(3, [assetData(tools, pool.poolNft)]))).attach.SpendingValidator(scripts.amm).attach.MintingPolicy(scripts.poolFactory).attach.MintingPolicy(scripts.lp).pay.ToAddress(address, reservePayout(pool)).addSigner(address);
-          const hash = await signSubmit(builder); const confirmed = await lucid.awaitTx(hash); if (!confirmed) throw new Error(`Pool destruction was submitted but not confirmed: ${hash}`); await refresh(); setMessage({ kind: "success", text: `Pool destroyed. Transaction ${hash}` }); return;
+          const hash = await signSubmit(builder); const confirmed = await confirmTransaction(lucid, hash); if (!confirmed) throw new Error(`Pool destruction was submitted but not confirmed: ${hash}`); await refresh(); setPendingHash(""); setMessage({ kind: "success", text: `Pool destroyed. Transaction ${hash}` }); return;
         }
         const datum = nextDatum(tools, pool, a, b, liquidity);
         builder = lucid.newTx().collectFrom([pool.utxo], tools.Data.to(redeemer!)).readFrom([state]).attach.SpendingValidator(scripts.amm).pay.ToContract(deployment.ammAddress, { kind: "inline", value: tools.Data.to(datum) }, poolValue(pool, a, b));
         if (swapPayout) builder = builder.pay.ToAddress(address, swapPayout);
         if (mint !== BigInt(0)) builder = builder.mintAssets({ [assetUnit(pool.lpToken)]: mint }, tools.Data.to(lpRedeemer!)).attach.MintingPolicy(scripts.lp);
       }
-      const hash = await signSubmit(builder); const confirmed = await lucid.awaitTx(hash); if (!confirmed) throw new Error(`Transaction was submitted but not confirmed: ${hash}`); await refresh(); setMessage({ kind: "success", text: `Transaction confirmed: ${hash}` });
+      const hash = await signSubmit(builder); const confirmed = await confirmTransaction(lucid, hash); if (!confirmed) throw new Error(`Transaction was submitted but not confirmed: ${hash}`); await refresh(); setPendingHash(""); setMessage({ kind: "success", text: `Transaction confirmed: ${hash}` });
     } catch (cause) { setMessage({ kind: "error", text: cause instanceof Error ? cause.message : "DEX transaction failed." }); }
     finally { setLoading(false); }
   }
 
   const estimate = pool && (action === "swap-a" || action === "swap-b") ? (() => { try { const input = action === "swap-a" ? (pool.assetA.policyId ? parseIntegerAmount(amount, "Quote amount") : parseAdaToLovelace(amount)) : parseIntegerAmount(amount, "Fraction amount"); return action === "swap-a" ? quoteConstantProduct(input, pool.reserveA, pool.reserveB, pool.feeN, pool.feeD) : quoteConstantProduct(input, pool.reserveB, pool.reserveA, pool.feeN, pool.feeD); } catch { return BigInt(0); } })() : null;
 
-  return <section className="dex-workbench"><div className="dex-card"><div className="section-heading"><div><span className="section-kicker">Constant-product exchange</span><h2>Fraction liquidity pools</h2></div><span className="network-badge"><i /> Preprod</span></div><p className="dex-intro">Trade fractionalized RWA tokens against tADA or a supported native quote asset, provide liquidity, or administer pool lifecycle operations. Every operation is signed by the connected wallet.</p>{!canCreatePool && <p className="dex-warning" role="status">Pool creation and the three-party bootstrap remain unavailable until the factory migration is redeployed. Existing active pools can still be swapped and have liquidity managed.</p>}<div className="dex-tabs">{availableActions.map((item) => <button key={item.id} type="button" className={action === item.id ? "selected" : ""} onClick={() => setAction(item.id)}>{item.label}</button>)}</div><form onSubmit={submit}>
+  const preview = (() => {
+    if (!pool || !lucid || action === "create" || action === "destroy") return null;
+    const show = (value: bigint, quote: boolean) => quote && !pool.assetA.policyId ? formatAda(value) + " tADA" : format(value) + " " + displayName(quote ? pool.assetA : pool.assetB) + " base units";
+    try {
+      const balanceA = balances[assetUnit(pool.assetA)] ?? BigInt(0), balanceB = balances[assetUnit(pool.assetB)] ?? BigInt(0), lp = balances[assetUnit(pool.lpToken)] ?? BigInt(0);
+      if (action === "add" || action === "remove") {
+        const quote = action === "add" ? quoteLiquidityDeposit(pool.assetA.policyId ? parseIntegerAmount(ada, "Quote amount") : parseAdaToLovelace(ada), pool.reserveA, pool.reserveB, pool.liquidity) : quoteLiquidityWithdrawal(parseIntegerAmount(amount, "LP amount"), pool.reserveA, pool.reserveB, pool.liquidity);
+        const insufficient = action === "add" ? quote.amountA > balanceA || quote.amountB > balanceB : quote.lp > lp;
+        return { lines: ["Your LP balance: " + format(lp), `${action === "add" ? "Deposit" : "Receive"}: ${show(quote.amountA, true)} + ${show(quote.amountB, false)}`, `${action === "add" ? "LP minted" : "LP burned"}: ${format(quote.lp)}`], warning: action === "add" ? "Deposits round up to the exact pool ratio. These are the actual amounts required." : "Amounts are rounded down to base units.", error: insufficient ? "Insufficient wallet balance for these amounts." : "" };
+      }
+      const input = action === "swap-a" ? pool.assetA.policyId ? parseIntegerAmount(amount, "Quote amount") : parseAdaToLovelace(amount) : parseIntegerAmount(amount, "Fraction amount");
+      const output = estimate ?? BigInt(0);
+      const impact = priceImpactBps(input, output, action === "swap-a" ? pool.reserveA : pool.reserveB, action === "swap-a" ? pool.reserveB : pool.reserveA);
+      return { lines: [`Wallet balance: ${show(action === "swap-a" ? balanceA : balanceB, action === "swap-a")}`, `Receive: ${show(output, action === "swap-b")}`, `Price impact including fee and rounding: ${(Number(impact) / 100).toFixed(2)}%`], warning: impact >= BigInt(500) ? "High price impact: this trade receives at least 5% less than the current spot-rate amount." : "Direct execution uses this exact pool state. A competing transaction can require a fresh quote.", error: input > (action === "swap-a" ? balanceA : balanceB) ? "Insufficient wallet balance." : "" };
+    } catch (cause) { return { lines: [], warning: "", error: cause instanceof Error ? cause.message : "Enter valid amounts." }; }
+  })();
+
+  async function checkPending() {
+    if (!pendingHash) return;
+    const response = await fetch(`/api/blockfrost/txs/${pendingHash}`, { cache: "no-store" });
+    if (!response.ok) { setMessage({ kind: "error", text: "Confirmation is not available yet. Check the explorer before retrying." }); return; }
+    await refresh(); setPendingHash(""); setMessage({ kind: "success", text: "Transaction confirmed." });
+  }
+
+  return <section className="dex-workbench"><div className="dex-card"><div className="section-heading"><div><span className="section-kicker">Constant-product exchange</span><h2>Fraction liquidity pools</h2></div><span className="network-badge"><i /> Preprod</span></div><p className="dex-intro">Trade fractionalized RWA tokens against tADA or a supported native quote asset, provide liquidity, or administer pool lifecycle operations. Every operation is signed by the connected wallet.</p>{!canCreatePool && <p className="dex-warning" role="status">Pool creation and the three-party bootstrap remain unavailable until the factory migration is redeployed. Existing active pools can still be swapped and have liquidity managed.</p>}<div className="dex-tabs">{availableActions.map((item) => <button key={item.id} type="button" className={action === item.id ? "selected" : ""} disabled={loading || Boolean(pendingHash)} onClick={() => setAction(item.id)}>{item.label}</button>)}</div><form onSubmit={submit}><fieldset className="module-fieldset" disabled={loading || Boolean(pendingHash)}>
     {action !== "create" && <label className="field dex-field"><span className="field-label">Pool</span><select value={pool?.id ?? ""} onChange={(event) => setSelected(event.target.value)} disabled={!pools.length}>{pools.length ? pools.map((item) => <option key={item.id} value={item.id}>{displayName(item.assetB)} · {item.assetB.policyId.slice(0, 8)}…</option>) : <option>No active pools</option>}</select></label>}
     {action === "create" && <div className="dex-form-grid"><label className="field field-wide"><span className="field-label">Fraction asset unit</span><input value={asset} onChange={(event) => setAsset(event.target.value)} placeholder="policy ID + asset name hex" required /></label><label className="field"><span className="field-label">Initial tADA</span><input type="number" min="2" step="1" value={ada} onChange={(event) => setAda(event.target.value)} required /></label><label className="field"><span className="field-label">Initial fraction units</span><input type="number" min="1" step="1" value={fractionAmount} onChange={(event) => setFractionAmount(event.target.value)} required /></label></div>}
-    {action === "add" && <label className="field dex-field"><span className="field-label">{pool ? displayName(pool.assetA) + " to add" : "Quote asset to add"}</span><input type="number" min="1" step="1" value={ada} onChange={(event) => setAda(event.target.value)} required /><span className="field-hint">The matching fraction amount is calculated from the current reserve ratio.</span></label>}
+    {action === "add" && <label className="field dex-field"><span className="field-label">{pool ? displayName(pool.assetA) + " to add" : "Quote asset to add"}</span><input type="text" inputMode="decimal" value={ada} onChange={(event) => setAda(event.target.value)} required /><span className="field-hint">The matching fraction amount is calculated from the current reserve ratio.</span></label>}
     {(action === "swap-a" || action === "swap-b" || action === "remove") && <label className="field dex-field"><span className="field-label">{action === "swap-a" ? (pool ? displayName(pool.assetA) + " to spend" : "Quote asset to spend") : action === "swap-b" ? "Fraction units to sell" : "LP units to burn"}</span><input type={action === "swap-a" && !pool?.assetA.policyId ? "text" : "number"} inputMode={action === "swap-a" && !pool?.assetA.policyId ? "decimal" : "numeric"} pattern={action === "swap-a" && !pool?.assetA.policyId ? "[0-9]+(?:\\.[0-9]{1,6})?" : "[0-9]+"} min="1" step={action === "swap-a" && !pool?.assetA.policyId ? "any" : "1"} value={amount} onChange={(event) => setAmount(event.target.value)} required />{estimate !== null && <span className="field-hint">Minimum received: {action === "swap-b" && !pool?.assetA.policyId ? formatAda(estimate) : format(estimate)} {action === "swap-b" ? (pool ? displayName(pool.assetA) : "quote units") : "fraction units"}. This quote includes the pool fee; the wallet network fee is separate.</span>}</label>}
-    {action === "destroy" && <div className="dex-warning">Destroying requires the admin wallet to hold and burn the pool&apos;s entire LP supply. All reserves return to that wallet.</div>}
-    <div className="form-footer"><p><span className="status-dot" /> {pools.length} active pool{pools.length === 1 ? "" : "s"}</p><button className="primary-button" type="submit" disabled={loading || (!pool && action !== "create")}>{loading ? "Working…" : availableActions.find((item) => item.id === action)?.label} <span className="button-arrow">↗</span></button></div>
-  </form>{message && <p className={`form-message ${message.kind === "error" ? "error-message" : "success-message"}`}>{message.text}</p>}</div>
-  {canCreatePool ? <DexBootstrapWorkbench /> : null}
+    {preview && <div className="execution-preview" aria-live="polite"><h3>Transaction preview</h3>{preview.lines.map((line) => <p key={line}>{line}</p>)}<p>{preview.warning}</p><p>Keep ADA available for the network fee and required output deposits.</p>{preview.error && <p role="alert" className="form-message error-message">{preview.error}</p>}</div>}{mode === "admin" && !isAdmin && <p className="dex-warning">Connect the configured factory administrator to use these controls.</p>}{action === "destroy" && <div className="dex-warning">Destroying requires the admin wallet to hold and burn the pool&apos;s entire LP supply. All reserves return to that wallet.</div>}
+    <div className="form-footer"><p><span className="status-dot" /> {pools.length} active pool{pools.length === 1 ? "" : "s"}</p><button className="primary-button" type="submit" disabled={loading || Boolean(pendingHash) || !lucid || Boolean(preview?.error) || (mode === "admin" && !isAdmin) || (action === "create" && !canCreatePool) || (!pool && action !== "create")}>{loading ? "Working…" : availableActions.find((item) => item.id === action)?.label} <span className="button-arrow">↗</span></button></div>
+  </fieldset></form>{pendingHash && <p className="form-message" role="status">Submitted; waiting for confirmation. <a href={`https://preprod.cardanoscan.io/transaction/${pendingHash}`} target="_blank" rel="noreferrer">View transaction</a> <button type="button" onClick={() => void checkPending().catch(() => setMessage({ kind: "error", text: "Unable to check confirmation. Try again." }))} disabled={loading}>Check confirmation</button></p>}{message && <p className={`form-message ${message.kind === "error" ? "error-message" : "success-message"}`}>{message.text}</p>}</div>
   <div className="dex-pools"><div className="dex-pools-head"><div><span className="section-kicker">On-chain state</span><h3>Active pools</h3></div><button type="button" className="refresh-button" onClick={() => void refresh()} disabled={loading}>Refresh</button></div>{!lucid ? <p className="dex-empty">Connect Eternl to read and operate the deployed pools.</p> : pools.length === 0 ? <p className="dex-empty">No active pool is currently indexed.</p> : pools.map((item) => <article className="dex-pool" key={item.id}><div><strong>{displayName(item.assetB)} / {displayName(item.assetA)}</strong><code>{assetUnit(item.assetB)}</code></div><dl><div><dt>{displayName(item.assetA)} reserve</dt><dd>{item.assetA.policyId ? format(item.reserveA) : formatAda(item.reserveA)}</dd></div><div><dt>Fraction reserve</dt><dd>{format(item.reserveB)}</dd></div><div><dt>LP supply</dt><dd>{format(item.liquidity)}</dd></div><div><dt>Fee</dt><dd>{Number(item.feeD - item.feeN) / Number(item.feeD) * 100}%</dd></div></dl></article>)}{deployment && <a className="explorer-link" href={`https://preprod.cardanoscan.io/address/${deployment.ammAddress}`} target="_blank" rel="noreferrer">Inspect DEX on Cardanoscan <span className="button-arrow">↗</span></a>}</div></section>;
 }

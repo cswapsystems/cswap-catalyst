@@ -46,16 +46,16 @@ An Instant Sell request is not a completed sale. The seller has escrowed an exac
 
 1. Inspect the exact asset unit, quantity, requested minimum, and quote asset.
 2. Confirm the asset approval and any off-chain price/risk approval required by the operating policy.
-3. Choose a bid at or above the seller minimum and an ask for the pool-owned inventory listing.
+3. Publish prices at `/team/inventory`: ADA buy price and resale price per base token unit, maximum units per request, maximum units held in inventory, and active status. Stage changes, then sign and publish with the configured operator wallet. The queue uses this shared price book; the resulting total bid must meet the seller minimum.
 4. Ensure the post-settlement pool quote balance remains at or above `min_cash_reserve` and that the ask/inventory exposure is acceptable.
 5. Use the Team pricing queue with the batcher wallet. The transaction consumes the request and pool together, pays the seller, mints one inventory receipt, creates the pool-owned listing, and advances pool accounting atomically.
 6. Wait for confirmation, refresh both Team and Marketplace, and archive the transaction hash, request out-ref, price source, bid, ask, and operator approval.
 
-The on-chain path rejects an under-minimum seller payout, a pool transition that breaches its reserve rule, or a listing that is not bound to the pool inventory receipt. It does not independently reject an unregistered exact asset today; do not bypass the Team admission check or treat registry approval as a validator-enforced permission until the registry reference is integrated into the settlement contracts.
+The on-chain path rejects an under-minimum seller payout or a listing that is not bound to the pool inventory receipt. The current acquisition path does **not** enforce registry admission, the post-acquisition reserve floor, or the new per-asset limits on-chain. The application checks these operational rules before signing. Do not bypass those checks. Price changes apply to future acquisitions, not existing on-chain inventory asks. Pending requests do not reserve capacity; acquisitions are rechecked against current inventory.
 
 ### 3. Manage liquidity
 
-LP operations are available from `/team` or `/reserves`:
+LP operations are available from `/portfolio/reserves`; administrators use `/team/controls`:
 
 - **Add reserves:** deposits the configured quote asset and mints the calculated LP amount.
 - **Remove reserves:** burns LP tokens and withdraws only from the amount above the protected reserve.
@@ -64,8 +64,8 @@ Do not try to change liquidity while open inventory exists. `inventory_value != 
 
 ### 4. Marketplace operations
 
-- Sellers use **List at my price** for a public direct listing. They control its price and can manage it under the direct-listing rules.
-- Sellers use **Instant sell to pool** to set the minimum acceptable payout and wait for batcher settlement. They can cancel before the batcher accepts.
+- Sellers use **Sell / List** on a holding in `/my-assets` to create a public direct listing with a chosen quantity. They edit/cancel direct listings in Marketplace or `/portfolio/orders`.
+- Sellers choose **Instant Sell to pool** in Portfolio to review the current published bid and request that payout as their on-chain minimum. Settlement still needs an operator signature. They can cancel from `/portfolio/orders` before acceptance.
 - Buyers may purchase either a direct listing or a pool-owned inventory listing. A pool-owned purchase returns payment to the pool and burns the corresponding inventory receipt.
 
 ## Reconciliation checklist
@@ -92,5 +92,7 @@ After every operator transaction, verify from the confirmed transaction and new 
 | Legacy deployment data | Stop and verify the deployment manifest and script address before any transaction. |
 
 ## Security boundary
+
+The shared price book requires durable production storage. Set server-only `PRICE_BOOK_BUCKET`, `PRICE_BOOK_KEY` (default `preprod/instant-sell.json`) and `AWS_REGION`; grant the app role GetObject/PutObject on that private object, and enable bucket versioning. No private wallet key is stored server-side. Publishing requires a fresh wallet message signature and a matching revision. Development without S3 uses `.data/instant-sell-preprod.json`; production without S3 disables publishing and quotes explicitly. See [UI modules](UI_MODULES.md) for storage and operational boundaries.
 
 The shared pool is a coordinated service with a trusted pricing/batcher role. It is not a permissionless AMM, and the UI does not turn a batcher decision into an oracle. Treat price approvals, inventory valuation, key custody, and transaction reconciliation as operational controls. The contracts are not audited; complete transaction-level Preprod tests and independent review before real-value use.

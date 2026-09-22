@@ -3,6 +3,7 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { useWallet } from "./wallet-context";
 import { formatAdaWithUnit } from "@/lib/ada";
+import { readSharedPool } from "@/lib/protocol/shared-pool-client";
 import { marketplaceOrderbookAddress, marketplacePoolAddress } from "@/lib/protocol/marketplace-deployment";
 
 type AssetClass = { policyId: string; assetName: string };
@@ -95,7 +96,7 @@ async function loadCode(title: string): Promise<string> {
   return body.compiledCode;
 }
 
-export default function ReservesWorkbench() {
+export default function ReservesWorkbench({ revision = 0 }: { revision?: number }) {
   const { address, lucid } = useWallet();
   const [mode, setMode] = useState<"add" | "remove">("add");
   const [amount, setAmount] = useState("");
@@ -117,18 +118,8 @@ export default function ReservesWorkbench() {
     setLoading(true);
     try {
       const tools = await import("@lucid-evolution/lucid");
-      const candidates = await lucid.utxosAt(quotePoolAddress);
-      let found: PoolState | null = null;
-      for (const utxo of candidates) {
-        if (!utxo.datum) continue;
-        try {
-          const decoded = decodePoolDatum(tools.Data.from(utxo.datum));
-          found = { utxo, ...decoded };
-          break;
-        } catch {
-          // Ignore unrelated outputs at the configured pool address.
-        }
-      }
+      const current = await readSharedPool(lucid, tools);
+      const found: PoolState = { utxo: current.utxo, ...decodePoolDatum(current.raw) };
       setPool(found);
       setLoaded(true);
       if (!found) setMessage({ kind: "error", text: "No quote-pool UTxO with a valid inline datum was found at the configured address." });
@@ -142,7 +133,7 @@ export default function ReservesWorkbench() {
   useEffect(() => {
     const timer = window.setTimeout(() => { void refresh(); }, 0);
     return () => window.clearTimeout(timer);
-  }, [refresh]);
+  }, [refresh, revision]);
 
   const quoteUnit = useMemo(() => pool ? unit(pool.quoteAsset) : "", [pool]);
   const cash = pool ? pool.utxo.assets[quoteUnit] || BigInt(0) : BigInt(0);
@@ -169,6 +160,8 @@ export default function ReservesWorkbench() {
     try {
       const tools = await import("@lucid-evolution/lucid");
       const details = tools.getAddressDetails(address);
+      const latest = await readSharedPool(lucid, tools);
+      if (latest.utxo.txHash !== pool.utxo.txHash || latest.utxo.outputIndex !== pool.utxo.outputIndex) { await refresh(); throw new Error("Pool state changed. Review the refreshed reserve before submitting again."); }
       if (!details?.paymentCredential || details.paymentCredential.type !== "Key") throw new Error("The connected wallet needs a payment-key address.");
       const provider = addressData(tools.Data, tools.AddressSchema, tools.getAddressDetails, address);
       const providerKey = details.paymentCredential.hash;

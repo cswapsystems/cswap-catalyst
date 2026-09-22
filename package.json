@@ -11,12 +11,14 @@
     "test:wallet": "node --experimental-strip-types --test tests/wallet-session.test.mjs",
     "test:wallet-assets": "node --experimental-strip-types --test tests/wallet-assets.test.mjs",
     "test:dex": "node --experimental-strip-types --test tests/dex.test.mjs",
+    "test:ui": "node --experimental-strip-types --test tests/ui-regressions.test.mjs tests/operator-controls.test.mjs tests/price-book.test.mjs",
     "test:metadata": "node --experimental-strip-types --test tests/rwa-metadata.test.mjs",
     "test:offchain": "npm --prefix infra/offchain test",
     "dex:preprod": "node scripts/dex-preprod.mjs",
     "marketplace:preprod": "node scripts/marketplace-preprod.mjs"
   },
   "dependencies": {
+    "@aws-sdk/client-s3": "3.1137.0",
     "@lucid-evolution/lucid": "^0.6.2",
     "effect": "3.22.2",
     "next": "15.5.25",

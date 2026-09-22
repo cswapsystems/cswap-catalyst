@@ -17,7 +17,7 @@ const pageDetails: Record<Page, { eyebrow: string; title: string; description: s
   mint: { eyebrow: "Asset origination", title: "Mint real-world value", description: "Create a verifiable on-chain representation of an off-chain asset." },
   fractionalize: { eyebrow: "Portfolio tooling", title: "Make ownership flexible", description: "Split an RWA into transferable units or reassemble units you hold." },
   liquidate: { eyebrow: "Redemption desk", title: "Exit with confidence", description: "Redeem eligible RWA tokens against the reserve and settle the position." },
-  marketplace: { eyebrow: "Secondary market", title: "Buy and sell RWA tokens", description: "Trade verified real-world asset tokens through transparent on-chain escrow." },
+  marketplace: { eyebrow: "Secondary market", title: "Marketplace", description: "Buy listed RWA and fraction tokens, or edit and cancel your listings. Create sales from Portfolio." },
   dex: { eyebrow: "Fraction exchange", title: "Trade fractional ownership", description: "Create and operate on-chain tADA liquidity pools for fractionalized RWA tokens." },
   reserves: { eyebrow: "Liquidity operations", title: "Fund Instant Sell", description: "Add or withdraw shared quote reserves used to settle approved RWA sales." },
   wallets: { eyebrow: "Operational directory", title: "Wallets & custody", description: "Inspect the public addresses that support each part of the RWA lifecycle." },

@@ -1,5 +1,5 @@
 import { redirect } from "next/navigation";
 
 export default function ListPage() {
-  redirect("/marketplace");
+  redirect("/my-assets");
 }

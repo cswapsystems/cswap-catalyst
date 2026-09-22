@@ -9,13 +9,18 @@ async function proxy(request: Request, context: RouteContext<"/api/blockfrost/[.
   const { path } = await context.params;
   const incoming = new URL(request.url);
   const endpoint = `${baseUrl}/${path.join("/")}${incoming.search}`;
+  try {
   const response = await fetch(endpoint, {
     method: request.method,
     headers: { project_id: projectId, "content-type": request.headers.get("content-type") ?? "application/json" },
     body: request.method === "GET" || request.method === "HEAD" ? undefined : await request.arrayBuffer(),
     cache: "no-store",
+    signal: AbortSignal.timeout(30_000),
   });
   return new Response(await response.arrayBuffer(), { status: response.status, headers: { "content-type": response.headers.get("content-type") ?? "application/json" } });
+  } catch {
+    return Response.json({ error: "Chain provider is temporarily unreachable. Retry shortly." }, { status: 503 });
+  }
 }
 
 export const GET = proxy;

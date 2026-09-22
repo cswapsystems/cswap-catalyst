@@ -1,22 +1,22 @@
 "use client";
 
-import { FormEvent, useCallback, useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useState } from "react";
 import Image from "next/image";
+import Link from "next/link";
 import { useWallet } from "./wallet-context";
 import { marketplaceOrderbookAddress, marketplacePoolAddress } from "@/lib/protocol/marketplace-deployment";
 import { formatAda } from "@/lib/ada";
+import { decodeCardanoAddress } from "@/lib/address-codec";
 
-type Mode = "all" | "price" | "instant";
+
 type MarketplaceView = "all" | "p2p" | "pool" | "fractions";
 type ListingLayout = "card" | "list";
 type AssetClass = { policyId: string; assetName: string };
 type Constr = { index: number; fields: unknown[] };
 type FractionInfo = { fraction: AssetClass; original: AssetClass; totalFractions: bigint };
-type FormState = { policyId: string; assetName: string; quantity: string; pricePolicyId: string; priceAssetName: string; price: string; proceeds: string };
 type Listing = { id: string; utxo: import("@lucid-evolution/lucid").UTxO; seller: string; sellerKey: string; managed: boolean; settlement: "direct" | "pool"; poolToken?: AssetClass; inventoryToken?: AssetClass; fraction?: FractionInfo; rwa: AssetClass; quantity: bigint; priceAsset: AssetClass; price: bigint; lockedLovelace: bigint };
 type PoolSellRequest = { id: string; utxo: import("@lucid-evolution/lucid").UTxO; seller: string; sellerKey: string; managed: boolean; poolToken: AssetClass; rwa: AssetClass; quantity: bigint; quoteAsset: AssetClass; minPayout: bigint; lockedLovelace: bigint };
 
-const initialForm: FormState = { policyId: "", assetName: "", quantity: "1", pricePolicyId: "", priceAssetName: "", price: "", proceeds: "" };
 
 function isConstr(value: unknown): value is Constr {
   return typeof value === "object" && value !== null && "index" in value && "fields" in value &&
@@ -32,24 +32,10 @@ function getAsset(value: unknown, label: string): AssetClass {
   if (c.index !== 0 || c.fields.length !== 2 || typeof c.fields[0] !== "string" || typeof c.fields[1] !== "string") throw new Error("Malformed " + label + " asset.");
   return { policyId: c.fields[0], assetName: c.fields[1] };
 }
-function getAddress(value: unknown, tools: { credentialToAddress: (network: "Preprod" | "Mainnet", payment: { type: "Key" | "Script"; hash: string }, stake?: { type: "Key" | "Script"; hash: string }) => string }): string {
-  const root = getConstr(value, "seller address");
-  if (root.index !== 0 || root.fields.length !== 2) throw new Error("Malformed seller address.");
-  const credential = (raw: unknown) => {
-    const c = getConstr(raw, "credential");
-    if (c.fields.length !== 1 || typeof c.fields[0] !== "string") throw new Error("Malformed credential.");
-    return { type: c.index === 0 ? "Key" as const : "Script" as const, hash: c.fields[0] };
-  };
-  const payment = credential(root.fields[0]);
-  const network = process.env.NEXT_PUBLIC_CARDANO_NETWORK === "mainnet" ? "Mainnet" as const : "Preprod" as const;
-  if (root.fields[1] === null) return tools.credentialToAddress(network, payment);
-  const stake = getConstr(root.fields[1], "staking credential");
-  if (stake.index !== 0 || stake.fields.length !== 1) throw new Error("Malformed staking credential.");
-  const stakingHash = getConstr(stake.fields[0], "staking hash");
-  if (stakingHash.index !== 0 || stakingHash.fields.length !== 1) throw new Error("Malformed staking hash.");
-  return tools.credentialToAddress(network, payment, credential(stakingHash.fields[0]));
+function getAddress(value: unknown, tools: { credentialToAddress: (network: import("@lucid-evolution/lucid").Network, payment: { type: "Key" | "Script"; hash: string }, stake?: { type: "Key" | "Script"; hash: string }) => string }): string {
+  return decodeCardanoAddress(value, tools, process.env.NEXT_PUBLIC_CARDANO_NETWORK === "mainnet" ? "Mainnet" : "Preprod");
 }
-function decodeListing(utxo: import("@lucid-evolution/lucid").UTxO, tools: { Data: { from: (raw: string) => unknown }; credentialToAddress: (network: "Preprod" | "Mainnet", payment: { type: "Key" | "Script"; hash: string }, stake?: { type: "Key" | "Script"; hash: string }) => string }): Listing {
+function decodeListing(utxo: import("@lucid-evolution/lucid").UTxO, tools: { Data: { from: (raw: string) => unknown }; credentialToAddress: (network: import("@lucid-evolution/lucid").Network, payment: { type: "Key" | "Script"; hash: string }, stake?: { type: "Key" | "Script"; hash: string }) => string }): Listing {
   if (!utxo.datum) throw new Error("Listing has no datum.");
   const root = getConstr(tools.Data.from(utxo.datum), "listing");
   if (root.index !== 0 || root.fields.length !== 7) throw new Error("Not a simple listing datum.");
@@ -69,11 +55,6 @@ function decodeListing(utxo: import("@lucid-evolution/lucid").UTxO, tools: { Dat
     price: root.fields[6] as bigint,
     lockedLovelace: utxo.assets.lovelace,
   };
-}
-function validateHex(value: string, label: string, allowEmpty = false): string {
-  const normalized = value.trim().toLowerCase();
-  if ((!allowEmpty && !normalized) || !/^[0-9a-f]*$/.test(normalized) || normalized.length % 2 !== 0) throw new Error(label + " must be even-length hexadecimal.");
-  return normalized;
 }
 function assetData(ConstrClass: typeof import("@lucid-evolution/lucid").Constr, asset: AssetClass): Constr {
   return new ConstrClass(0, [asset.policyId, asset.assetName]) as Constr;
@@ -147,52 +128,14 @@ async function loadListingScript(address: string, tools: typeof import("@lucid-e
   if (scriptHash && tools.validatorToScriptHash(script) !== scriptHash) throw new Error("Marketplace listing validator does not match the listing address.");
   return script;
 }
-function encodeListing(tools: typeof import("@lucid-evolution/lucid"), form: FormState, address: string) {
-  const policyId = validateHex(form.policyId, "Listed policy ID");
-  const assetName = validateHex(form.assetName, "Listed asset name", true);
-  const pricePolicyId = form.pricePolicyId.trim() ? validateHex(form.pricePolicyId, "Requested policy ID") : "";
-  const priceAssetName = pricePolicyId ? validateHex(form.priceAssetName, "Requested asset name", true) : "";
-  const quantity = BigInt(form.quantity);
-  const price = BigInt(form.price);
-  if (policyId.length !== 56 || (pricePolicyId && pricePolicyId.length !== 56)) throw new Error("Policy IDs must be 28 bytes (56 hex characters).");
-  if (quantity <= BigInt(0) || price <= BigInt(0)) throw new Error("Quantity and minimum payout must be greater than zero.");
-  if (policyId === pricePolicyId && assetName === priceAssetName) throw new Error("The requested asset cannot be the listed asset.");
-  const details = tools.getAddressDetails(address);
-  if (!details?.paymentCredential || details.paymentCredential.type !== "Key") throw new Error("The connected wallet needs a payment-key address.");
-  const datum = new tools.Constr(0, [addressData(tools.Data, tools.AddressSchema, tools.getAddressDetails, form.proceeds.trim() || address), details.paymentCredential.hash, new tools.Constr(0, []), assetData(tools.Constr, { policyId, assetName }), quantity, assetData(tools.Constr, { policyId: pricePolicyId, assetName: priceAssetName }), price]);
-  return { datum, policyId, assetName, quantity };
-}
-function decodePoolSellRequest(utxo: import("@lucid-evolution/lucid").UTxO, tools: { Data: { from: (raw: string) => unknown }; credentialToAddress: (network: "Preprod" | "Mainnet", payment: { type: "Key" | "Script"; hash: string }, stake?: { type: "Key" | "Script"; hash: string }) => string }): PoolSellRequest {
+function decodePoolSellRequest(utxo: import("@lucid-evolution/lucid").UTxO, tools: { Data: { from: (raw: string) => unknown }; credentialToAddress: (network: import("@lucid-evolution/lucid").Network, payment: { type: "Key" | "Script"; hash: string }, stake?: { type: "Key" | "Script"; hash: string }) => string }): PoolSellRequest {
   if (!utxo.datum) throw new Error("Pool sell request has no datum.");
   const root = getConstr(tools.Data.from(utxo.datum), "pool sell request");
   if (root.index !== 0 || root.fields.length !== 7 || typeof root.fields[1] !== "string" || typeof root.fields[4] !== "bigint" || typeof root.fields[6] !== "bigint") throw new Error("Not a pool sell request datum.");
   return { id: utxo.txHash + "#" + utxo.outputIndex, utxo, seller: getAddress(root.fields[0], tools), sellerKey: root.fields[1], managed: false, poolToken: getAsset(root.fields[2], "request pool token"), rwa: getAsset(root.fields[3], "requested RWA"), quantity: root.fields[4], quoteAsset: getAsset(root.fields[5], "request quote asset"), minPayout: root.fields[6], lockedLovelace: utxo.assets.lovelace };
 }
-function encodePoolSellRequest(tools: typeof import("@lucid-evolution/lucid"), form: FormState, address: string, poolToken: AssetClass, quoteAsset: AssetClass) {
-  const policyId = validateHex(form.policyId, "Listed policy ID");
-  const assetName = validateHex(form.assetName, "Listed asset name", true);
-  const pricePolicyId = form.pricePolicyId.trim() ? validateHex(form.pricePolicyId, "Requested policy ID") : "";
-  const priceAssetName = pricePolicyId ? validateHex(form.priceAssetName, "Requested asset name", true) : "";
-  const quantity = BigInt(form.quantity);
-  const minPayout = BigInt(form.price);
-  if (policyId.length !== 56 || (pricePolicyId && pricePolicyId.length !== 56)) throw new Error("Policy IDs must be 28 bytes (56 hex characters).");
-  if (quantity <= BigInt(0) || minPayout <= BigInt(0)) throw new Error("Quantity and minimum payout must be greater than zero.");
-  const rwa = { policyId, assetName };
-  const requested = { policyId: pricePolicyId, assetName: priceAssetName };
-  if (sameAsset(rwa, requested)) throw new Error("The requested asset cannot be the listed asset.");
-  if (!sameAsset(requested, quoteAsset)) throw new Error("The minimum payout asset must match the shared pool quote asset.");
-  const details = tools.getAddressDetails(address);
-  if (!details?.paymentCredential || details.paymentCredential.type !== "Key") throw new Error("The connected wallet needs a payment-key address.");
-  const seller = form.proceeds.trim() || address;
-  const datum = new tools.Constr(0, [addressData(tools.Data, tools.AddressSchema, tools.getAddressDetails, seller), details.paymentCredential.hash, assetData(tools.Constr, poolToken), assetData(tools.Constr, rwa), quantity, assetData(tools.Constr, requested), minPayout]);
-  return { datum, policyId, assetName, quantity };
-}
-
-export default function MarketplaceWorkbench() {
+export default function MarketplaceWorkbench({ ownerOnly = false }: { ownerOnly?: boolean }) {
   const { address, lucid, connect } = useWallet();
-  const [form, setForm] = useState<FormState>(initialForm);
-  const [showListingForm, setShowListingForm] = useState(false);
-  const [mode, setMode] = useState<Exclude<Mode, "all">>("price");
   const [view, setView] = useState<MarketplaceView>("all");
   const [listingLayout, setListingLayout] = useState<ListingLayout>("card");
   const [listings, setListings] = useState<Listing[]>([]);
@@ -214,12 +157,6 @@ export default function MarketplaceWorkbench() {
     return () => window.clearTimeout(timer);
   }, [marketplaceToast]);
 
-  useEffect(() => {
-    const asset = new URLSearchParams(window.location.search).get("asset") ?? "";
-    if (asset.length < 56) return;
-    setForm({ ...initialForm, policyId: asset.slice(0, 56), assetName: asset.slice(56) });
-    setShowListingForm(true);
-  }, []);
 
   const refresh = useCallback(async () => {
     setMessage(null);
@@ -230,13 +167,7 @@ export default function MarketplaceWorkbench() {
       let fractions = new Map<string, FractionInfo>();
       try { fractions = await loadFractionIndex(lucid); } catch { /* Fraction metadata is optional for generic listings. */ }
       const found: Listing[] = [];
-      const response = await fetch("/api/blockfrost/addresses/" + encodeURIComponent(orderbookAddress) + "/utxos?count=100", { cache: "no-store" });
-      const outputs = await response.json().catch(() => []) as Array<{ tx_hash?: unknown; output_index?: unknown; inline_datum?: unknown; amount?: Array<{ unit?: unknown; quantity?: unknown }> }>;
-      const orderbookUtxos = outputs.flatMap((output) => {
-        if (typeof output.tx_hash !== "string" || typeof output.output_index !== "number" || typeof output.inline_datum !== "string" || !Array.isArray(output.amount)) return [];
-        const assets = Object.fromEntries(output.amount.flatMap((entry) => typeof entry.unit === "string" && typeof entry.quantity === "string" ? [[entry.unit, BigInt(entry.quantity)]] : []));
-        return [{ txHash: output.tx_hash, outputIndex: output.output_index, address: orderbookAddress, assets, datum: output.inline_datum } as import("@lucid-evolution/lucid").UTxO];
-      });
+      const orderbookUtxos = await lucid.utxosAt(orderbookAddress);
       for (const utxo of orderbookUtxos) {
         if (!utxo.datum) continue;
         try {
@@ -262,11 +193,11 @@ export default function MarketplaceWorkbench() {
           }
         } catch { /* Request availability does not prevent orderbook browsing. */ }
       }
-      setListings(found); setSellRequests(requests); setLoaded(true);
+      setListings(ownerOnly ? found.filter((listing) => listing.managed && listing.settlement === "direct") : found); setSellRequests(ownerOnly ? requests.filter((request) => request.managed) : requests); setLoaded(true);
     } catch (cause) {
       setMessage({ kind: "error", text: cause instanceof Error ? cause.message : "Unable to read orderbook listings." });
     } finally { setLoading(false); }
-  }, [address, lucid, orderbookAddress, quotePoolAddress]);
+  }, [address, lucid, orderbookAddress, quotePoolAddress, ownerOnly]);
 
   useEffect(() => { const timer = window.setTimeout(() => { void refresh(); }, 0); return () => window.clearTimeout(timer); }, [refresh]);
   useEffect(() => {
@@ -289,38 +220,6 @@ export default function MarketplaceWorkbench() {
     .filter((listing) => view === "all" || (view === "p2p" && listing.settlement === "direct") || (view === "pool" && listing.settlement === "pool") || (view === "fractions" && Boolean(listing.fraction))), [listings, view]);
   const p2pListings = useMemo(() => visible.filter((listing) => listing.settlement === "direct"), [visible]);
   const poolListings = useMemo(() => visible.filter((listing) => listing.settlement === "pool"), [visible]);
-  const update = (key: keyof FormState, value: string) => { setForm((current) => ({ ...current, [key]: value })); setMessage(null); };
-
-  async function createListing(event: FormEvent<HTMLFormElement>) {
-    event.preventDefault(); setMessage(null);
-    if (!lucid || !address) { setMessage({ kind: "error", text: "Connect Eternl before creating a listing." }); return; }
-    if (!orderbookAddress) { setMessage({ kind: "error", text: "Set NEXT_PUBLIC_SIMPLE_ORDERBOOK_ADDRESS to the deployed registry-free orderbook script address." }); return; }
-    if (mode === "instant" && !quotePoolAddress) { setMessage({ kind: "error", text: "Set NEXT_PUBLIC_QUOTE_POOL_ADDRESS to submit a shared-pool sell request." }); return; }
-    setLoading(true);
-    try {
-      const tools = await import("@lucid-evolution/lucid");
-      let destination = orderbookAddress;
-      let encoded: ReturnType<typeof encodeListing> | ReturnType<typeof encodePoolSellRequest>;
-      if (mode === "instant") {
-        const poolUtxo = (await lucid.utxosAt(quotePoolAddress)).find((utxo) => utxo.datum && (() => { try { const datum = getConstr(tools.Data.from(utxo.datum!), "quote pool"); return datum.index === 0 && datum.fields.length === 10; } catch { return false; } })());
-        if (!poolUtxo?.datum) throw new Error("No active shared-pool state was found.");
-        const poolDatum = getConstr(tools.Data.from(poolUtxo.datum), "quote pool");
-        const poolToken = getAsset(poolDatum.fields[2], "pool token");
-        const quoteAsset = getAsset(poolDatum.fields[5], "pool quote asset");
-        encoded = encodePoolSellRequest(tools, form, address, poolToken, quoteAsset);
-        const requestCode = await loadScript("pool_sell_request.pool_sell_request.spend");
-        const network = process.env.NEXT_PUBLIC_CARDANO_NETWORK === "mainnet" ? "Mainnet" as const : "Preprod" as const;
-        destination = tools.validatorToAddress(network, { type: "PlutusV3", script: tools.applyParamsToScript(requestCode.script, [addressData(tools.Data, tools.AddressSchema, tools.getAddressDetails, quotePoolAddress) as import("@lucid-evolution/lucid").Data]) });
-      } else {
-        encoded = encodeListing(tools, form, address);
-      }
-      const escrow = { lovelace: BigInt(2000000), [unit({ policyId: encoded.policyId, assetName: encoded.assetName })]: encoded.quantity };
-      const tx = await lucid.newTx().pay.ToContract(destination, { kind: "inline", value: tools.Data.to(encoded.datum as import("@lucid-evolution/lucid").Data) }, escrow).complete();
-      const hash = await (await tx.sign.withWallet().complete()).submit();
-      setForm({ ...initialForm, proceeds: address }); setMessage({ kind: "success", text: (mode === "instant" ? "Pool sell request submitted: " : "Listing submitted: ") + hash + ". It will appear after confirmation." }); await refresh(); [5_000, 15_000, 30_000].forEach((delay) => window.setTimeout(() => { void refresh(); }, delay));
-    } catch (cause) { setMessage({ kind: "error", text: cause instanceof Error ? cause.message : "Listing creation was cancelled or failed." }); }
-    finally { setLoading(false); }
-  }
 
   async function buyListing(listing: Listing) {
     setMessage(null);
@@ -474,30 +373,23 @@ export default function MarketplaceWorkbench() {
       <div className="section-heading"><div><span className="section-kicker">Orderbook / shared settlement</span><h2>Trade RWA and fractional ownership</h2></div><span className="step-badge">{orderbookAddress ? "Contract ready" : "Address needed"}</span></div>
       <p className="marketplace-intro">Browse direct P2P listings and pool-owned inventory in one orderbook.</p>
       <div className="marketplace-toolbar">
-        <span className="wallet-assets-note">Choose a direct listing or request an instant shared-pool sale.</span>
-        <div className="marketplace-toolbar-actions"><button type="button" className="marketplace-refresh" onClick={() => { setShowListingForm((visible) => !visible); setMessage(null); }}>{showListingForm ? "Close sell form" : "Sell an asset"}</button><button className="marketplace-refresh" type="button" onClick={() => void refresh()} disabled={loading}>{loading ? "Loading…" : "Refresh books"}</button></div>
+        <span className="wallet-assets-note">Buy listed assets here. Create listings and request Instant Sell from Portfolio.</span>
+        <div className="marketplace-toolbar-actions"><Link href="/my-assets">Open Portfolio</Link><button className="marketplace-refresh" type="button" onClick={() => void refresh()} disabled={loading}>{loading ? "Loading…" : "Refresh books"}</button></div>
       </div>
       {message && <p className={message.kind === "error" ? "marketplace-message marketplace-error" : "marketplace-message marketplace-success"} role={message.kind === "error" ? "alert" : "status"}>{message.text}</p>}
-      <div className="marketplace-market-summary"><div><span>Direct listings</span><strong>{p2pListings.length}</strong></div><div><span>Pool inventory</span><strong>{poolListings.length}</strong></div><div><span>Instant-sell requests</span><strong>{sellRequests.length}</strong></div></div>
+      <div className="marketplace-market-summary"><div><span>Direct listings</span><strong>{p2pListings.length}</strong></div><div><span>Pool inventory</span><strong>{poolListings.length}</strong></div>{ownerOnly && <div><span>Your Instant Sell requests</span><strong>{sellRequests.length}</strong></div>}</div>
       <div className="marketplace-view-tabs" role="tablist" aria-label="Marketplace inventory">
         <button type="button" className={view === "all" ? "selected" : ""} onClick={() => setView("all")}>Overview</button>
         <button type="button" className={view === "p2p" ? "selected" : ""} onClick={() => setView("p2p")}>Listed tokens</button>
         <button type="button" className={view === "pool" ? "selected" : ""} onClick={() => setView("pool")}>Pool owned</button>
         <button type="button" className={view === "fractions" ? "selected" : ""} onClick={() => setView("fractions")}>Fractions</button>
       </div>
-      {showListingForm && <form onSubmit={createListing}>
-        <div className="marketplace-sell-mode" role="group" aria-label="How to sell"><button type="button" className={mode === "price" ? "selected" : ""} onClick={() => setMode("price")}>List at my price</button><button type="button" className={mode === "instant" ? "selected" : ""} onClick={() => setMode("instant")}>Instant sell to pool</button></div>
-        <div className="marketplace-form-grid"><label className="field"><span className="field-label">Listed policy ID</span><input value={form.policyId} onChange={(event) => update("policyId", event.target.value)} placeholder="28-byte policy ID (hex)" /></label><label className="field"><span className="field-label">Listed asset name</span><input value={form.assetName} onChange={(event) => update("assetName", event.target.value)} placeholder="Asset name (hex)" /></label><label className="field"><span className="field-label">Quantity</span><input inputMode="numeric" value={form.quantity} onChange={(event) => update("quantity", event.target.value)} placeholder="1" /></label><label className="field"><span className="field-label">{mode === "instant" ? "Minimum pool payout" : "Listing price"}</span><input inputMode="numeric" value={form.price} onChange={(event) => update("price", event.target.value)} placeholder="Smallest quote units" /></label><label className="field"><span className="field-label">{mode === "instant" ? "Pool quote policy ID (blank for ADA)" : "Requested policy ID (blank for ADA)"}</span><input value={form.pricePolicyId} onChange={(event) => update("pricePolicyId", event.target.value)} placeholder="Blank = ADA" /></label><label className="field"><span className="field-label">{mode === "instant" ? "Pool quote asset name" : "Requested asset name"}</span><input value={form.priceAssetName} onChange={(event) => update("priceAssetName", event.target.value)} placeholder="Asset name (hex)" disabled={!form.pricePolicyId} /></label><label className="field field-wide"><span className="field-label">Proceeds address</span><input value={form.proceeds || address} onChange={(event) => update("proceeds", event.target.value)} placeholder="Defaults to connected wallet" /></label></div>
-        <div className="marketplace-mode-note"><b>{mode === "instant" ? ">" : "-"}</b><div><strong>{mode === "instant" ? "Shared-pool sell request" : "Sell at a price"}</strong><span>{mode === "instant" ? "Your asset is escrowed for the pool batcher; it can only settle at or above your on-chain minimum, or you can cancel it with your wallet." : "Any buyer can consume the listing when payment reaches the proceeds address."}</span></div></div>
-        <div className="marketplace-contract-note"><span>*</span><div>{mode === "instant" ? <>Uses <code>pool_sell_request</code> and the configured shared pool. Settlement requires the pool batcher; no signing key is exposed to the browser.</> : <>Uses <code>p2p_listing_simple</code>; no registry reference is required. Fraction listings use the exact fraction asset unit.</>}</div></div>
-        {message && <p className={message.kind === "error" ? "marketplace-message marketplace-error" : "marketplace-message marketplace-success"} role={message.kind === "error" ? "alert" : "status"}>{message.text}</p>}
-        <div className="marketplace-form-footer"><p><span className="status-dot" />{lucid ? " Eternl connected - ready to sign." : " Connect Eternl to prepare a transaction."}</p><button type="submit" className="primary-button" disabled={loading}>{loading ? "Awaiting wallet..." : mode === "instant" ? "Submit pool request" : "Create listing"} <span className="button-arrow">Go</span></button></div>
-      </form>}
+
     </section>
     {marketplaceToast && <div className="marketplace-toast" role="status"><strong>Marketplace updated</strong><span>{marketplaceToast}</span><button type="button" onClick={() => setMarketplaceToast(null)} aria-label="Dismiss Marketplace notification">×</button></div>}
     {editing && <div className="marketplace-edit-backdrop" role="presentation" onMouseDown={() => !loading && setEditing(null)}><section className="marketplace-edit-dialog" role="dialog" aria-modal="true" aria-labelledby="marketplace-edit-title" onMouseDown={(event) => event.stopPropagation()}><div className="listing-dialog-heading"><div><span className="section-kicker">Marketplace listing</span><h2 id="marketplace-edit-title">Edit price</h2></div><button type="button" className="listing-dialog-close" onClick={() => setEditing(null)} disabled={loading} aria-label="Close edit dialog">×</button></div><p>Update the price for {assetNameText(editing.rwa.assetName)}. The listed quantity remains {editing.quantity.toString()}.</p><label className="field"><span className="field-label">Price in base units</span><input autoFocus inputMode="numeric" pattern="[0-9]+" min="1" value={editPrice} onChange={(event) => setEditPrice(event.target.value)} /></label><div className="marketplace-edit-dialog-actions"><button type="button" onClick={() => setEditing(null)} disabled={loading}>Cancel</button><button type="button" className="primary-button" onClick={() => void updateListing(editing)} disabled={loading}>{loading ? "Awaiting wallet…" : "Save price"}</button></div></section></div>}
     <section className="marketplace-listings">
-      {sellRequests.length > 0 && <section className="marketplace-book"><div className="marketplace-book-head"><div><span className="section-kicker">Shared-pool requests</span><h3>Awaiting pool pickup</h3></div><span className="marketplace-count">{sellRequests.length} pending</span></div><p className="directory-intro">A batcher can settle a request only with the shared pool and only at or above its minimum payout. Request owners can cancel at any time.</p><div className="marketplace-list">{sellRequests.map(renderRequest)}</div></section>}
+      {ownerOnly && sellRequests.length > 0 && <section className="marketplace-book"><div className="marketplace-book-head"><div><span className="section-kicker">Shared-pool requests</span><h3>Awaiting pool pickup</h3></div><span className="marketplace-count">{sellRequests.length} pending</span></div><p className="directory-intro">A batcher can settle a request only with the shared pool and only at or above its minimum payout. Request owners can cancel at any time.</p><div className="marketplace-list">{sellRequests.map(renderRequest)}</div></section>}
       {view !== "pool" && renderSection(view === "fractions" ? "Fraction P2P listings" : "Listed tokens", "P2P orderbook", p2pListings, view === "fractions" ? "No fraction tokens are currently listed by users." : "No direct user listings are currently open.")}
       {view !== "p2p" && renderSection(view === "fractions" ? "Fraction pool inventory" : "Available tokens", "Shared pool inventory", poolListings, view === "fractions" ? "No fractional tokens are currently available from the pool." : "No pool-owned inventory is currently available.")}
     </section>

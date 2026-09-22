@@ -136,8 +136,8 @@ LP removal burns LP tokens and only withdraws quote liquidity above the protecte
 ~~~text
 [Approved-asset seller]
    |
-   | 1. Marketplace > Instant sell to pool.
-   |    Set a minimum acceptable payout in the pool quote asset.
+   | 1. Portfolio > Sell / List > Instant Sell to pool.
+   |    Review the operator bid and request it as the minimum payout.
    v
 {pool_sell_request}
   value: seller RWA + ADA buffer
@@ -160,7 +160,7 @@ LP removal burns LP tokens and only withdraws quote liquidity above the protecte
                             inventory value += ask                                 at the selected ask
 ~~~
 
-The seller chooses a floor, not a final sale price. The batcher chooses the bid and resale ask. Record the valuation source, approval, request out-reference, bid, ask, and resulting transaction hash.
+The seller accepts an on-chain floor, not a completed sale. The operator publishes per-base-unit ADA bids/asks, per-request limits, inventory caps and active status at `/team/inventory`. `/team` checks that book again on acquisition, alongside registry admission and cash. Record the price-book revision, approval, request out-reference, bid, ask, and resulting transaction hash. These settings are operator controls, not additional contract guarantees.
 
 ### Reserve-protection boundary
 

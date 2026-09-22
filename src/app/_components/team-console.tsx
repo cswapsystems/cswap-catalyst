@@ -3,7 +3,6 @@
 import Link from "next/link";
 import { useCallback, useEffect, useMemo, useState } from "react";
 import PlatformHeader from "./platform-header";
-import ReservesWorkbench from "./reserves-workbench";
 import TeamWorkbench from "./team-workbench";
 import { marketplaceDeployment } from "@/lib/protocol/marketplace-deployment";
 import { formatAda } from "@/lib/ada";
@@ -66,16 +65,15 @@ export default function TeamConsole() {
             <dl><dt>Open inventory value</dt><dd>{health ? formatAda(health.inventoryValue) + " tADA" : "-"}</dd></dl>
             <dl><dt>LP supply</dt><dd>{health ? health.totalLpSupply.toString() : "-"}</dd></dl>
           </div>
-          <div className="team-quick-links"><Link href="/registry">Approve assets <span>-&gt;</span></Link><a href="#pool-liquidity">Manage LP reserves <span>v</span></a><Link href="/marketplace">Review marketplace <span>-&gt;</span></Link></div>
+          <div className="team-quick-links"><Link href="/team/inventory">Manage prices & inventory <span>-&gt;</span></Link><Link href="/registry">Approve assets <span>-&gt;</span></Link><Link href="/team/controls">Pool controls and reserves <span>-&gt;</span></Link><Link href="/marketplace">Review marketplace <span>-&gt;</span></Link></div>
           {error && <p role="alert" className="form-message error-message">{error}</p>}
         </section>
         <section className="team-pricing">
           <div className="section-heading"><div><span className="section-kicker">Pricing and acquisition</span><h2>Instant-sell queue</h2></div><span className="marketplace-count">Batcher-only signing</span></div>
-          <p className="mint-intro">Set a bid no lower than the seller minimum and an ask for the pool-owned resale listing. The on-chain validator rejects a trade below the cash floor or without an approved exact asset.</p>
-          <TeamWorkbench />
+          <p className="mint-intro">Use the published operator price book to approve acquisitions. The application rechecks active status, quantity limits, registry admission and available cash before signing. These operational checks are not new on-chain guarantees.</p>
+          <TeamWorkbench onSettled={refresh} />
         </section>
-        <section id="pool-liquidity" className="team-liquidity"><ReservesWorkbench /></section>
-        {!lucid && <div className="team-connect-callout"><strong>Team wallet not connected.</strong><span>Connect the batcher to set prices, or connect an LP wallet to manage its own reserve position.</span><button type="button" className="primary-button" onClick={() => void connect()}>Connect Eternl <span className="button-arrow">-&gt;</span></button></div>}
+        {!lucid && <div className="team-connect-callout"><strong>Team wallet not connected.</strong><span>Connect the operator to publish prices, or connect an LP wallet to manage its own reserve position.</span><button type="button" className="primary-button" onClick={() => void connect()}>Connect Eternl <span className="button-arrow">-&gt;</span></button></div>}
       </div>
     </main>
   </div>;
