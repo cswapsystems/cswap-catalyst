@@ -2,14 +2,12 @@
 
 import { useCallback, useEffect, useMemo, useState } from "react";
 import Image from "next/image";
-import Link from "next/link";
 import { useWallet } from "./wallet-context";
 import { marketplaceOrderbookAddress, marketplacePoolAddress } from "@/lib/protocol/marketplace-deployment";
 import { formatAda } from "@/lib/ada";
 import { decodeCardanoAddress } from "@/lib/address-codec";
 
 
-type MarketplaceView = "all" | "p2p" | "pool" | "fractions";
 type ListingLayout = "card" | "list";
 type AssetClass = { policyId: string; assetName: string };
 type Constr = { index: number; fields: unknown[] };
@@ -136,7 +134,6 @@ function decodePoolSellRequest(utxo: import("@lucid-evolution/lucid").UTxO, tool
 }
 export default function MarketplaceWorkbench({ ownerOnly = false }: { ownerOnly?: boolean }) {
   const { address, lucid, connect } = useWallet();
-  const [view, setView] = useState<MarketplaceView>("all");
   const [listingLayout, setListingLayout] = useState<ListingLayout>("card");
   const [listings, setListings] = useState<Listing[]>([]);
   const [thumbnails, setThumbnails] = useState<Record<string, string>>({});
@@ -216,10 +213,8 @@ export default function MarketplaceWorkbench({ ownerOnly = false }: { ownerOnly?
     });
     return () => { cancelled = true; };
   }, [listings]);
-  const visible = useMemo(() => listings
-    .filter((listing) => view === "all" || (view === "p2p" && listing.settlement === "direct") || (view === "pool" && listing.settlement === "pool") || (view === "fractions" && Boolean(listing.fraction))), [listings, view]);
-  const p2pListings = useMemo(() => visible.filter((listing) => listing.settlement === "direct"), [visible]);
-  const poolListings = useMemo(() => visible.filter((listing) => listing.settlement === "pool"), [visible]);
+  const p2pListings = useMemo(() => listings.filter((listing) => listing.settlement === "direct"), [listings]);
+  const poolListings = useMemo(() => listings.filter((listing) => listing.settlement === "pool"), [listings]);
 
   async function buyListing(listing: Listing) {
     setMessage(null);
@@ -370,28 +365,21 @@ export default function MarketplaceWorkbench({ ownerOnly = false }: { ownerOnly?
 
   return <div className="marketplace-workbench">
     <section className="marketplace-card">
-      <div className="section-heading"><div><span className="section-kicker">Orderbook / shared settlement</span><h2>Trade RWA and fractional ownership</h2></div><span className="step-badge">{orderbookAddress ? "Contract ready" : "Address needed"}</span></div>
+      <div className="section-heading"><div><span className="section-kicker">Orderbook / shared settlement</span><h2>Trade RWA ownership</h2></div><span className="step-badge">{orderbookAddress ? "Contract ready" : "Address needed"}</span></div>
       <p className="marketplace-intro">Browse direct P2P listings and pool-owned inventory in one orderbook.</p>
       <div className="marketplace-toolbar">
-        <span className="wallet-assets-note">Buy listed assets here. Create listings and request Instant Sell from Portfolio.</span>
-        <div className="marketplace-toolbar-actions"><Link href="/my-assets">Open Portfolio</Link><button className="marketplace-refresh" type="button" onClick={() => void refresh()} disabled={loading}>{loading ? "Loading…" : "Refresh books"}</button></div>
+        <span className="wallet-assets-note">Buy listed assets here.</span>
+        <div className="marketplace-toolbar-actions"><button className="marketplace-refresh" type="button" onClick={() => void refresh()} disabled={loading}>{loading ? "Loading…" : "Refresh"}</button></div>
       </div>
       {message && <p className={message.kind === "error" ? "marketplace-message marketplace-error" : "marketplace-message marketplace-success"} role={message.kind === "error" ? "alert" : "status"}>{message.text}</p>}
       <div className="marketplace-market-summary"><div><span>Direct listings</span><strong>{p2pListings.length}</strong></div><div><span>Pool inventory</span><strong>{poolListings.length}</strong></div>{ownerOnly && <div><span>Your Instant Sell requests</span><strong>{sellRequests.length}</strong></div>}</div>
-      <div className="marketplace-view-tabs" role="tablist" aria-label="Marketplace inventory">
-        <button type="button" className={view === "all" ? "selected" : ""} onClick={() => setView("all")}>Overview</button>
-        <button type="button" className={view === "p2p" ? "selected" : ""} onClick={() => setView("p2p")}>Listed tokens</button>
-        <button type="button" className={view === "pool" ? "selected" : ""} onClick={() => setView("pool")}>Pool owned</button>
-        <button type="button" className={view === "fractions" ? "selected" : ""} onClick={() => setView("fractions")}>Fractions</button>
-      </div>
-
     </section>
     {marketplaceToast && <div className="marketplace-toast" role="status"><strong>Marketplace updated</strong><span>{marketplaceToast}</span><button type="button" onClick={() => setMarketplaceToast(null)} aria-label="Dismiss Marketplace notification">×</button></div>}
     {editing && <div className="marketplace-edit-backdrop" role="presentation" onMouseDown={() => !loading && setEditing(null)}><section className="marketplace-edit-dialog" role="dialog" aria-modal="true" aria-labelledby="marketplace-edit-title" onMouseDown={(event) => event.stopPropagation()}><div className="listing-dialog-heading"><div><span className="section-kicker">Marketplace listing</span><h2 id="marketplace-edit-title">Edit price</h2></div><button type="button" className="listing-dialog-close" onClick={() => setEditing(null)} disabled={loading} aria-label="Close edit dialog">×</button></div><p>Update the price for {assetNameText(editing.rwa.assetName)}. The listed quantity remains {editing.quantity.toString()}.</p><label className="field"><span className="field-label">Price in base units</span><input autoFocus inputMode="numeric" pattern="[0-9]+" min="1" value={editPrice} onChange={(event) => setEditPrice(event.target.value)} /></label><div className="marketplace-edit-dialog-actions"><button type="button" onClick={() => setEditing(null)} disabled={loading}>Cancel</button><button type="button" className="primary-button" onClick={() => void updateListing(editing)} disabled={loading}>{loading ? "Awaiting wallet…" : "Save price"}</button></div></section></div>}
     <section className="marketplace-listings">
       {ownerOnly && sellRequests.length > 0 && <section className="marketplace-book"><div className="marketplace-book-head"><div><span className="section-kicker">Shared-pool requests</span><h3>Awaiting pool pickup</h3></div><span className="marketplace-count">{sellRequests.length} pending</span></div><p className="directory-intro">A batcher can settle a request only with the shared pool and only at or above its minimum payout. Request owners can cancel at any time.</p><div className="marketplace-list">{sellRequests.map(renderRequest)}</div></section>}
-      {view !== "pool" && renderSection(view === "fractions" ? "Fraction P2P listings" : "Listed tokens", "P2P orderbook", p2pListings, view === "fractions" ? "No fraction tokens are currently listed by users." : "No direct user listings are currently open.")}
-      {view !== "p2p" && renderSection(view === "fractions" ? "Fraction pool inventory" : "Available tokens", "Shared pool inventory", poolListings, view === "fractions" ? "No fractional tokens are currently available from the pool." : "No pool-owned inventory is currently available.")}
+      {renderSection("Listed tokens", "P2P orderbook", p2pListings, "No direct user listings are currently open.")}
+      {renderSection("Available tokens", "Shared pool inventory", poolListings, "No pool-owned inventory is currently available.")}
     </section>
   </div>;
 
