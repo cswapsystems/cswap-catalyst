@@ -1,10 +1,11 @@
-import { readFile, writeFile } from "node:fs/promises";
+import { readFile, writeFile, rename, access } from "node:fs/promises";
 import { Blockfrost } from "@lucid-evolution/provider";
 import { AddressSchema, Constr, Data, Lucid, applyParamsToScript, fromText, getAddressDetails, mintingPolicyToId, validatorToAddress } from "@lucid-evolution/lucid";
 
 const NETWORK = "Preprod";
 const API = "https://cardano-preprod.blockfrost.io/api/v0";
 const DEPLOYMENT_FILE = new URL("../dex-deployment.preprod.json", import.meta.url);
+const PENDING_FILE = new URL("../dex-deployment.preprod.pending.json", import.meta.url);
 
 function parseEnv(source) {
   return Object.fromEntries(source.split(/\r?\n/).filter((line) => line && !line.startsWith("#") && line.includes("=")).map((line) => { const split = line.indexOf("="); return [line.slice(0, split), line.slice(split + 1)]; }));
@@ -49,6 +50,7 @@ function scripts(code, admin, factoryToken) {
   return { factoryState, factoryAddress, bootstrapOffer, bootstrapOfferAddress, amm, ammAddress, lp, lpPolicyId, poolFactory, poolPolicyId: mintingPolicyToId(poolFactory) };
 }
 async function deploy(replace = false) {
+  if (await access(PENDING_FILE).then(() => true, () => false)) throw new Error("A pending deployment exists. Run confirm-deployment before attempting another deployment; if never submitted, inspect the pending transaction before removing its record.");
   const existing = await readFile(DEPLOYMENT_FILE, "utf8").then(JSON.parse).catch(() => null);
   if (existing?.factoryToken && !replace) throw new Error("A DEX deployment record already exists; verify it instead of creating a second factory. Use redeploy only for a validator migration.");
   const { lucid, walletAddress, admin, code } = await context();
@@ -62,16 +64,28 @@ async function deploy(replace = false) {
   const derived = scripts(code, admin, factoryToken);
   const datum = new Constr(0, [assetData(factoryToken), admin, derived.poolPolicyId, 0n, new Constr(0, [])]);
   const deployment = { network: "preprod", admin, factoryToken: unit(factoryToken), factoryAddress: derived.factoryAddress, ammAddress: derived.ammAddress, lpPolicyId: derived.lpPolicyId, poolPolicyId: derived.poolPolicyId, bootstrapOfferAddress: derived.bootstrapOfferAddress, transaction: null, ...(replace && existing ? { supersedes: existing } : {}) };
-  await writeFile(DEPLOYMENT_FILE, JSON.stringify(deployment, null, 2) + "\n", "utf8");
   console.log("Building factory bootstrap transaction...");
   const tx = await lucid.newTx().collectFrom([seed]).mintAssets({ [unit(factoryToken)]: 1n }, Data.to(new Constr(0, []))).attach.MintingPolicy(bootstrap).pay.ToContract(derived.factoryAddress, { kind: "inline", value: Data.to(datum) }, { lovelace: 5_000_000n, [unit(factoryToken)]: 1n }).addSigner(walletAddress).complete();
   console.log("Signing and submitting factory bootstrap transaction...");
+  deployment.transaction = tx.toHash();
+  await writeFile(PENDING_FILE, JSON.stringify(deployment, null, 2) + "\n", { encoding: "utf8", flag: "wx" });
+  console.log(`Prepared deployment: ${deployment.transaction}. Recovery record: dex-deployment.preprod.pending.json`);
   const hash = await (await tx.sign.withWallet().complete()).submit();
-  const confirmed = await lucid.awaitTx(hash);
+  console.log(`Submitted: ${hash}`);
+  const confirmed = await lucid.awaitTxConfirmation(hash, { timeout: 120_000, checkInterval: 3_000 });
   if (!confirmed) throw new Error(`Factory bootstrap was submitted but not confirmed: ${hash}`);
-  deployment.transaction = hash;
-  await writeFile(DEPLOYMENT_FILE, JSON.stringify(deployment, null, 2) + "\n", "utf8");
+  await rename(PENDING_FILE, DEPLOYMENT_FILE);
   console.log(JSON.stringify(deployment, null, 2));
+}
+async function confirmDeployment() {
+  const deployment = JSON.parse(await readFile(PENDING_FILE, "utf8"));
+  const { lucid, admin } = await context();
+  if (deployment.network !== "preprod" || deployment.admin !== admin || !deployment.transaction) throw new Error("Pending deployment does not match the configured Preprod admin.");
+  if (!await lucid.awaitTxConfirmation(deployment.transaction, { timeout: 120_000, checkInterval: 3_000 })) throw new Error("Pending deployment is not confirmed; do not deploy again until its status is resolved.");
+  const state = await lucid.utxoByUnit(deployment.factoryToken);
+  if (state.address !== deployment.factoryAddress || state.assets[deployment.factoryToken] !== 1n) throw new Error("Pending factory identity mismatch.");
+  await rename(PENDING_FILE, DEPLOYMENT_FILE);
+  console.log(`Deployment confirmed and published: ${deployment.transaction}`);
 }
 async function status() {
   const { lucid, walletAddress } = await context();
@@ -175,4 +189,4 @@ async function closePool(fractionUnit) {
   await submit(ctx, builder, "close-pool");
 }
 const command = process.argv[2] ?? "status";
-if (command === "deploy") await deploy(); else if (command === "redeploy") await deploy(true); else if (command === "await") await awaitTransaction(process.argv[3]); else if (command === "collateral") await createCollateral(); else if (command === "status") await status(); else if (command === "pool") await inspectPool(process.argv[3]); else if (command === "create") await createPool(process.argv[3], process.argv[4], process.argv[5]); else if (["add", "swap", "swap-b", "remove"].includes(command)) await transition(command, process.argv[3], process.argv[4]); else if (command === "close") await closePool(process.argv[3]); else throw new Error("Usage: npm run dex:preprod -- status|pool|deploy|redeploy|await|collateral|create|add|swap|swap-b|remove|close");
+if (command === "deploy") await deploy(); else if (command === "redeploy") await deploy(true); else if (command === "confirm-deployment") await confirmDeployment(); else if (command === "await") await awaitTransaction(process.argv[3]); else if (command === "collateral") await createCollateral(); else if (command === "status") await status(); else if (command === "pool") await inspectPool(process.argv[3]); else if (command === "create") await createPool(process.argv[3], process.argv[4], process.argv[5]); else if (["add", "swap", "swap-b", "remove"].includes(command)) await transition(command, process.argv[3], process.argv[4]); else if (command === "close") await closePool(process.argv[3]); else throw new Error("Usage: npm run dex:preprod -- status|pool|deploy|redeploy|confirm-deployment|await|collateral|create|add|swap|swap-b|remove|close");

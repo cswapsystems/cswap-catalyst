@@ -8,8 +8,7 @@ The primary navigation groups customer and operator work by task. Existing URLs 
 | Protocol | `/protocol` | Wallet-free current-state statistics with per-source unavailable/partial indicators. |
 | Portfolio | `/my-assets`, `/portfolio/positions`, `/portfolio/orders`, `/portfolio/reserves`, `/wallet`, `/history` | Wallet holdings, configured-deployment positions, owned listing management, shared reserve LP actions, wallet details and activity. |
 | DEX | `/dex`, `/dex/liquidity`, `/dex/launch` | Swaps, LP deposits/withdrawals, and three-party bootstrap. |
-| Operations | `/team`, `/team/inventory`, `/registry`, `/team/controls`, `/team/dex`, `/team/recovery`, `/wallets` | Request approval, operator prices and inventory limits, admission, pool configuration, factory administration, recovery, and deployment wallets. |
-| Explore | `/assets`, `/asset-registry`, `/vault` | Public asset and state inspection. |
+| Operations | `/team`, `/team/inventory`, `/registry`, `/team/controls`, `/team/dex`, `/team/recovery`, `/wallets` | Request approval, operator prices and inventory limits, admission, pool configuration, three-party DEX bootstrap review, factory administration, recovery, and deployment wallets. |
 
 ## Portfolio data
 
@@ -31,7 +30,9 @@ DEX deployment and datum helpers live in `src/lib/protocol/dex-client.ts`; integ
 
 ## Operator controls
 
-Shared-pool controls permit an authorized administrator to update the protected reserve and pause flag, preserving identity, authorities, values and LP/inventory accounting. Factory controls modify only the pause flag and require a deployment matching the reviewed factory script. Pool creation and destruction are grouped under DEX administration.
+Shared-pool controls permit an authorized administrator to update the protected reserve and pause flag, preserving identity, authorities, values and LP/inventory accounting. Factory controls modify only the pause flag and require a deployment matching the reviewed factory script. DEX administration also hosts the three-party bootstrap workspace: before the Team creator can co-sign an LP request, the UI verifies the current factory and offer inputs, deterministic pool/LP identities, exact reserves and LP split, mint set, required signers, and that no Team-wallet UTxO is spent. Pool creation and destruction are grouped there as well.
+
+Bootstrap approval additionally rejects Team or third-party collateral, unrelated inputs/outputs, governance actions, certificates, withdrawals, and reference inputs. It displays participant addresses, exact asset units and base-unit reserves, LP allocations, transaction hash and fee; acknowledgment is required. The current inputs are rechecked before signing and submission. Pending hashes and confirmation controls remain in the active page, not across reloads. Factory deployment/redeployment still uses the reviewed CLI, not a browser button; its public manifest is replaced only after confirmation, with a pending recovery record for interrupted runs.
 
 The pricing queue reads published operator bids/asks, multiplies them by request quantity, shows remaining settlement cash, and rechecks active status, per-request quantity, total inventory cap, registry admission and the reserve floor before signing. An approval reference is required. After submission, the operator can download a JSON record containing price-book revision, input references, signer, prices, expected cash and transaction hash. The record is held in the current page session and must be archived by the operator; downloading does not prove confirmation.
 

@@ -72,7 +72,7 @@ fn valid_offer(offer: BootstrapOfferDatum, value: assets.Value) -> Bool {
     offer.quote_asset != offer.fraction_asset,
     offer.fraction_amount > 0,
     offer.quote_amount > 0,
-    offer.pool_lovelace > 0,
+    has_minimum_pool_buffer(offer.pool_lovelace),
     offer.owner_share_bps > 0,
     offer.owner_share_bps < 10_000,
     if offer.quote_asset == ada {
@@ -141,5 +141,16 @@ fn owner_matches_key(owner: address.Address, key: VerificationKeyHash) -> Bool {
   when owner.payment_credential is {
     address.VerificationKey(owner_key) -> owner_key == key
     _ -> False
+  }
+}
+
+fn has_minimum_pool_buffer(pool_lovelace: Int) -> Bool {
+  pool_lovelace >= 2_000_000
+}
+
+test bootstrap_offer_requires_two_ada_buffer() {
+  and {
+    has_minimum_pool_buffer(2_000_000),
+    has_minimum_pool_buffer(1_999_999) == False,
   }
 }

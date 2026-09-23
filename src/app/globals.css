@@ -414,6 +414,8 @@ footer b, footer a:hover { color: var(--moss); }
 .dex-bootstrap-handoff-actions { display: flex; align-items: center; flex-wrap: wrap; gap: 12px; margin-top: 16px; }
 .dex-bootstrap-handoff-actions > span { color: var(--muted); font-size: 11px; overflow-wrap: anywhere; }
 .dex-bootstrap-handoff-actions code { color: var(--ink); }
+.dex-bootstrap-review { margin-top: 16px; padding: 14px; border: 1px solid var(--line); border-radius: 8px; background: var(--surface-deep); overflow-wrap: anywhere; }.dex-bootstrap-review.ready { border-color: #1f7740; }.dex-bootstrap-review.error { border-color: #8c3434; }.dex-bootstrap-review strong, .dex-bootstrap-review p { display: block; }.dex-bootstrap-review p { margin-top: 6px; color: var(--muted); font-size: 13px; }.dex-bootstrap-review label { display: flex; align-items: flex-start; gap: 9px; margin-top: 12px; color: var(--ink); font-size: 13px; line-height: 1.45; }.dex-bootstrap-review input { flex: 0 0 auto; margin-top: 3px; accent-color: var(--lime); }.dex-bootstrap-review ul { margin: 8px 0 0; padding-left: 18px; color: #f5b3b3; font-size: 13px; }
+.dex-bootstrap-review dt { margin-top: 10px; color: var(--muted); font-size: 12px; }.dex-bootstrap-review dd { margin: 4px 0 0; font-size: 13px; }
 
 /* Shared-pool team console ------------------------------------------------ */
 .team-console { display: grid; gap: 16px; margin-bottom: 48px; }

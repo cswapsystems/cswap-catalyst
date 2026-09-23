@@ -3,6 +3,10 @@
 import { FormEvent, useCallback, useEffect, useMemo, useState } from "react";
 import { useWallet } from "./wallet-context";
 import { formatAda } from "@/lib/ada";
+import { reviewBootstrapTransaction } from "@/lib/bootstrap-review";
+import { decodeCardanoAddress } from "@/lib/address-codec";
+import { confirmTransaction } from "@/lib/transaction-confirmation";
+import { assertBootstrapMinimumAda } from "@/lib/bootstrap-values";
 
 type Tools = typeof import("@lucid-evolution/lucid");
 type AssetClass = { policyId: string; assetName: string };
@@ -56,6 +60,7 @@ type ApprovalRequest = {
   transactionCbor: string;
   providerWitness: string;
 };
+type TeamReview = Awaited<ReturnType<typeof reviewBootstrapTransaction>>;
 
 const initialForm: Form = {
   fractionUnit: "",
@@ -63,7 +68,7 @@ const initialForm: Form = {
   quoteKind: "ada",
   usdcxUnit: process.env.NEXT_PUBLIC_USDCX_UNIT ?? "",
   quoteAmount: "10",
-  poolAda: "2",
+  poolAda: "4",
   ownerShare: "50",
 };
 
@@ -90,7 +95,7 @@ function assetUnit(asset: AssetClass) {
 
 function parseUnit(value: string, label: string): AssetClass {
   const normalized = value.trim().toLowerCase();
-  if (!/^[0-9a-f]+$/.test(normalized) || normalized.length < 56 || normalized.length % 2 !== 0) throw new Error(label + " must be a policy ID plus asset name in hexadecimal.");
+  if (!/^[0-9a-f]+$/.test(normalized) || normalized.length < 56 || normalized.length > 120 || normalized.length % 2 !== 0) throw new Error(label + " must be a policy ID plus an asset name of at most 32 bytes in hexadecimal.");
   return { policyId: normalized.slice(0, 56), assetName: normalized.slice(56) };
 }
 
@@ -102,21 +107,6 @@ function addressData(tools: Tools, address: string) {
     addressCredential: credential(details.paymentCredential),
     addressStakingCredential: details.stakeCredential ? { StakingHash: [credential(details.stakeCredential)] } : null,
   } as never, tools.AddressSchema as never));
-}
-
-function addressFrom(tools: Tools, value: unknown): string {
-  const root = asConstr(value, "offer owner");
-  if (root.index !== 0 || root.fields.length !== 2) throw new Error("Malformed offer owner.");
-  const credential = (raw: unknown) => {
-    const item = asConstr(raw, "credential");
-    if (item.fields.length !== 1 || typeof item.fields[0] !== "string") throw new Error("Malformed offer credential.");
-    return { type: item.index === 0 ? "Key" as const : "Script" as const, hash: item.fields[0] };
-  };
-  const payment = credential(root.fields[0]);
-  if (root.fields[1] === null) return tools.credentialToAddress("Preprod", payment);
-  const stake = asConstr(root.fields[1], "staking credential");
-  if (stake.index !== 0 || stake.fields.length !== 1) throw new Error("Malformed offer staking credential.");
-  return tools.credentialToAddress("Preprod", payment, credential(asConstr(stake.fields[0], "staking hash").fields[0]));
 }
 
 function poolName(id: bigint) {
@@ -162,10 +152,11 @@ function decodeOffer(tools: Tools, utxo: import("@lucid-evolution/lucid").UTxO, 
   const datum = asConstr(tools.Data.from(utxo.datum), "bootstrap offer");
   if (datum.index !== 0 || datum.fields.length !== 9 || typeof datum.fields[1] !== "string" || typeof datum.fields[4] !== "bigint" || typeof datum.fields[6] !== "bigint" || typeof datum.fields[7] !== "bigint" || typeof datum.fields[8] !== "bigint") throw new Error("Malformed bootstrap offer datum.");
   const ownerKey = datum.fields[1];
+  if (datum.fields[4] <= BigInt(0) || datum.fields[6] <= BigInt(0) || datum.fields[7] < BigInt(2_000_000) || datum.fields[8] <= BigInt(0) || datum.fields[8] >= BigInt(10_000)) throw new Error("Invalid offer terms.");
   return {
     id: utxo.txHash + "#" + utxo.outputIndex,
     utxo,
-    owner: addressFrom(tools, datum.fields[0]),
+    owner: decodeCardanoAddress(datum.fields[0], tools),
     ownerKey,
     factoryToken: assetFrom(datum.fields[2], "factory token"),
     fraction: assetFrom(datum.fields[3], "fraction"),
@@ -206,7 +197,10 @@ export default function DexBootstrapWorkbench() {
   const [approvalRequest, setApprovalRequest] = useState<ApprovalRequest | null>(null);
   const [teamTransaction, setTeamTransaction] = useState("");
   const [teamWitness, setTeamWitness] = useState("");
+  const [teamReview, setTeamReview] = useState<TeamReview | null>(null);
+  const [teamAcknowledged, setTeamAcknowledged] = useState(false);
   const [returnedTeamWitness, setReturnedTeamWitness] = useState("");
+  const [pendingHash, setPendingHash] = useState("");
 
   const refresh = useCallback(async () => {
     setMessage(null);
@@ -223,7 +217,8 @@ export default function DexBootstrapWorkbench() {
       const found: Offer[] = [];
       for (const utxo of await lucid.utxosAt(next.bootstrapAddress)) {
         try {
-          found.push(decodeOffer(tools, utxo, ownerKey));
+          const offer = decodeOffer(tools, utxo, ownerKey);
+          if (assetUnit(offer.factoryToken) === next.deployment.factoryToken) found.push(offer);
         } catch {
           // Ignore any unrelated UTxO sent to the offer script.
         }
@@ -246,6 +241,19 @@ export default function DexBootstrapWorkbench() {
 
   const update = <Key extends keyof Form>(key: Key, value: Form[Key]) => setForm((current) => ({ ...current, [key]: value }));
 
+  async function checkConfirmation(hash = pendingHash) {
+    if (!lucid || !hash) return;
+    setLoading(true);
+    try {
+      if (!await confirmTransaction(lucid, hash)) throw new Error("Confirmation is still pending: " + hash);
+      await refresh();
+      setPendingHash("");
+      setMessage({ kind: "success", text: "Transaction confirmed: " + hash });
+    } catch (cause) {
+      setMessage({ kind: "error", text: cause instanceof Error ? cause.message : "Unable to check confirmation: " + hash });
+    } finally { setLoading(false); }
+  }
+
   async function submitOffer(event: FormEvent) {
     event.preventDefault();
     if (!lucid || !address || !context) {
@@ -258,14 +266,19 @@ export default function DexBootstrapWorkbench() {
       const tools = await import("@lucid-evolution/lucid");
       const details = tools.getAddressDetails(address);
       if (details.paymentCredential?.type !== "Key") throw new Error("The FT-owner wallet needs a payment-key address.");
+      if (details.paymentCredential.hash === context.deployment.admin) throw new Error("The FT provider must be distinct from the Team creator.");
       const fraction = parseUnit(form.fractionUnit, "FT asset unit");
       const quote = form.quoteKind === "ada" ? { policyId: "", assetName: "" } : parseUnit(form.usdcxUnit, "USDCx asset unit");
+      if (assetUnit(fraction) === assetUnit(quote)) throw new Error("FT and quote assets must be different.");
       const fractionAmount = BigInt(form.fractionAmount);
       const quoteAmount = BigInt(form.quoteAmount) * (quote.policyId ? BigInt(1) : BigInt(1_000_000));
       const poolLovelace = BigInt(form.poolAda) * BigInt(1_000_000);
       const ownerShareBps = parseShareBps(form.ownerShare);
       if (fractionAmount <= BigInt(0) || quoteAmount <= BigInt(0) || poolLovelace < BigInt(2_000_000)) throw new Error("Use a positive FT amount, positive quote reserve, and an ADA buffer of at least 2.");
       if (!quote.policyId && poolLovelace > quoteAmount) throw new Error("The ADA reserve must be at least as large as the locked ADA buffer.");
+      const liquidity = integerSqrt(fractionAmount * quoteAmount);
+      const ownerLp = liquidity * ownerShareBps / BigInt(10_000);
+      if (ownerLp <= BigInt(0) || ownerLp >= liquidity) throw new Error("Increase reserves or adjust the split so both parties receive LP tokens.");
       const datum = new tools.Constr(0, [
         addressData(tools, address),
         details.paymentCredential.hash,
@@ -277,13 +290,26 @@ export default function DexBootstrapWorkbench() {
         poolLovelace,
         ownerShareBps,
       ]);
+      const name = poolName(BigInt(0)); // Every pool ID is encoded as exactly 8 bytes.
+      const poolNft = { policyId: context.deployment.poolPolicyId, assetName: name };
+      const lpToken = { policyId: context.deployment.lpPolicyId, assetName: name };
+      const poolValue = quote.policyId ? poolLovelace : quoteAmount;
+      const poolDatum = new tools.Constr(0, [assetData(tools, poolNft), assetData(tools, quote), assetData(tools, fraction), assetData(tools, lpToken), BigInt(997), BigInt(1000), quoteAmount, fractionAmount, liquidity, poolValue]);
+      const parameters = lucid.config().protocolParameters;
+      if (!parameters) throw new Error("Network protocol parameters are unavailable.");
+      const offerDatum = tools.Data.to(datum as import("@lucid-evolution/lucid").Data);
+      const offerAssets = { lovelace: poolLovelace, [assetUnit(fraction)]: fractionAmount };
+      assertBootstrapMinimumAda(tools, parameters.coinsPerUtxoByte, [
+        { label: "Offer escrow", address: context.bootstrapAddress, datum: offerDatum, assets: offerAssets },
+        { label: "Resulting pool", address: context.deployment.ammAddress, datum: tools.Data.to(poolDatum), assets: quote.policyId ? { lovelace: poolValue, [assetUnit(quote)]: quoteAmount, [assetUnit(fraction)]: fractionAmount, [assetUnit(poolNft)]: BigInt(1) } : { lovelace: poolValue, [assetUnit(fraction)]: fractionAmount, [assetUnit(poolNft)]: BigInt(1) } },
+      ]);
       const tx = lucid.newTx()
-        .pay.ToContract(context.bootstrapAddress, { kind: "inline", value: tools.Data.to(datum as import("@lucid-evolution/lucid").Data) }, { lovelace: poolLovelace, [assetUnit(fraction)]: fractionAmount })
+        .pay.ToContract(context.bootstrapAddress, { kind: "inline", value: offerDatum }, offerAssets)
         .addSigner(address);
       const hash = await (await (await tx.complete()).sign.withWallet().complete()).submit();
-      setMessage({ kind: "success", text: "Bootstrap offer submitted: " + hash });
+      setPendingHash(hash);
       setForm(initialForm);
-      await refresh();
+      await checkConfirmation(hash);
     } catch (cause) {
       setMessage({ kind: "error", text: cause instanceof Error ? cause.message : "The bootstrap offer could not be submitted." });
     } finally {
@@ -336,6 +362,8 @@ export default function DexBootstrapWorkbench() {
         .addSignerKey(provider.hash)
         .addSignerKey(context.deployment.admin);
       const completed = await tx.complete();
+      const reviewed = await reviewBootstrapTransaction(tools, lucid, completed.toCBOR(), context.deployment, decodeCardanoAddress);
+      if (!reviewed.result.ok) throw new Error(reviewed.result.issues.join(" "));
       const providerWitness = await completed.partialSign.withWallet();
       setApprovalRequest({ offerId: offer.id, transactionCbor: completed.toCBOR(), providerWitness });
       setReturnedTeamWitness("");
@@ -347,9 +375,10 @@ export default function DexBootstrapWorkbench() {
     }
   }
 
-  async function signTeamApproval() {
+  async function reviewTeamApproval() {
+    setTeamWitness("");
     if (!lucid || !address || !context) {
-      setMessage({ kind: "error", text: "Connect the configured Team creator wallet before approving a bootstrap transaction." });
+      setMessage({ kind: "error", text: "Connect the configured Team creator wallet before reviewing a bootstrap transaction." });
       return;
     }
     setLoading(true);
@@ -357,21 +386,42 @@ export default function DexBootstrapWorkbench() {
     try {
       const tools = await import("@lucid-evolution/lucid");
       const team = tools.getAddressDetails(address).paymentCredential;
-      if (!team || team.type !== "Key" || team.hash !== context.deployment.admin) throw new Error("Only the configured Team creator can approve this bootstrap transaction.");
+      if (!team || team.type !== "Key" || team.hash !== context.deployment.admin) throw new Error("Only the configured Team creator can review this bootstrap transaction.");
       const transaction = teamTransaction.trim();
       if (!/^[0-9a-f]+$/i.test(transaction)) throw new Error("Paste a valid hexadecimal transaction CBOR value.");
-      const witness = await lucid.fromTx(transaction).partialSign.withWallet();
-      setTeamWitness(witness);
-      setMessage({ kind: "success", text: "Team approval witness created. Return this witness to the liquidity provider for final submission." });
+      const review = await reviewBootstrapTransaction(tools, lucid, transaction, context.deployment, decodeCardanoAddress);
+      const { result } = review;
+      setTeamReview(review);
+      setTeamAcknowledged(false);
+      setMessage(result.ok ? { kind: "success", text: "Bootstrap request matches the current offer and factory state. Confirm the review before signing." } : { kind: "error", text: result.issues.join(" ") });
     } catch (cause) {
-      setMessage({ kind: "error", text: cause instanceof Error ? cause.message : "The Team approval could not be created." });
+      setTeamReview(null);
+      setTeamAcknowledged(false);
+      setMessage({ kind: "error", text: cause instanceof Error ? cause.message : "The Team approval request could not be reviewed." });
     } finally {
       setLoading(false);
     }
   }
 
+  async function signTeamApproval() {
+    if (!lucid || !address || !context) { setMessage({ kind: "error", text: "Connect the configured Team creator wallet before approving a bootstrap transaction." }); return; }
+    const transaction = teamTransaction.trim();
+    if (!teamReview || teamReview.transaction !== transaction || !teamReview.result.ok || !teamAcknowledged) { setMessage({ kind: "error", text: "Review the exact bootstrap transaction and confirm its terms before signing." }); return; }
+    setLoading(true); setMessage(null);
+    try {
+      const team = (await import("@lucid-evolution/lucid")).getAddressDetails(address).paymentCredential;
+      if (!team || team.type !== "Key" || team.hash !== context.deployment.admin) throw new Error("Only the configured Team creator can approve this bootstrap transaction.");
+      const fresh = await reviewBootstrapTransaction(await import("@lucid-evolution/lucid"), lucid, transaction, context.deployment, decodeCardanoAddress);
+      if (!fresh.result.ok) throw new Error(fresh.result.issues.join(" "));
+      const witness = await lucid.fromTx(transaction).partialSign.withWallet();
+      setTeamWitness(witness);
+      setMessage({ kind: "success", text: "Team approval witness created. Return this witness to the liquidity provider for final submission." });
+    } catch (cause) { setMessage({ kind: "error", text: cause instanceof Error ? cause.message : "The Team approval could not be created." }); }
+    finally { setLoading(false); }
+  }
+
   async function submitTeamApprovedBootstrap() {
-    if (!lucid || !approvalRequest) {
+    if (!lucid || !approvalRequest || !context) {
       setMessage({ kind: "error", text: "Prepare the quote-side transaction with the liquidity-provider wallet first." });
       return;
     }
@@ -380,14 +430,16 @@ export default function DexBootstrapWorkbench() {
     try {
       const team = returnedTeamWitness.trim();
       if (!/^[0-9a-f]+$/i.test(team)) throw new Error("Paste the Team creator's hexadecimal witness before submitting.");
+      const review = await reviewBootstrapTransaction(await import("@lucid-evolution/lucid"), lucid, approvalRequest.transactionCbor, context.deployment, decodeCardanoAddress);
+      if (!review.result.ok) throw new Error(review.result.issues.join(" "));
       const signed = await lucid.fromTx(approvalRequest.transactionCbor)
         .assemble([approvalRequest.providerWitness, team])
         .complete();
       const hash = await signed.submit();
+      setPendingHash(hash);
       setApprovalRequest(null);
       setReturnedTeamWitness("");
-      setMessage({ kind: "success", text: "Team-approved pool bootstrap submitted: " + hash });
-      await refresh();
+      await checkConfirmation(hash);
     } catch (cause) {
       setMessage({ kind: "error", text: cause instanceof Error ? cause.message : "The Team-approved bootstrap could not be submitted." });
     } finally {
@@ -410,8 +462,8 @@ export default function DexBootstrapWorkbench() {
         .pay.ToAddress(offer.owner, { ...offer.utxo.assets })
         .addSigner(address);
       const hash = await (await (await tx.complete()).sign.withWallet().complete()).submit();
-      setMessage({ kind: "success", text: "Bootstrap offer cancelled: " + hash });
-      await refresh();
+      setPendingHash(hash);
+      await checkConfirmation(hash);
     } catch (cause) {
       setMessage({ kind: "error", text: cause instanceof Error ? cause.message : "The offer could not be cancelled." });
     } finally {
@@ -435,6 +487,8 @@ export default function DexBootstrapWorkbench() {
       <li><span>02</span><div><strong>LP funds and signs</strong><p>A different payment key funds tADA or USDCx and creates a partial witness.</p></div></li>
       <li><span>03</span><div><strong>Team creator approves</strong><p>The factory creator reviews the same CBOR, co-signs it, and the LP submits the complete settlement.</p></div></li>
     </ol>
+    {pendingHash && <p className="dex-warning" role="status">Transaction submitted: <code>{pendingHash}</code>. Check confirmation before retrying. <button type="button" onClick={() => void checkConfirmation()} disabled={loading}>Check confirmation</button></p>}
+    <fieldset className="module-fieldset" disabled={loading || Boolean(pendingHash)}>
     <form className="dex-bootstrap-form" onSubmit={submitOffer}>
       <div className="section-heading"><div><span className="section-kicker">New offer</span><h3>Lock the FT side</h3></div><span className="step-badge">{context ? "Ready" : loaded ? "Redeploy required" : "Loading"}</span></div>
       <div className="dex-form-grid">
@@ -456,8 +510,9 @@ export default function DexBootstrapWorkbench() {
     {context && <section className="dex-bootstrap-handoff">
       <span className="section-kicker">Step 3 · Team creator</span><h3>Review and co-sign an LP request</h3>
       <p>Connect only the wallet whose payment key hash is configured as the factory Team creator. Paste the LP&apos;s transaction CBOR, verify its inputs, outputs, pair, reserves, and LP split, then return only the generated witness to that LP.</p>
-      <label><span>LP approval transaction CBOR</span><textarea value={teamTransaction} onChange={(event) => setTeamTransaction(event.target.value)} placeholder="Paste transaction CBOR from the liquidity provider" aria-label="LP approval transaction CBOR" /></label>
-      <div className="dex-bootstrap-handoff-actions"><button type="button" onClick={() => void signTeamApproval()} disabled={loading || !teamTransaction.trim()}>Create Team approval witness</button></div>
+      <label><span>LP approval transaction CBOR</span><textarea value={teamTransaction} onChange={(event) => { setTeamTransaction(event.target.value); setTeamReview(null); setTeamAcknowledged(false); setTeamWitness(""); }} placeholder="Paste transaction CBOR from the liquidity provider" aria-label="LP approval transaction CBOR" /></label>
+      <div className="dex-bootstrap-handoff-actions"><button type="button" onClick={() => void reviewTeamApproval()} disabled={loading || !teamTransaction.trim()}>Review bootstrap request</button><button type="button" onClick={() => void signTeamApproval()} disabled={loading || !teamReview?.result.ok || !teamAcknowledged}>Create Team approval witness</button></div>
+      {teamReview && <div className={"dex-bootstrap-review " + (teamReview.result.ok ? "ready" : "error")}>{teamReview.result.ok ? <><strong>Verified bootstrap request</strong><p>Offer {teamReview.offer.id} creates pool {teamReview.result.poolName}. The FT provider receives {format(teamReview.result.ownerLp)} LP units; the liquidity provider receives {format(teamReview.result.providerLp)}.</p><dl><dt>FT reserve (base units)</dt><dd>{format(teamReview.offer.fractionAmount)} · <code>{assetUnit(teamReview.offer.fraction)}</code></dd><dt>Quote reserve (base units)</dt><dd>{format(teamReview.offer.quoteAmount)} · <code>{assetUnit(teamReview.offer.quote)}</code></dd><dt>Locked ADA buffer</dt><dd>{formatAda(teamReview.offer.poolLovelace)} tADA</dd><dt>FT provider</dt><dd><code>{teamReview.offer.owner}</code></dd><dt>Liquidity provider</dt><dd><code>{teamReview.provider.address}</code></dd><dt>Transaction hash / fee (lovelace)</dt><dd><code>{teamReview.hash}</code> / {teamReview.fee}</dd></dl><label><input type="checkbox" checked={teamAcknowledged} onChange={(event) => setTeamAcknowledged(event.target.checked)} /> I reviewed the offer, pair, reserves, LP split, and the absence of Team-wallet inputs or collateral.</label></> : <><strong>Do not sign this request</strong><ul>{teamReview.result.issues.map((issue) => <li key={issue}>{issue}</li>)}</ul></>}</div>}
       {teamWitness && <label><span>Return this Team witness to the liquidity provider</span><textarea readOnly value={teamWitness} aria-label="Generated Team approval witness" /></label>}
     </section>}
     <div className="dex-bootstrap-book">
@@ -471,5 +526,6 @@ export default function DexBootstrapWorkbench() {
         <div className="dex-bootstrap-offer-actions">{offer.managed ? <button type="button" onClick={() => void cancel(offer)} disabled={loading}>Cancel offer</button> : !lucid ? <button type="button" onClick={() => void connect()} disabled={loading}>Connect to fund</button> : <button type="button" className="primary-button" onClick={() => void accept(offer)} disabled={loading}>Fund & request Team approval <span className="button-arrow">↗</span></button>}</div>
       </article>)}
     </div>
+    </fieldset>
   </section>;
 }

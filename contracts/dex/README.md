@@ -86,6 +86,14 @@ aiken check --deny
 aiken build
 ```
 
+From the repository root, `npm run test:dex` executes the compiled bootstrap,
+factory, pool-NFT and LP validators in a Lucid emulator with independently
+funded participant wallets. It covers ADA and native-token quotes, missing
+and reused signer identities, incorrect allocations, cancellation ownership,
+minimum-buffer boundaries, standard admin creation, and stale or malicious
+Team approval CBOR. `npm run test:ui` covers review arithmetic and UI helpers.
+These tests do not replace a real Eternl multi-wallet acceptance check.
+
 ## Preprod operator and UI
 
 The repository root includes `scripts/dex-preprod.mjs`, which uses the funded
@@ -96,6 +104,7 @@ the full lifecycle:
 npm run dex:preprod -- status
 npm run dex:preprod -- deploy
 npm run dex:preprod -- redeploy
+npm run dex:preprod -- confirm-deployment
 npm run dex:preprod -- pool <fraction-unit>
 npm run dex:preprod -- collateral
 npm run dex:preprod -- create <fraction-unit> <lovelace> <fraction-units>
@@ -108,7 +117,14 @@ npm run dex:preprod -- close <fraction-unit>
 
 The public deployment addresses and confirmed lifecycle transaction IDs are
 recorded in `dex-deployment.preprod.json`; it contains no signing material.
-The admin script commands create and operate tADA/FT pools. The `/dex` UI derives the same scripts from the deployment record, reads live pools, signs normal operations with Eternl, and presents the three-party tADA/FT or USDCx/FT bootstrap flow. The deployment record must include `bootstrapOfferAddress` before the UI will enable it.
+Deployment keeps the active manifest unchanged until confirmation. Before
+submission it writes a public recovery record to the ignored
+`dex-deployment.preprod.pending.json`. If confirmation times out, run
+`confirm-deployment` to verify and publish that same factory; do not redeploy
+again. An unsigned/unsubmitted pending record must be investigated before
+manual removal. Redeployment does not migrate old offers, pools, or funds;
+the previous manifest is preserved under `supersedes` for recovery.
+The admin script commands create and operate tADA/FT pools. The `/dex` UI derives the same scripts from the deployment record, reads live pools, signs normal operations with Eternl, and presents the three-party tADA/FT or USDCx/FT bootstrap flow. The same workspace is available in DEX Administration for the Team creator. The deployment record must include `bootstrapOfferAddress` before the UI will enable it.
 
 ## Security boundary
 
@@ -157,3 +173,19 @@ its bootstrap-offer redeemer encoding. Build the contracts, review the new deplo
 and run `npm run dex:preprod -- redeploy` on Preprod before using this UI. The
 record must include `bootstrapOfferAddress`. Never use the new UI against a
 legacy factory; it cannot be upgraded in place.
+
+Before the Team creator signs an LP-provided bootstrap CBOR, the operator UI
+must show a successful review of the current offer and factory inputs, the
+deterministic pool NFT and LP token, the exact reserve and LP allocation, the
+mint set, required signers, and the absence of Team-wallet inputs or collateral.
+All funding and collateral must belong to the LP. The review is repeated
+immediately before signing and final submission. Reject any
+request with certificates, withdrawals, governance operations, unexpected
+reference inputs or output destinations, an unexpected mint, or a changed
+factory/offer reference. The validator also requires at least 2 tADA in the
+offer escrow. This is a protocol floor, not a guarantee of the network's
+size-dependent minimum UTxO. The UI defaults to 4 tADA and checks both the
+escrow and resulting pool against current network parameters before signing;
+automatic top-ups would invalidate the immutable exact-value datum. Increase
+the buffer or ADA reserve if this check fails. A submitted hash remains visible with a confirmation
+check and duplicate actions disabled until it confirms in the active page.

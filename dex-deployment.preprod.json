@@ -1,49 +1,71 @@
 {
   "network": "preprod",
   "admin": "6b88f592b89de5b5fac9359aa273184519ea23a538d776565c7220a1",
-  "factoryToken": "daa256696412931c667b9221df4400c8dcba5ff0dbaec7598b3a87b343535741505f4445585f464143544f5259",
-  "factoryAddress": "addr_test1wrnsh2qwdqp83z2v7xad6ysyuv6fnwzmzfu2qwctxn8rxpg8vlcdp",
-  "ammAddress": "addr_test1wpf8ca3uef8sxg0jnv2deec7u4r0vzvukyrq9kznzrelk7gewvksx",
-  "lpPolicyId": "47402e44ce488a847d9cbeab1cc94ed4aa62f4ee1a7823902025a362",
-  "poolPolicyId": "13fcac102f496fd2b1af08e04553418c0d1fa59a33dffe3269627324",
-  "transaction": "4c87343fb1ec90a3109d12f5e8f0d3aac9b453635c094a22b6779c6101bb11fa",
-  "livePool": {
-    "fractionUnit": "0ca6a26383f5d5bf726ffcb75adca6eb5b97b4ca66a51b17b49c70315257412d434f4e444f2d323032362d303030312d46",
-    "initialLovelace": "100000000",
-    "initialFractions": "1000",
-    "transaction": "67e44c32d482ba78db7fe2cdab0e792c6195ce438e02f77b371d96493291933b"
-  },
-  "verifiedLifecycle": {
-    "create": "846db97715e5938cf64b58d32028ec4c1d73cc6876f0f3429ad9917564ed6fcd",
-    "addLiquidity": "51372dd0d8c1c11a69df32a04831a6172e53e4462e3a9c7bffca2c2ecc889e66",
-    "swapAdaForFractions": "1fdff0c4f2b7cd2bfe14cd1790dc65d5dc77b6ab4023bc7f0080982551eca8e6",
-    "swapFractionsForAda": "515914c30e04c33d7aad3c27aacab54e0a17a1174ce0051180fac33b84ea065c",
-    "removeLiquidity": "01c0aa24049b10c792f58bdd974f91cacd888d1e932be5d397cbeeb7bf5c169a",
-    "destroy": "7662d9be33011502636538db38fe56363fcd424f10202657ba9be6f581b73a98"
-  },
+  "factoryToken": "b0d144fab92e56c2135e2cc3a7068aae50190e2a30a1d91f9d5448df43535741505f4445585f464143544f5259",
+  "factoryAddress": "addr_test1wp6xagzv8jlte735vq8sut6a3462je2x73f4uy2vcpv8mtszpqj87",
+  "ammAddress": "addr_test1wz2ttkxl3rpkrzu63yq486terscgw8sywumxs7ya2uuwxqqaxgk4f",
+  "lpPolicyId": "4fb4a30e450fcef688c62d624543a41a33ad726f917748cb4a39f7ef",
+  "poolPolicyId": "82b5034b2f3c3658ebcf8ee55ade402af53e51d292c1648c2e508bfe",
+  "bootstrapOfferAddress": "addr_test1wr0whj998j30etearaqdqp0xzhfzkrh65475tt7mmrs5k5st6twsd",
+  "transaction": "02286df2d4da548a90ed9c78a94e7055b0fe59c1e474e1a164dbe0310b6a14f6",
   "supersedes": {
     "network": "preprod",
     "admin": "6b88f592b89de5b5fac9359aa273184519ea23a538d776565c7220a1",
-    "factoryToken": "54f77649528570907e421b650f02a83a811acf71dc6fa50f9fca999643535741505f4445585f464143544f5259",
-    "factoryAddress": "addr_test1wrnsh2qwdqp83z2v7xad6ysyuv6fnwzmzfu2qwctxn8rxpg8vlcdp",
-    "ammAddress": "addr_test1wzedsfr4y3g4ewce04fw954y58yjwslmwezna79jyyp6sgs8hpkep",
-    "lpPolicyId": "96c9aae4d9433cd60af8c5c37e22c127a85dcc1f03c1f009a6c42cf0",
-    "poolPolicyId": "0e002d817906242cbf839f8d856c7f6368b2a2ad0c83d97eec959093",
-    "transaction": "933001190c3a9c19dbb5ba14ed639ab3671697e6c3aba5fdcf404541af784960",
-    "livePool": {
-      "fractionUnit": "0ca6a26383f5d5bf726ffcb75adca6eb5b97b4ca66a51b17b49c70315257412d434f4e444f2d323032362d303030312d46",
-      "initialLovelace": "100000000",
-      "initialFractions": "1000",
-      "transaction": "d7ae137e051c39783c8b601271f468b1c717258f21d4c4639ccc608cfd90b0c2",
-      "closedBy": "4ad640d689fe89b351ff2c99b9d1521dcfb9af9e4c32e37c9835372f4ec11ce1"
-    },
-    "verifiedLifecycle": {
-      "create": "3d2ff4012601c39a83b9f1d2d96432c91f0b611151cae35e0c76239389b2ecc5",
-      "addLiquidity": "194f679afd050213fe84244d6b298390dc9771dc84f6338234f432a7c0a434f7",
-      "swapAdaForFractions": "c2bb8d4b10b15bb92579f8c452ffc4675414bcb1148f012003e8a0db5e5bfd46",
-      "swapFractionsForAda": "5ecdc53a8e3e36ae37149236a810e5081bae95420c37997e303eefed62ccd8d7",
-      "removeLiquidity": "ce0e8496544b800608080c7ba31f2334b99557339639e0b3b118ad9d9d058d73",
-      "destroy": "d420eb9acbbb6862d5f00b4c54d5044873bb7ebcd1e9d16c9143e59ffb83f734"
+    "factoryToken": "0a71e4d0d43b61a095505d7fd558903c7e9a7d9ae0c47b0d666d3bf343535741505f4445585f464143544f5259",
+    "factoryAddress": "addr_test1wzr0dgp4l9pnj9udyft868ppej58pkdejc2hewcs3jmu9sst6h83f",
+    "ammAddress": "addr_test1wq542q0r0ec2drvfq7deaz2z4ffqddjmvgthtghyhsn783qr3d7vx",
+    "lpPolicyId": "3580b7d53557ae287d9bccb5608dc28f3803f80e57de2fa8d0dfeeab",
+    "poolPolicyId": "74d0cd9215d72bbaee14a821a0d76e5ef4700a67ad8e687d8d127b66",
+    "bootstrapOfferAddress": "addr_test1wqh79ys8f0gzca0dn8ene85ml5dtm4fg79xs94l5zmttd3srvrcze",
+    "transaction": "0d0d221ccb58a030d2cba3fc56af7fb73c73d3fff35cf243d08e25c8ec952322",
+    "supersedes": {
+      "network": "preprod",
+      "admin": "6b88f592b89de5b5fac9359aa273184519ea23a538d776565c7220a1",
+      "factoryToken": "daa256696412931c667b9221df4400c8dcba5ff0dbaec7598b3a87b343535741505f4445585f464143544f5259",
+      "factoryAddress": "addr_test1wrnsh2qwdqp83z2v7xad6ysyuv6fnwzmzfu2qwctxn8rxpg8vlcdp",
+      "ammAddress": "addr_test1wpf8ca3uef8sxg0jnv2deec7u4r0vzvukyrq9kznzrelk7gewvksx",
+      "lpPolicyId": "47402e44ce488a847d9cbeab1cc94ed4aa62f4ee1a7823902025a362",
+      "poolPolicyId": "13fcac102f496fd2b1af08e04553418c0d1fa59a33dffe3269627324",
+      "transaction": "4c87343fb1ec90a3109d12f5e8f0d3aac9b453635c094a22b6779c6101bb11fa",
+      "livePool": {
+        "fractionUnit": "0ca6a26383f5d5bf726ffcb75adca6eb5b97b4ca66a51b17b49c70315257412d434f4e444f2d323032362d303030312d46",
+        "initialLovelace": "100000000",
+        "initialFractions": "1000",
+        "transaction": "67e44c32d482ba78db7fe2cdab0e792c6195ce438e02f77b371d96493291933b"
+      },
+      "verifiedLifecycle": {
+        "create": "846db97715e5938cf64b58d32028ec4c1d73cc6876f0f3429ad9917564ed6fcd",
+        "addLiquidity": "51372dd0d8c1c11a69df32a04831a6172e53e4462e3a9c7bffca2c2ecc889e66",
+        "swapAdaForFractions": "1fdff0c4f2b7cd2bfe14cd1790dc65d5dc77b6ab4023bc7f0080982551eca8e6",
+        "swapFractionsForAda": "515914c30e04c33d7aad3c27aacab54e0a17a1174ce0051180fac33b84ea065c",
+        "removeLiquidity": "01c0aa24049b10c792f58bdd974f91cacd888d1e932be5d397cbeeb7bf5c169a",
+        "destroy": "7662d9be33011502636538db38fe56363fcd424f10202657ba9be6f581b73a98"
+      },
+      "supersedes": {
+        "network": "preprod",
+        "admin": "6b88f592b89de5b5fac9359aa273184519ea23a538d776565c7220a1",
+        "factoryToken": "54f77649528570907e421b650f02a83a811acf71dc6fa50f9fca999643535741505f4445585f464143544f5259",
+        "factoryAddress": "addr_test1wrnsh2qwdqp83z2v7xad6ysyuv6fnwzmzfu2qwctxn8rxpg8vlcdp",
+        "ammAddress": "addr_test1wzedsfr4y3g4ewce04fw954y58yjwslmwezna79jyyp6sgs8hpkep",
+        "lpPolicyId": "96c9aae4d9433cd60af8c5c37e22c127a85dcc1f03c1f009a6c42cf0",
+        "poolPolicyId": "0e002d817906242cbf839f8d856c7f6368b2a2ad0c83d97eec959093",
+        "transaction": "933001190c3a9c19dbb5ba14ed639ab3671697e6c3aba5fdcf404541af784960",
+        "livePool": {
+          "fractionUnit": "0ca6a26383f5d5bf726ffcb75adca6eb5b97b4ca66a51b17b49c70315257412d434f4e444f2d323032362d303030312d46",
+          "initialLovelace": "100000000",
+          "initialFractions": "1000",
+          "transaction": "d7ae137e051c39783c8b601271f468b1c717258f21d4c4639ccc608cfd90b0c2",
+          "closedBy": "4ad640d689fe89b351ff2c99b9d1521dcfb9af9e4c32e37c9835372f4ec11ce1"
+        },
+        "verifiedLifecycle": {
+          "create": "3d2ff4012601c39a83b9f1d2d96432c91f0b611151cae35e0c76239389b2ecc5",
+          "addLiquidity": "194f679afd050213fe84244d6b298390dc9771dc84f6338234f432a7c0a434f7",
+          "swapAdaForFractions": "c2bb8d4b10b15bb92579f8c452ffc4675414bcb1148f012003e8a0db5e5bfd46",
+          "swapFractionsForAda": "5ecdc53a8e3e36ae37149236a810e5081bae95420c37997e303eefed62ccd8d7",
+          "removeLiquidity": "ce0e8496544b800608080c7ba31f2334b99557339639e0b3b118ad9d9d058d73",
+          "destroy": "d420eb9acbbb6862d5f00b4c54d5044873bb7ebcd1e9d16c9143e59ffb83f734"
+        }
+      }
     }
   }
 }

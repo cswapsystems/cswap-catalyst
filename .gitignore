@@ -15,6 +15,7 @@
 
 # testing
 /coverage
+/dex-deployment.preprod.pending.json
 
 # next.js
 /.next/
