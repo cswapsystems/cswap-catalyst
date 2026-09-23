@@ -46,7 +46,7 @@ export default function AssetRegistryBoard() {
 
   return <div className="platform-shell">
     <PlatformHeader />
-    <main className="page-main">
+    <main id="main-content" tabIndex={-1} className="page-main">
       <section className="hero">
         <div>
           <span className="eyebrow">Shared pool marketplace · Preprod</span>

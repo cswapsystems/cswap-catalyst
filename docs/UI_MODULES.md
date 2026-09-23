@@ -1,24 +1,31 @@
 # UI modules
 
-The primary navigation groups customer and operator work by task. Existing URLs remain available.
+The primary navigation is **Marketplace, Swap, Portfolio, Create**. The More disclosure separates public protocol information from the Operator console. Operators retain their dedicated secondary navigation; these menus do not grant signing authority. The connected wallet disclosure contains wallet details, activity and an explicit Disconnect action, rather than disconnecting when its address is clicked.
+
+Sections share a compact page heading, a persistent Preprod testnet indicator and keyboard skip-to-content support. Menus close on Escape, outside interaction and route changes. Narrow screens keep all four primary destinations visible and allow the section tabs to scroll without overflowing the page. No Explore entry is reintroduced.
+
+Existing working URLs remain available. `/list` and the retired demo `/liquidate` redirect to `/my-assets`; `/reserves` redirects to `/portfolio/reserves` instead of exposing a duplicate workspace. The hard-coded liquidation balances and nonfunctional submission button were removed. Footer links point to protocol status and approved assets; placeholder Terms/Support links are not presented as working destinations.
 
 | Module | Routes | Responsibility |
 | --- | --- | --- |
 | Marketplace | `/marketplace` | Buy listings; owners can edit/cancel direct listings. Sale creation lives in Portfolio. |
-| Protocol | `/protocol` | Wallet-free current-state statistics with per-source unavailable/partial indicators. |
+| Protocol (More) | `/protocol`, `/asset-registry`, `/vault` | Public statistics, admission and custody inspection. |
 | Portfolio | `/my-assets`, `/portfolio/positions`, `/portfolio/orders`, `/portfolio/reserves`, `/wallet`, `/history` | Wallet holdings, configured-deployment positions, owned listing management, shared reserve LP actions, wallet details and activity. |
 | DEX | `/dex`, `/dex/liquidity`, `/dex/launch` | Swaps, LP deposits/withdrawals, and three-party bootstrap. |
+| Create | `/mint`, `/fractionalize` | Mint metadata-backed tokens or split/combine ownership. Minting does not imply registry admission or independent verification. |
 | Operations | `/team`, `/team/inventory`, `/registry`, `/team/controls`, `/team/dex`, `/team/recovery`, `/wallets` | Request approval, operator prices and inventory limits, admission, pool configuration, three-party DEX bootstrap review, factory administration, recovery, and deployment wallets. |
 
 ## Portfolio data
 
-Holdings consolidate ADA, RWA/other native tokens, vault-linked fraction tokens, Reserves LP and DEX LP. LP classification uses the configured deployment's exact reserve token or DEX LP policy; open positions independently authenticate live pools. Unknown native tokens are not claimed to be verified RWA. Metadata and vault lookups may be incomplete; balances remain wallet base units. Open positions are also embedded below holdings, without adding them to wallet balances.
+Holdings consolidate ADA, RWA/other native tokens, vault-linked fraction tokens, Reserves LP and DEX LP. LP classification uses the configured deployment's exact reserve token or DEX LP policy; open positions independently authenticate live pools. Unknown native tokens are not claimed to be verified RWA. Metadata and vault lookups may be incomplete; balances remain wallet base units. Open positions have a dedicated page, linked alongside Listings & requests and Shared liquidity above holdings. The holdings page no longer mounts a second, full position scanner beneath the wallet assets.
 
 Sell / List supports a chosen quantity for NFTs and fungible tokens. Direct listings accept ADA (human ADA input) or an exact payment token (base-unit input). Instant Sell shows the published per-base-unit ADA bid and stores the resulting lot minimum on-chain. It is a cancellable request awaiting an operator, not immediate execution. Pending requests do not reserve capacity.
 
 Open positions read vaults, direct listings, Instant Sell requests, bootstrap offers, DEX pools and the shared quote pool. Ownership comes from the connected wallet's payment key, recorded vault address, fraction holdings or LP holdings as appropriate. A recorded vault owner is not presented as having an unconditional redemption claim.
 
 Each source reports its own failure; unavailable sources must not be interpreted as zero positions. The escrow ADA total includes owned listings, requests and FT-owner bootstrap offers. It excludes wallet cash, vault deposits and LP reserve value. Bootstrap ADA may become pool liquidity on acceptance; it is not always refunded.
+
+Listings & requests uses owner-specific instructions and omits the public pool-inventory book. Counts show an unavailable marker until wallet data loads successfully; refresh is disabled without a connection. The Marketplace retains its buying view and the “Trade RWA ownership” heading.
 
 This is a current-state view of configured deployments, not a historical indexer. LP-funded bootstrap transactions awaiting Team approval are not on-chain escrow positions until submitted. Activity history remains the existing limited classifier.
 

@@ -1,53 +1,23 @@
 "use client";
 
 import { useEffect, useState } from "react";
+import Link from "next/link";
 import PlatformHeader from "./platform-header";
 import Cip25MintForm from "./cip25-mint-form";
-import OnchainFractionalizeForm from "./fractionalize-form";
 import MarketplaceWorkbench from "./marketplace-workbench";
-import ReservesWorkbench from "./reserves-workbench";
-import DexWorkbench from "./dex-workbench";
 import { formatAda } from "@/lib/ada";
 
-type Page = "mint" | "fractionalize" | "liquidate" | "marketplace" | "dex" | "reserves" | "wallets";
+type Page = "mint" | "marketplace" | "wallets";
 
-const pageIcons: Record<Page, string> = { mint: "◇", fractionalize: "◒", liquidate: "↘", marketplace: "□", dex: "DEX", reserves: "◈", wallets: "⌘" };
+const pageIcons: Record<Page, string> = { mint: "◇", marketplace: "□", wallets: "⌘" };
 
 const pageDetails: Record<Page, { eyebrow: string; title: string; description: string }> = {
-  mint: { eyebrow: "Asset origination", title: "Mint real-world value", description: "Create a verifiable on-chain representation of an off-chain asset." },
-  fractionalize: { eyebrow: "Portfolio tooling", title: "Make ownership flexible", description: "Split an RWA into transferable units or reassemble units you hold." },
-  liquidate: { eyebrow: "Redemption desk", title: "Exit with confidence", description: "Redeem eligible RWA tokens against the reserve and settle the position." },
+  mint: { eyebrow: "Create", title: "Mint an asset", description: "Create an asset token with its supporting metadata. Minting does not automatically approve it for trading." },
   marketplace: { eyebrow: "Secondary market", title: "Marketplace", description: "Buy listed RWA and fraction tokens, or edit and cancel your listings. Create sales from Portfolio." },
-  dex: { eyebrow: "Fraction exchange", title: "Trade fractional ownership", description: "Create and operate on-chain tADA liquidity pools for fractionalized RWA tokens." },
-  reserves: { eyebrow: "Liquidity operations", title: "Fund Instant Sell", description: "Add or withdraw shared quote reserves used to settle approved RWA sales." },
   wallets: { eyebrow: "Operational directory", title: "Wallets & custody", description: "Inspect the public addresses that support each part of the RWA lifecycle." },
 };
 
 function Arrow() { return <span aria-hidden="true" className="button-arrow">↗</span>; }
-
-function MintForm() {
-  return <Cip25MintForm />;
-}
-
-function FractionalizeForm() {
-  return <OnchainFractionalizeForm />;
-}
-
-function LiquidateForm() {
-  return <section className="work-card form-card"><div className="section-heading"><div><span className="section-kicker">01 / Redemption request</span><h2>Choose a position to liquidate</h2></div><span className="step-badge">1 of 2</span></div><div className="asset-choice selected-choice"><div className="asset-monogram amber">SH</div><div><strong>Seaport Warehouse 04</strong><p>Commercial property · 42.5 RWA available</p></div><span className="asset-value">$12,750.00</span><span className="choice-check">✓</span></div><div className="asset-choice"><div className="asset-monogram moss">NS</div><div><strong>Northline Solar Project</strong><p>Renewable energy · 18.0 RWA available</p></div><span className="asset-value">$7,920.00</span></div><div className="liquidation-summary"><div><span>Requested amount</span><strong>42.5 RWA</strong></div><div><span>Estimated settlement</span><strong>$12,686.25</strong></div><div><span>Settlement window</span><strong>1–2 business days</strong></div></div><div className="form-footer"><p><span className="status-dot" /> Redemption eligibility verified.</p><button type="button" className="primary-button">Request liquidation <Arrow /></button></div></section>;
-}
-
-function MarketplaceForm() {
-  return <MarketplaceWorkbench />;
-}
-
-function ReservesForm() {
-  return <ReservesWorkbench />;
-}
-
-function DexForm() {
-  return <DexWorkbench />;
-}
 
 const walletRoles = [
   { name: "Issuer / Admin", purpose: "Controls the one-shot mint setup and authorized vault updates.", env: "NEXT_PUBLIC_ISSUER_WALLET", tone: "lime", tag: "Control" },
@@ -99,14 +69,14 @@ function WalletDirectory() {
 }
 
 function SidePanel({ page }: { page: Page }) {
-  const content = page === "mint" ? ["Verified asset registry", "Independent valuation", "Proof-of-reserve record"] : page === "fractionalize" ? ["Flexible ownership sizes", "Transferable fractional units", "Full audit trail"] : page === "liquidate" ? ["Reserve-backed settlement", "Transparent pricing", "Dedicated support desk"] : ["Verified counter-parties", "Secure escrow settlement", "Real-time listing status"];
-  const title = page === "mint" ? "Assets, made accessible." : page === "fractionalize" ? "Own what matters, your way." : page === "liquidate" ? "Liquidity, without the unknown." : "Discover the value you hold.";
-  const icon = page === "mint" ? "RWA" : page === "fractionalize" ? "÷" : page === "liquidate" ? "$" : "↗";
-  return <aside className="side-panel"><span className="panel-eyebrow">{page === "liquidate" ? "Settlement confidence" : page === "marketplace" || page === "reserves" ? "Built for exchange" : "How it works"}</span><div className="panel-orbit"><i /><i /><b>{icon}</b></div><h3>{title}</h3><p className="panel-copy">Every action creates an auditable record, giving participants a clearer view of real-world value.</p><div className="benefit-list">{content.map((item, index) => <div key={item}><span>0{index + 1}</span>{item}</div>)}</div></aside>;
+  const content = page === "mint" ? ["Add the asset details", "Attach supporting documents", "Review and sign in Eternl"] : ["Review the asset and price", "Connect your wallet", "Review and sign the purchase"];
+  const title = page === "mint" ? "From asset to token." : "Know what you are buying.";
+  const icon = page === "mint" ? "RWA" : "↗";
+  return <aside className="side-panel"><span className="panel-eyebrow">How it works</span><div className="panel-orbit"><i /><i /><b>{icon}</b></div><h3>{title}</h3><p className="panel-copy">Review the asset documentation and exact token identity. An on-chain token does not independently verify the underlying asset.</p><div className="benefit-list">{content.map((item, index) => <div key={item}><span>0{index + 1}</span>{item}</div>)}</div></aside>;
 }
 
 export default function RwaPlatform({ page }: { page: Page }) {
   const detail = pageDetails[page];
-  const form = page === "mint" ? <MintForm /> : page === "fractionalize" ? <FractionalizeForm /> : page === "liquidate" ? <LiquidateForm /> : page === "marketplace" ? <MarketplaceForm /> : page === "dex" ? <DexForm /> : <ReservesForm />;
-  return <div className="platform-shell"><PlatformHeader /><main className="page-main"><section className="hero"><div><span className="eyebrow"><span className="eyebrow-icon">{pageIcons[page]}</span>{detail.eyebrow}</span><h1>{detail.title}</h1><p>{detail.description}</p></div></section>{page === "wallets" ? <WalletDirectory /> : <div className="workspace">{form}<SidePanel page={page} /></div>}</main><footer><span>© 2025 CSWAP Systems</span><span>Built for real-world assets <b>•</b> Secured on-chain</span><div><a href="#">Terms</a><a href="#">Support</a></div></footer></div>;
+  const form = page === "mint" ? <Cip25MintForm /> : <MarketplaceWorkbench />;
+  return <div className="platform-shell"><PlatformHeader /><main id="main-content" tabIndex={-1} className="page-main"><section className="hero"><div><span className="eyebrow"><span className="eyebrow-icon">{pageIcons[page]}</span>{detail.eyebrow}</span><h1>{detail.title}</h1><p>{detail.description}</p></div></section>{page === "wallets" ? <WalletDirectory /> : <div className="workspace">{form}<SidePanel page={page} /></div>}</main><footer><span>CSWAP Systems</span><span>Preprod testnet <b>•</b> Test assets only</span><div><Link href="/protocol">Protocol status</Link><Link href="/asset-registry">Approved assets</Link></div></footer></div>;
 }

@@ -1,5 +1,5 @@
-import RwaPlatform from "../_components/rwa-platform";
+import { redirect } from "next/navigation";
 
 export default function ReservesPage() {
-  return <RwaPlatform page="reserves" />;
+  redirect("/portfolio/reserves");
 }

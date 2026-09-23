@@ -8,7 +8,7 @@ import { formatWalletAda, summarizeWalletAssets, type WalletAsset, type WalletHo
 import { marketplaceDeployment } from "@/lib/protocol/marketplace-deployment";
 import dexDeployment from "../../../dex-deployment.preprod.json";
 import PortfolioSale from "./portfolio-sale";
-import PortfolioPositions from "./portfolio-positions";
+import WorkflowLinks from "./workflow-links";
 import FractionalizeForm from "./fractionalize-form";
 import PlatformHeader from "./platform-header";
 import { useWallet } from "./wallet-context";
@@ -216,9 +216,14 @@ export default function WalletAssets() {
     if (fractionalizeAction?.mode === "split" && fractionLinks.has(fractionalizeAction.originalUnit)) setFractionalizeAction(null);
   }, [fractionLinks, fractionalizeAction]);
 
-  return <div className="platform-shell"><PlatformHeader /><main className="page-main">
-    <section className="hero"><div><span className="eyebrow">Connected wallet · Preprod</span><h1>Your portfolio</h1><p>Manage ADA, RWA tokens, fractions, Reserves LP and DEX LP in one place. Sell, list, fractionalize or combine your assets, and review escrowed positions below.</p></div></section>
-    <div className="portfolio-links"><Link href="/portfolio/positions">Open positions and escrow</Link><Link href="/dex/liquidity">DEX liquidity</Link><Link href="/portfolio/reserves">Shared reserves</Link><Link href="/registry">Request asset support</Link></div><section className="wallet-assets-board" aria-labelledby="wallet-assets-title">
+  return <div className="platform-shell"><PlatformHeader /><main id="main-content" tabIndex={-1} className="page-main">
+    <section className="hero"><div><span className="eyebrow">Portfolio</span><h1>Your holdings</h1><p>View your wallet assets. Select an asset to sell, list, split or combine its ownership.</p></div></section>
+    <WorkflowLinks label="Portfolio workflows" items={[
+      { href: "/portfolio/positions", title: "Open positions", description: "Find assets in escrow, vaults and liquidity pools." },
+      { href: "/portfolio/orders", title: "Listings & requests", description: "Edit listings or cancel pending Instant Sell requests." },
+      { href: "/portfolio/reserves", title: "Shared liquidity", description: "Manage your share of the Instant Sell settlement pool." },
+    ]} />
+    <section className="wallet-assets-board" aria-labelledby="wallet-assets-title">
       <div className="section-heading"><div><span className="section-kicker">Wallet holdings</span><h2 id="wallet-assets-title">Your ADA and tokens</h2></div>{connected && <button className="primary-button" type="button" disabled={loading} onClick={() => setRevision((value) => value + 1)}>{loading ? "Loading…" : "Refresh assets"}</button>}</div>
       {!connected && <div className="wallet-assets-empty"><h3>{status === "connecting" ? "Connecting to Eternl…" : "Connect your wallet to see its assets"}</h3><p>This page reads your wallet holdings. No transaction signature is requested.</p><button className="primary-button" type="button" disabled={status === "connecting"} onClick={() => void connect()}>{status === "connecting" ? "Connecting…" : "Connect Eternl"}</button>{connectionError && <p role="alert" className="form-message error-message">{connectionError}</p>}</div>}
       {connected && <p className="wallet-assets-address"><strong>Connected address</strong><code>{address}</code></p>}
@@ -253,7 +258,6 @@ export default function WalletAssets() {
       </>}
 
     </section>
-    {connected && <PortfolioPositions />}
     {fractionalizeAction && <div className="listing-dialog-backdrop" role="presentation" onMouseDown={() => setFractionalizeAction(null)}><section className="asset-action-dialog" role="dialog" aria-modal="true" aria-label={(fractionalizeAction.mode === "split" ? "Fractionalize asset: " : "Combine fractions: ") + fractionalizeAction.assetName} onMouseDown={(event) => event.stopPropagation()}><button type="button" className="listing-dialog-close asset-action-dialog-close" onClick={() => setFractionalizeAction(null)} aria-label="Close asset action">×</button><FractionalizeForm key={fractionalizeAction.mode + fractionalizeAction.originalUnit} initialMode={fractionalizeAction.mode} initialAssetUnit={fractionalizeAction.originalUnit} /></section></div>}
     {listingAsset && <PortfolioSale key={listingAsset.unit} asset={listingAsset} onClose={() => setListingAsset(null)} onSubmitted={() => setRevision((value) => value + 1)} />}
   </main></div>;

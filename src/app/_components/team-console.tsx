@@ -1,6 +1,6 @@
 "use client";
 
-import Link from "next/link";
+import WorkflowLinks from "./workflow-links";
 import { useCallback, useEffect, useMemo, useState } from "react";
 import PlatformHeader from "./platform-header";
 import TeamWorkbench from "./team-workbench";
@@ -18,7 +18,7 @@ function datumBool(tools: typeof import("@lucid-evolution/lucid"), value: unknow
 
 
 export default function TeamConsole() {
-  const { address, lucid, connect } = useWallet();
+  const { address, lucid, connect, status: walletStatus } = useWallet();
   const [health, setHealth] = useState<PoolHealth | null>(null);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState("");
@@ -48,15 +48,21 @@ export default function TeamConsole() {
   }, [refresh]);
 
   const available = useMemo(() => health ? health.cash - health.minimumReserve : BigInt(0), [health]);
-  const status = !address ? "Connect team wallet" : health?.paused ? "Pool paused" : health ? "Pool live" : "Pool unavailable";
+  const status = !address ? "Wallet not connected" : loading ? "Checking pool…" : health?.paused ? "Pool paused" : health ? "Pool live" : "Pool unavailable";
 
   return <div className="platform-shell">
     <PlatformHeader />
-    <main className="page-main">
-      <section className="hero team-hero"><div><span className="eyebrow"><span className="eyebrow-icon">POOL</span>Shared-pool operations</span><h1>Run the market with context, not guesswork.</h1><p>Price incoming inventory, protect settlement liquidity, approve assets and manage LP reserves from one operator workspace.</p></div><span className={health && !health.paused ? "network-badge" : "step-badge"}>{status}</span></section>
+    <main id="main-content" tabIndex={-1} className="page-main">
+      <section className="hero team-hero"><div><span className="eyebrow">Operations</span><h1>Operator console</h1><p>Review sale requests and settlement capacity. Signing actions require the corresponding authorized wallet.</p></div><span className={health && !health.paused ? "network-badge" : "step-badge"}>{status}</span></section>
+      <WorkflowLinks label="Operator workflows" items={[
+        { href: "/team/inventory", title: "Prices & inventory", description: "Publish bids, resale prices and acquisition limits." },
+        { href: "/registry", title: "Asset approvals", description: "Review admission requests and approved assets." },
+        { href: "/team/dex", title: "DEX controls", description: "Review pool launches and administer the factory." },
+      ]} />
+      {!lucid && <div className="team-connect-callout"><strong>Connect an operator wallet</strong><span>Connect Eternl to load settlement capacity and review pending requests. Each action checks its required signer.</span><button type="button" className="primary-button" disabled={walletStatus === "connecting"} onClick={() => void connect()}>{walletStatus === "connecting" ? "Connecting…" : "Connect Eternl"}</button></div>}
       <div className="team-console">
         <section className="team-overview">
-          <div className="section-heading"><div><span className="section-kicker">Live settlement health</span><h2>Shared pool capacity</h2></div><button type="button" className="refresh-button" onClick={() => void refresh()} disabled={loading}>{loading ? "Refreshing..." : "Refresh state"}</button></div>
+          <div className="section-heading"><div><span className="section-kicker">Live settlement health</span><h2>Shared pool capacity</h2></div><button type="button" className="refresh-button" onClick={() => void refresh()} disabled={!lucid || loading}>{loading ? "Refreshing…" : "Refresh"}</button></div>
           <p className="mint-intro">Available cash excludes the protected reserve. Liquidity changes are also blocked while pool-owned inventory is still open.</p>
           <div className="team-metrics">
             <dl><dt>Pool cash</dt><dd>{health ? formatAda(health.cash) + " tADA" : "-"}</dd></dl>
@@ -65,7 +71,6 @@ export default function TeamConsole() {
             <dl><dt>Open inventory value</dt><dd>{health ? formatAda(health.inventoryValue) + " tADA" : "-"}</dd></dl>
             <dl><dt>LP supply</dt><dd>{health ? health.totalLpSupply.toString() : "-"}</dd></dl>
           </div>
-          <div className="team-quick-links"><Link href="/team/inventory">Manage prices & inventory <span>-&gt;</span></Link><Link href="/registry">Approve assets <span>-&gt;</span></Link><Link href="/team/controls">Pool controls and reserves <span>-&gt;</span></Link><Link href="/marketplace">Review marketplace <span>-&gt;</span></Link></div>
           {error && <p role="alert" className="form-message error-message">{error}</p>}
         </section>
         <section className="team-pricing">
@@ -73,7 +78,6 @@ export default function TeamConsole() {
           <p className="mint-intro">Use the published operator price book to approve acquisitions. The application rechecks active status, quantity limits, registry admission and available cash before signing. These operational checks are not new on-chain guarantees.</p>
           <TeamWorkbench onSettled={refresh} />
         </section>
-        {!lucid && <div className="team-connect-callout"><strong>Team wallet not connected.</strong><span>Connect the operator to publish prices, or connect an LP wallet to manage its own reserve position.</span><button type="button" className="primary-button" onClick={() => void connect()}>Connect Eternl <span className="button-arrow">-&gt;</span></button></div>}
       </div>
     </main>
   </div>;

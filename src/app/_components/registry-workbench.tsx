@@ -271,7 +271,7 @@ export default function RegistryWorkbench() {
 
   return <div className="platform-shell">
     <PlatformHeader />
-    <main className="page-main">
+    <main id="main-content" tabIndex={-1} className="page-main">
       <section className="hero">
         <div><span className="eyebrow">On-chain asset registry · Preprod</span><h1>Asset controls</h1><p>Request shared-pool support for original RWA assets, or manage the registry as the configured Team issuer.</p></div>
       </section>

@@ -14,6 +14,8 @@
     "test:ui": "node --experimental-strip-types --test tests/ui-regressions.test.mjs tests/operator-controls.test.mjs tests/price-book.test.mjs tests/bootstrap-review.test.mjs",
     "test:metadata": "node --experimental-strip-types --test tests/rwa-metadata.test.mjs",
     "test:offchain": "npm --prefix infra/offchain test",
+    "test:navigation": "node --experimental-strip-types --test tests/navigation.test.mjs",
+    "test:browser": "playwright test",
     "dex:preprod": "node scripts/dex-preprod.mjs",
     "marketplace:preprod": "node scripts/marketplace-preprod.mjs"
   },
@@ -27,6 +29,7 @@
     "react-dom": "19.2.8"
   },
   "devDependencies": {
+    "@playwright/test": "^1.63.0",
     "@tailwindcss/postcss": "^4",
     "@types/node": "^20",
     "@types/react": "^19",

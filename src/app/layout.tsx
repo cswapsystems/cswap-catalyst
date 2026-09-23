@@ -24,7 +24,7 @@ export const metadata: Metadata = {
 export default function RootLayout({ children }: LayoutProps<"/">) {
   return (
     <html lang="en" className={`${baiJamjuree.variable} ${hostGrotesk.variable} h-full antialiased`}>
-      <body className="min-h-full flex flex-col"><WalletProvider>{children}</WalletProvider></body>
+      <body className="min-h-full flex flex-col"><a className="skip-link" href="#main-content">Skip to content</a><WalletProvider>{children}</WalletProvider></body>
     </html>
   );
 }

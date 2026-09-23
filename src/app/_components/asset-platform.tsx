@@ -64,5 +64,5 @@ const assetBrowserStyles = `
 
 
 export default function AssetPlatform() {
-  return <div className="platform-shell"><style>{assetBrowserStyles}</style><PlatformHeader /><main className="page-main"><section className="hero"><div><span className="eyebrow"><span className="eyebrow-icon">⌕</span>Asset intelligence</span><h1>Know what your token carries</h1><p>Inspect the on-chain record, metadata, and files created when an asset was minted.</p></div></section><AssetBrowser /></main><footer><span>© 2025 CSWAP Systems</span><span>Built for real-world assets <b>•</b> Secured on-chain</span><div><a href="#">Terms</a><a href="#">Support</a></div></footer></div>;
+  return <div className="platform-shell"><style>{assetBrowserStyles}</style><PlatformHeader /><main id="main-content" tabIndex={-1} className="page-main"><section className="hero"><div><span className="eyebrow"><span className="eyebrow-icon">⌕</span>Asset intelligence</span><h1>Know what your token carries</h1><p>Inspect the on-chain record, metadata, and files created when an asset was minted.</p></div></section><AssetBrowser /></main><footer><span>© 2025 CSWAP Systems</span><span>Built for real-world assets <b>•</b> Secured on-chain</span><div><a href="#">Terms</a><a href="#">Support</a></div></footer></div>;
 }

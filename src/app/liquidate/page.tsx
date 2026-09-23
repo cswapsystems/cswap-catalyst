@@ -1,5 +1,5 @@
-import RwaPlatform from "../_components/rwa-platform";
+import { redirect } from "next/navigation";
 
 export default function LiquidatePage() {
-  return <RwaPlatform page="liquidate" />;
+  redirect("/my-assets");
 }

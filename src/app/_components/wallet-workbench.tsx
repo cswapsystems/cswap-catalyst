@@ -48,7 +48,7 @@ export default function WalletWorkbench() {
 
   return <div className="platform-shell">
     <PlatformHeader />
-    <main className="page-main">
+    <main id="main-content" tabIndex={-1} className="page-main">
       <section className="hero">
         <div>
           <span className="eyebrow">Connected wallet · Preprod</span>

@@ -3,33 +3,32 @@
 import Link from "next/link";
 import { usePathname } from "next/navigation";
 import EternlWalletButton from "./eternl-wallet";
-
-const navigation = [
-  ["/marketplace", "Marketplace"],
-  ["/my-assets", "Portfolio"],
-  ["/dex", "DEX"],
-  ["/mint", "Mint"],
-  ["/protocol", "Protocol"],
-  ["/team", "Operations"],
-] as const;
-
-const groups = {
-  portfolio: [["/my-assets", "Holdings"], ["/portfolio/positions", "Open positions"], ["/portfolio/orders", "Listings & requests"], ["/portfolio/reserves", "Shared reserves"], ["/wallet", "Wallet"], ["/history", "Activity"]],
-  dex: [["/dex", "Swap"], ["/dex/liquidity", "Liquidity"], ["/dex/launch", "Launch a pool"]],
-  operations: [["/team", "Requests"], ["/team/inventory", "Inventory & prices"], ["/registry", "Asset approvals"], ["/team/controls", "Pool controls"], ["/team/dex", "DEX administration"], ["/team/recovery", "Recovery"], ["/wallets", "Deployment wallets"]],
-} as const;
+import HeaderDisclosure from "./header-disclosure";
+import { navigationForPath, primaryNavigation } from "@/lib/navigation";
 
 export default function PlatformHeader() {
   const pathname = usePathname();
-  const activePath = pathname === "/" ? "/marketplace" : pathname;
-  const group = activePath.startsWith("/portfolio") || ["/my-assets", "/wallet", "/history", "/fractionalize"].includes(activePath) ? "portfolio" : activePath.startsWith("/dex") ? "dex" : activePath.startsWith("/team") || ["/registry", "/reserves", "/wallets"].includes(activePath) ? "operations" : null;
-  const primaryPath = group === "portfolio" ? "/my-assets" : group === "operations" ? "/team" : group === "dex" ? "/dex" : activePath;
+  const { path, section, primary } = navigationForPath(pathname);
 
-  return <><header className="topbar">
-    <Link href="/" className="brand"><span className="brand-mark" aria-hidden="true"><i /><i /><i /></span><span>CSWAP Systems</span></Link>
-    <nav aria-label="Main navigation">
-      {navigation.map(([href, label]) => <Link key={href} href={href} className={primaryPath === href ? "active" : ""} aria-current={activePath === href ? "page" : undefined}>{label}</Link>)}
+  return <><header className="app-header">
+    <Link href="/marketplace" className="app-brand" aria-label="CSWAP marketplace"><span className="brand-mark" aria-hidden="true"><i /><i /><i /></span><span>CSWAP<span className="app-brand-suffix"> Systems</span></span></Link>
+    <nav className="app-primary-nav" aria-label="Main navigation">
+      {primaryNavigation.map(({ href, label }) => <Link key={href} href={href} className={primary === href ? "active" : ""} aria-current={path === href ? "page" : primary === href ? "location" : undefined}>{label}</Link>)}
     </nav>
-    <EternlWalletButton />
-  </header>{group && <nav className="module-nav" aria-label={`${group} navigation`}>{groups[group].map(([href, label]) => <Link key={href} href={href} className={activePath === href ? "active" : ""} aria-current={activePath === href ? "page" : undefined}>{label}</Link>)}</nav>}</>;
+    <div className="app-header-actions">
+      <HeaderDisclosure label="More" active={section?.primary === null}>
+        <span className="header-menu-label">Protocol information</span>
+        <Link href="/protocol" aria-current={path === "/protocol" ? "page" : undefined}>Protocol overview<small>Public deployment statistics</small></Link>
+        <Link href="/asset-registry" aria-current={path === "/asset-registry" ? "page" : undefined}>Approved assets<small>Check registry admission</small></Link>
+        <Link href="/vault" aria-current={path === "/vault" ? "page" : undefined}>Vault activity<small>Inspect assets held in custody</small></Link>
+        <div className="header-menu-divider" />
+        <Link href="/team" aria-current={path === "/team" ? "page" : undefined}>Operator console<small>Approvals, pricing and pool controls</small></Link>
+        <p className="header-network-note"><span />Preprod testnet · Test assets only</p>
+      </HeaderDisclosure>
+      <EternlWalletButton />
+    </div>
+  </header><div className="app-context-bar">
+    {section ? <nav className="app-section-nav" aria-label={`${section.label} navigation`}><span className="app-section-label">{section.label}</span>{section.items.map(({ href, label }) => <Link key={href} href={href} className={path === href ? "active" : ""} aria-current={path === href ? "page" : undefined}>{label}</Link>)}</nav> : <span className="app-context-label">Real-world asset marketplace</span>}
+    <span className="app-network-label"><i aria-hidden="true" />Preprod<span> · Testnet</span></span>
+  </div></>;
 }

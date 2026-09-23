@@ -1,4 +1,5 @@
 @import "tailwindcss";
+@import "./navigation.css";
 
 :root { color-scheme: dark; --ink: #ffffff; --muted: #b0b0b0; --line: #3d3d3d; --paper: #0d0d0d; --cream: #131313; --moss: #39ff71; --deep-moss: #00470c; --lime: #72ff89; --surface-raised: #1f1f1f; --surface-deep: #0f0f0f; --green-soft: #002406; --font-financial: var(--font-cswap-body), "Host Grotesk", "Segoe UI", sans-serif; --font-display: var(--font-cswap-display), "Bai Jamjuree", sans-serif; }
 * { box-sizing: border-box; } body { font-size: 16px; line-height: 1.55; margin: 0; background: var(--paper); color: var(--ink); font-family: var(--font-financial); } button, input, select { font: inherit; } button { cursor: pointer; }

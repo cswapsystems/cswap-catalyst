@@ -1,0 +1,87 @@
+/* Application chrome is deliberately separate from legacy workbench styles. */
+.app-header { position: relative; z-index: 20; display: grid; grid-template-columns: auto minmax(0, 1fr) auto; align-items: center; gap: 24px; min-height: 80px; padding: 16px max(24px, calc((100vw - 1280px) / 2)); border-bottom: 1px solid #292c29; background: #101210; }
+.app-brand { display: inline-flex; align-items: center; gap: 12px; color: var(--ink); font-family: var(--font-display); font-size: 19px; font-weight: 700; text-decoration: none; white-space: nowrap; letter-spacing: -.4px; }
+.app-primary-nav { justify-self: center; display: flex; gap: 4px; padding: 4px; margin: 0; border: 0; border-radius: 10px; background: transparent; }
+.app-primary-nav a { display: flex; align-items: center; justify-content: center; min-height: 42px; padding: 9px 15px; color: var(--muted); font-size: 14px; text-decoration: none; border-radius: 8px; }
+.app-primary-nav a.active { color: var(--lime); background: #202720; box-shadow: none; }
+.app-header-actions { position: relative; display: flex; align-items: center; justify-content: end; gap: 10px; }
+.app-header .wallet-button { min-width: 0; min-height: 42px; padding: 9px 13px; border-color: #3e6646; border-radius: 8px; font-size: 12px; white-space: nowrap; }
+.app-header .wallet-error { z-index: 2; width: min(300px, calc(100vw - 32px)); padding: 14px; font-size: 13px; }
+.header-disclosure > summary { display: flex; align-items: center; justify-content: center; gap: 8px; min-height: 42px; padding: 9px 12px; border: 1px solid transparent; border-radius: 8px; color: var(--muted); background: transparent; font-size: 13px; font-weight: 600; list-style: none; cursor: pointer; white-space: nowrap; }
+.header-disclosure > summary::-webkit-details-marker { display: none; }
+.header-disclosure[open] > summary, .header-disclosure > summary:hover, .header-disclosure > summary.is-active { color: var(--ink); border-color: var(--line); background: var(--surface-raised); }
+.header-disclosure > summary:focus-visible { outline: 2px solid var(--lime); outline-offset: 3px; }
+.disclosure-chevron { color: var(--muted); transition: transform .15s ease; }
+.header-disclosure[open] .disclosure-chevron { transform: rotate(180deg); }
+.header-disclosure-panel { position: absolute; z-index: 2; top: calc(100% + 12px); right: 0; width: min(320px, calc(100vw - 32px)); max-height: calc(100dvh - 110px); overflow-y: auto; padding: 10px; border: 1px solid #394139; border-radius: 12px; color: var(--ink); background: #171b17; box-shadow: 0 16px 48px #0008; }
+.header-disclosure-panel > a, .header-disconnect { display: block; width: 100%; padding: 11px 12px; color: var(--ink); border: 0; border-radius: 7px; background: transparent; text-align: left; text-decoration: none; font-size: 14px; font-weight: 600; }
+.header-disclosure-panel > a:hover, .header-disclosure-panel > a[aria-current], .header-disconnect:hover { background: #283028; }
+.header-disclosure-panel small { display: block; margin-top: 3px; color: var(--muted); font-size: 12px; font-weight: 400; }
+.header-menu-label { display: block; padding: 8px 12px; color: #b7c2b7; font-size: 11px; font-weight: 600; text-transform: uppercase; letter-spacing: .9px; }
+.header-menu-divider { height: 1px; margin: 6px 12px; background: var(--line); }
+.header-network-note { display: flex; align-items: center; gap: 8px; padding: 12px; color: var(--muted); font-size: 11px; }
+.header-network-note > span, .wallet-status-dot, .app-network-label i { display: inline-block; flex: 0 0 6px; height: 6px; width: 6px; border-radius: 50%; background: var(--lime); }
+.header-wallet-full-address { display: block; padding: 8px 12px 14px; overflow-wrap: anywhere; color: var(--muted); font-size: 11px; }
+.header-wallet-label { display: none; }
+.header-disconnect { color: #ffb4a9; }
+.app-context-bar { display: flex; align-items: center; justify-content: space-between; gap: 20px; padding: 0 max(24px, calc((100vw - 1280px) / 2)); min-height: 54px; border-bottom: 1px solid #292c29; background: #111411; }
+.app-section-nav { display: flex; align-items: center; gap: 3px; min-width: 0; padding: 6px 3px; overflow-x: auto; border: 0; border-radius: 0; background: transparent; scrollbar-width: thin; scrollbar-color: #4a554a transparent; }
+.app-section-nav a { flex: 0 0 auto; min-height: 40px; padding: 10px 12px; color: var(--muted); font-size: 12px; white-space: nowrap; border-radius: 6px; }
+.app-section-nav a.active { color: var(--ink); background: #252d25; box-shadow: none; }
+.app-section-label { flex: 0 0 auto; padding-right: 18px; margin-right: 8px; border-right: 1px solid var(--line); color: #d5ded5; font-size: 12px; font-weight: 600; }
+.app-context-label { color: var(--muted); font-size: 12px; }
+.app-network-label { display: flex; align-items: center; flex: 0 0 auto; gap: 7px; color: #c2cdc2; font-size: 11px; white-space: nowrap; }
+.app-network-label > span { margin-left: -4px; color: var(--muted); }
+.skip-link { position: fixed; z-index: 100; top: 12px; left: 12px; padding: 12px 18px; transform: translateY(-160%); border-radius: 8px; color: #09200e; background: var(--lime); font-weight: 700; }
+.skip-link:focus { transform: translateY(0); }
+#main-content { outline: none; padding-bottom: 32px; }
+.platform-shell .hero { padding: 38px 0 28px; align-items: center; gap: 20px; }
+.platform-shell .hero h1 { margin-top: 10px; font-size: clamp(30px, 3.4vw, 46px); line-height: 1.12; letter-spacing: -1.3px; }
+.platform-shell .hero p { max-width: 700px; margin-top: 12px; font-size: 16px; line-height: 1.65; }
+.workflow-links { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 12px; margin-bottom: 24px; }
+.workflow-links > a { display: flex; align-items: start; justify-content: space-between; gap: 18px; padding: 20px; color: var(--ink); border: 1px solid #353c35; border-radius: 12px; background: #151a15; text-decoration: none; transition: border-color .15s ease, background .15s ease; }
+.workflow-links > a:hover { border-color: #628369; background: #1b231c; }
+.workflow-links h2 { font-family: var(--font-display); font-size: 16px; font-weight: 600; }
+.workflow-links p { margin-top: 7px; color: var(--muted); font-size: 13px; line-height: 1.6; }
+.workflow-links > a > span { color: var(--lime); }
+.page-main > .team-connect-callout { margin-bottom: 24px; }
+.page-main .marketplace-workbench { grid-template-columns: minmax(0, 1fr); }
+.page-main .marketplace-card, .page-main .marketplace-book, .page-main .marketplace-listings { min-width: 0; }
+.page-main .marketplace-card-grid { grid-template-columns: repeat(auto-fill, minmax(min(100%, 250px), 1fr)); }
+.page-main .marketplace-market-summary { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+@media (max-width: 1100px) {
+  .app-header { grid-template-columns: 1fr auto; gap: 12px; padding-block: 14px 8px; }
+  .app-primary-nav { grid-row: 2; grid-column: 1 / -1; justify-self: start; }
+  .app-section-label { display: none; }
+}
+@media (max-width: 700px) {
+  .app-header { padding-inline: 16px; }
+  .app-brand-suffix { display: none; }
+  .app-primary-nav { width: 100%; justify-content: space-between; padding: 4px 0; }
+  .app-primary-nav a { flex: 1; padding-inline: 8px; font-size: 13px; }
+  .app-context-bar { gap: 8px; padding-inline: 16px; }
+  .app-network-label > span { display: none; }
+  .app-section-nav a { padding-inline: 10px; }
+  .header-wallet-label { display: inline; }
+  .header-wallet-address { display: none; }
+  .workflow-links { grid-template-columns: 1fr; gap: 8px; }
+  .workflow-links > a { padding: 16px; }
+  .platform-shell .hero { padding-block: 28px 24px; align-items: start; }
+  .platform-shell .hero p { font-size: 15px; }
+  .page-main .marketplace-card > .section-heading { flex-direction: column; gap: 12px; }
+  .page-main .marketplace-card, .page-main .marketplace-book { padding: 20px; }
+  .page-main .marketplace-market-summary { grid-template-columns: 1fr; }
+}
+@media (max-width: 380px) {
+  .app-header { gap: 8px; padding-inline: 12px; }
+  .app-brand { gap: 7px; font-size: 16px; }
+  .app-brand .brand-mark { width: 20px; height: 20px; }
+  .app-header-actions { gap: 4px; }
+  .header-disclosure > summary { padding-inline: 8px; }
+  .app-header .wallet-button { padding-inline: 8px; font-size: 11px; }
+  .app-header .wallet-glyph { display: none; }
+  .app-context-bar { padding-inline: 12px; }
+}
+@media (prefers-reduced-motion: reduce) {
+  .workflow-links > a, .disclosure-chevron { transition: none; }
+}
