@@ -24,6 +24,14 @@ This is a current-state view of configured deployments, not a historical indexer
 
 ## DEX execution
 
+The swap page uses a compact From/To card with token selectors, wallet balances,
+estimated output, and a direction switch. Selectors only expose existing direct
+pool pairs; changing the pair or direction clears the input and quote. ADA is
+entered in human tADA, while native tokens are explicitly shown in base units.
+The single Swap action preserves balance checks, fee/impact disclosure, fresh
+pool-state validation, and confirmation guards. Liquidity and administrator
+workflows remain separate.
+
 Transaction previews show wallet balances, fee-inclusive spot-price impact, exact ratio-rounded deposits, expected LP mint/burn and both withdrawal assets. Pre-signing pool freshness checks reject a changed UTxO and require a new review. The direct AMM uses an exact state and quote; there is no configurable order-batcher slippage model.
 
 DEX deployment and datum helpers live in `src/lib/protocol/dex-client.ts`; integer quote arithmetic lives in `src/lib/dex.ts`. Portfolio and DEX reuse the same pool reader and identity checks. Pending transaction hashes are shown with explorer and confirmation controls in the active page. These controls are not a persistent cross-page transaction center.

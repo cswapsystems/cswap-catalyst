@@ -3,6 +3,7 @@
 import { createContext, ReactNode, useContext, useEffect, useState, useSyncExternalStore } from "react";
 import type { LucidEvolution } from "@lucid-evolution/lucid";
 import { createWalletSession, WALLET_STORAGE_KEY, type WalletSnapshot } from "@/lib/wallet-session";
+import { createBrowserChainProvider } from "@/lib/browser-chain-provider";
 
 type WalletContextValue = WalletSnapshot & {
   connect: () => Promise<LucidEvolution | null>;
@@ -16,8 +17,8 @@ export function WalletProvider({ children }: { children: ReactNode }) {
     storage: () => window.localStorage,
     extension: () => window.cardano?.eternl,
     initialize: async (api) => {
-      const { Blockfrost, Lucid } = await import("@lucid-evolution/lucid");
-      const lucid = await Lucid(new Blockfrost("/api/blockfrost", ""), "Preprod");
+      const tools = await import("@lucid-evolution/lucid");
+      const lucid = await tools.Lucid(createBrowserChainProvider(tools), "Preprod");
       lucid.selectWallet.fromAPI(api);
       return { lucid, address: await lucid.wallet().address() };
     },

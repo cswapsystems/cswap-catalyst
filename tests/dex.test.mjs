@@ -1,6 +1,37 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 import { parseAdaToLovelace, quoteConstantProduct, quoteLiquidityDeposit, quoteLiquidityWithdrawal, priceImpactBps } from "../src/lib/dex.ts";
+import { findSwapMarket, swapTargets, swapTokens } from "../src/lib/dex-swap.ts";
+
+const ada = { policyId: "", assetName: "" };
+const tokenA = { policyId: "aa".repeat(28), assetName: "01" };
+const tokenB = { policyId: "bb".repeat(28), assetName: "02" };
+const nativeQuote = { policyId: "cc".repeat(28), assetName: "03" };
+const unit = asset => asset.policyId ? asset.policyId + asset.assetName : "lovelace";
+const markets = [{ id: "first", assetA: ada, assetB: tokenA }, { id: "second", assetA: ada, assetB: tokenB }, { id: "native", assetA: nativeQuote, assetB: tokenA }];
+
+test("swap selectors deduplicate tokens and only expose direct counterparties", () => {
+  assert.deepEqual(swapTokens(markets), [ada, tokenA, tokenB, nativeQuote]);
+  assert.deepEqual(swapTargets(markets, unit(ada)), [tokenA, tokenB]);
+  assert.deepEqual(swapTargets(markets, unit(tokenA)), [ada, nativeQuote]);
+  assert.deepEqual(swapTargets(markets, "unknown"), []);
+  assert.deepEqual(swapTokens([]), []);
+});
+
+test("From/To selection maps both directions to the correct validator action", () => {
+  assert.deepEqual(findSwapMarket(markets, unit(ada), unit(tokenA)), { id: "first", action: "swap-a" });
+  assert.deepEqual(findSwapMarket(markets, unit(tokenA), unit(ada)), { id: "first", action: "swap-b" });
+  assert.deepEqual(findSwapMarket(markets, unit(tokenA), unit(nativeQuote)), { id: "native", action: "swap-b" });
+  assert.equal(findSwapMarket(markets, unit(tokenA), unit(tokenB)), null);
+  assert.equal(findSwapMarket(markets, unit(ada), unit(ada)), null);
+  assert.equal(findSwapMarket([], unit(ada)), null);
+});
+
+test("pair selection preserves a preferred pool and falls back to a supported market", () => {
+  const duplicate = { ...markets[0], id: "duplicate" };
+  assert.deepEqual(findSwapMarket([...markets, duplicate], unit(ada), unit(tokenA), "duplicate"), { id: "duplicate", action: "swap-a" });
+  assert.deepEqual(findSwapMarket(markets, unit(tokenB)), { id: "second", action: "swap-b" });
+});
 
 test("parses ADA amounts exactly into lovelace", () => {
   assert.equal(parseAdaToLovelace("12.345678"), 12_345_678n);
