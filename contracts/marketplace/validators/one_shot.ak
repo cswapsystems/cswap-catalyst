@@ -7,6 +7,8 @@ pub type OneShotRedeemer {
   Mint
 }
 
+/// Mints the single named identity token authorized by a consumed seed UTxO.
+/// Used for persistent registry and shared-pool identity assets.
 validator one_shot(seed: OutputReference, token_name: AssetName) {
   mint(_redeemer: OneShotRedeemer, policy_id: PolicyId, tx: Transaction) {
     let seed_is_spent =

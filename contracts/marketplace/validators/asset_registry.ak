@@ -37,6 +37,8 @@ fn prepend_all(new_entries: List<AssetClass>, entries: List<AssetClass>) -> List
     [entry, ..rest] -> [entry, ..prepend_all(rest, entries)]
   }
 }
+/// Maintains the bounded approved-asset list. Every update is issuer-signed,
+/// increments the version, and recreates the registry at the same address.
 validator asset_registry(
   registry_token: AssetClass,
   issuer: VerificationKeyHash,

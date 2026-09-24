@@ -1,14 +1,40 @@
 use aiken/collection/list
 use cardano/assets
+use aiken/crypto.{VerificationKeyHash}
 use cardano/address
 use cardano/address.{Address}
 use cardano/transaction.{InlineDatum, Input, Output, OutputReference, Transaction, find_input}
-use ebecca/types.{AssetClass, Direct, QuotePool, QuotePoolDatum, SimpleListingDatum, ada, has_one, quantity_of}
+use ebecca/types.{
+  AssetClass, Direct, InstantSell, PoolAssetPrice, QuotePool, QuotePoolDatum,
+  ListingSettlement, PoolExit, SimpleListingDatum, ada, has_one, quantity_of, ratio_value,
+}
 
 pub type SimpleListingRedeemer {
   Buy { buyer: Address }
   Cancel
   Update { next: SimpleListingDatum }
+  // Batcher's pool purchase of a seller's instant-sell escrow.
+  BatcherAcquire { inventory: SimpleListingDatum }
+  // Atomic price edit for already pool-owned inventory.
+  Reprice { next: SimpleListingDatum }
+  // During pool wind-down, the last LP returns each pool-owned RWA in its own
+  // transaction before closing the reserve.
+  ReturnToClosingLp {
+    recipient: Address,
+    provider_key: VerificationKeyHash,
+    next: QuotePoolDatum,
+  }
+}
+
+fn signed(tx: Transaction, key: VerificationKeyHash) -> Bool {
+  list.has(tx.extra_signatories, key)
+}
+
+fn paid_to_key(address: Address, key: VerificationKeyHash) -> Bool {
+  when address.payment_credential is {
+    address.VerificationKey(payment_key) -> payment_key == key
+    _ -> False
+  }
 }
 
 fn paid_at_least(
@@ -43,7 +69,8 @@ fn listing_escrow_value(
 
   when listing.settlement is {
     Direct -> value
-    QuotePool { inventory_token, pool_token: _ } ->
+    InstantSell { pool_token: _ } -> value
+    QuotePool { inventory_token, pool_token: _, acquisition_cost: _ } ->
       value
         |> assets.add(
           inventory_token.policy_id,
@@ -139,10 +166,18 @@ fn seller_is_paid(
   }
 }
 
+fn seller_can_manage_listing(listing: SimpleListingDatum) -> Bool {
+  when listing.settlement is {
+    Direct -> True
+    InstantSell { pool_token: _ } -> True
+    QuotePool { pool_token: _, inventory_token: _, acquisition_cost: _ } -> False
+  }
+}
+
 fn is_direct_listing(listing: SimpleListingDatum) -> Bool {
   when listing.settlement is {
     Direct -> True
-    QuotePool { pool_token: _, inventory_token: _ } -> False
+    _ -> False
   }
 }
 
@@ -152,7 +187,8 @@ fn pool_sale_is_atomic(
 ) -> Bool {
   when listing.settlement is {
     Direct -> True
-    QuotePool { pool_token, inventory_token: _ } ->
+    InstantSell { pool_token: _ } -> False
+    QuotePool { pool_token, inventory_token: _, acquisition_cost: _ } ->
       and {
         list.any(
           tx.inputs,
@@ -181,6 +217,59 @@ fn pool_sale_is_atomic(
   }
 }
 
+fn datum_pool(output: Output) -> Option<QuotePoolDatum> {
+  when output.datum is {
+    InlineDatum(data) -> {
+      expect pool: QuotePoolDatum = data
+      Some(pool)
+    }
+    _ -> None
+  }
+}
+
+fn pool_input_for(inputs: List<Input>, token: AssetClass) -> Option<Input> {
+  list.find(
+    inputs,
+    fn(input) {
+      has_one(input.output.value, token)
+        && datum_pool(input.output) != None
+    },
+  )
+}
+
+fn pool_output_for(
+  outputs: List<Output>,
+  address: Address,
+  token: AssetClass,
+) -> Option<Output> {
+  list.find(
+    outputs,
+    fn(output) {
+      output.address == address
+        && has_one(output.value, token)
+        && datum_pool(output) != None
+    },
+  )
+}
+
+fn pool_price_for(asset: AssetClass, prices: List<PoolAssetPrice>) -> Option<PoolAssetPrice> {
+  list.find(prices, fn(price) { price.asset == asset })
+}
+
+fn inventory_for_pool(
+  settlement: ListingSettlement,
+  token: AssetClass,
+  receipt: AssetClass,
+) -> Bool {
+  when settlement is {
+    QuotePool { pool_token, inventory_token, acquisition_cost: _ } ->
+      pool_token == token && inventory_token == receipt
+    _ -> False
+  }
+}
+
+/// Registry-free orderbook for direct/Instant Sell listings and receipt-backed
+/// pool inventory. Pool actions are validated jointly with `quote_pool`.
 validator p2p_listing_simple {
   spend(
     datum: Option<SimpleListingDatum>,
@@ -197,6 +286,10 @@ validator p2p_listing_simple {
 
         and {
           listing_is_valid(listing),
+          is_direct_listing(listing) || when listing.settlement is {
+            QuotePool { pool_token: _, inventory_token: _, acquisition_cost: _ } -> True
+            _ -> False
+          },
           listing_escrow_is_exact(own_input.output.value, listing, locked_lovelace),
           seller_is_paid(tx.outputs, listing, locked_lovelace),
           pool_sale_is_atomic(tx, listing),
@@ -208,7 +301,7 @@ validator p2p_listing_simple {
         let locked_lovelace = own_input.output.value |> quantity_of(ada())
 
         and {
-          is_direct_listing(listing),
+          seller_can_manage_listing(listing),
           listing_escrow_is_exact(own_input.output.value, listing, locked_lovelace),
           list.has(tx.extra_signatories, listing.seller_key),
           seller_receives_quantity(
@@ -233,12 +326,14 @@ validator p2p_listing_simple {
           )
 
         and {
-          is_direct_listing(listing),
+          seller_can_manage_listing(listing),
           listing_is_valid(next),
           listing_escrow_is_exact(own_input.output.value, listing, locked_lovelace),
           list.has(tx.extra_signatories, listing.seller_key),
           next.rwa == listing.rwa,
+          next.price_asset == listing.price_asset,
           next.settlement == listing.settlement,
+          next.seller == listing.seller,
           next.seller_key == listing.seller_key,
           next_output.value == listing_escrow_value(next, locked_lovelace),
           seller_receives_quantity(
@@ -247,6 +342,142 @@ validator p2p_listing_simple {
             listing.rwa,
             released_quantity,
           ),
+        }
+      }
+
+      BatcherAcquire { inventory } -> {
+        let locked_lovelace = own_input.output.value |> quantity_of(ada())
+        expect InstantSell { pool_token } = listing.settlement
+        expect Some(pool_input) = pool_input_for(tx.inputs, pool_token)
+        expect Some(pool) = datum_pool(pool_input.output)
+        expect Some(price) = pool_price_for(listing.rwa, pool.prices)
+        expect Some(pool_output) = pool_output_for(tx.outputs, pool_input.output.address, pool_token)
+        expect Some(next_pool) = datum_pool(pool_output)
+        let payout = ratio_value(price.buy_price, listing.quantity)
+        expect Some(inventory_output) = list.find(
+          tx.outputs,
+          fn(output) {
+            output.address == own_input.output.address
+              && when output.datum is {
+                InlineDatum(data) -> {
+                  expect candidate: SimpleListingDatum = data
+                  candidate == inventory
+                }
+                _ -> False
+              }
+          },
+        )
+        let inventory_lovelace = inventory_output.value |> quantity_of(ada())
+        let expected_ask = ratio_value(price.sell_price, listing.quantity)
+
+        and {
+          listing_is_valid(listing),
+          listing.price_asset == pool.quote_asset,
+          listing.price > 0,
+          listing_escrow_is_exact(own_input.output.value, listing, locked_lovelace),
+          pool.pool_token == pool_token,
+          pool.quote_asset == listing.price_asset,
+          next_pool.pool_token == pool_token,
+          pool_output.address == pool_input.output.address,
+          pool_input.output.address == inventory.seller,
+          signed(tx, pool.batcher),
+          payout >= listing.price,
+          payout > 0,
+          if pool.quote_asset == ada() {
+            paid_at_least(tx.outputs, listing.seller, ada(), payout + locked_lovelace)
+          } else {
+            and {
+              paid_at_least(tx.outputs, listing.seller, pool.quote_asset, payout),
+              paid_at_least(tx.outputs, listing.seller, ada(), locked_lovelace),
+            }
+          },
+          inventory_for_pool(inventory.settlement, pool_token, pool.inventory_token),
+          inventory.seller == pool_input.output.address,
+          inventory.seller_key == pool.batcher,
+          inventory.rwa == listing.rwa,
+          inventory.quantity == listing.quantity,
+          inventory.price_asset == pool.quote_asset,
+          inventory.price == expected_ask,
+          inventory_lovelace > 0,
+          inventory_output.value == listing_escrow_value(inventory, inventory_lovelace),
+          inventory.settlement == QuotePool {
+            pool_token,
+            inventory_token: pool.inventory_token,
+            acquisition_cost: payout,
+          },
+          quantity_of(tx.mint, pool.inventory_token) == 1,
+        }
+      }
+
+      Reprice { next } -> {
+        let locked_lovelace = own_input.output.value |> quantity_of(ada())
+        expect QuotePool { pool_token, inventory_token, acquisition_cost } = listing.settlement
+        expect Some(pool_input) = pool_input_for(tx.inputs, pool_token)
+        expect Some(pool) = datum_pool(pool_input.output)
+        expect Some(pool_output) = pool_output_for(tx.outputs, pool_input.output.address, pool_token)
+        expect Some(next_pool) = datum_pool(pool_output)
+        expect Some(next_output) = find_listing_output(
+          tx.outputs,
+          own_input.output.address,
+          next,
+          locked_lovelace,
+        )
+
+        and {
+          listing_is_valid(listing),
+          listing_escrow_is_exact(own_input.output.value, listing, locked_lovelace),
+          pool.pool_token == pool_token,
+          pool.inventory_token == inventory_token,
+          pool.batcher == listing.seller_key,
+          listing.seller == pool_input.output.address,
+          signed(tx, pool.batcher),
+          next.settlement == listing.settlement,
+          next.seller == listing.seller,
+          next.seller_key == listing.seller_key,
+          next.rwa == listing.rwa,
+          next.quantity == listing.quantity,
+          next.price_asset == listing.price_asset,
+          next.price > 0,
+          acquisition_cost > 0,
+          next_output.value == listing_escrow_value(next, locked_lovelace),
+          next_pool.pool_token == pool_token,
+          pool_output.address == pool_input.output.address,
+        }
+      }
+
+      ReturnToClosingLp { recipient, provider_key, next } -> {
+        let locked_lovelace = own_input.output.value |> quantity_of(ada())
+        expect QuotePool { pool_token, inventory_token, acquisition_cost: _ } = listing.settlement
+        expect Some(pool_input) = pool_input_for(tx.inputs, pool_token)
+        expect Some(pool) = datum_pool(pool_input.output)
+        expect Some(exit) = pool.closing
+        expect Some(pool_output) = pool_output_for(
+          tx.outputs,
+          pool_input.output.address,
+          pool_token,
+        )
+        expect Some(next_pool) = datum_pool(pool_output)
+
+        and {
+          listing_escrow_is_exact(own_input.output.value, listing, locked_lovelace),
+          pool.pool_token == pool_token,
+          pool.inventory_token == inventory_token,
+          pool.total_lp_supply == 0,
+          exit == PoolExit { recipient, provider_key },
+          listing.seller == pool_input.output.address,
+          listing.seller_key == pool.batcher,
+          listing.price_asset == pool.quote_asset,
+          paid_to_key(recipient, provider_key),
+          signed(tx, provider_key),
+          pool_output.address == pool_input.output.address,
+          next_pool == next,
+          next.closing == pool.closing,
+          quantity_of(tx.mint, inventory_token) == -1,
+          list.all(tx.outputs, fn(output) {
+            quantity_of(output.value, inventory_token) == 0
+          }),
+          paid_at_least(tx.outputs, recipient, listing.rwa, listing.quantity),
+          paid_at_least(tx.outputs, recipient, ada(), locked_lovelace),
         }
       }
     }
@@ -314,6 +545,7 @@ test pool_listing_escrow_requires_inventory_receipt() {
       settlement: QuotePool {
         pool_token: test_pool_token,
         inventory_token: test_inventory_token,
+        acquisition_cost: 500,
       },
       rwa: test_rwa,
       quantity: 1,

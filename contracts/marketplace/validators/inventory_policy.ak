@@ -12,6 +12,9 @@ pub type InventoryRedeemer {
   BurnInventory
 }
 
+/// Mints one receipt for each batcher-acquired pool listing and permits burns
+/// when that listing is sold or returned during LP wind-down. The pool
+/// validator authenticates the matching listing and accounting transition.
 validator inventory_policy(
   pool_token: AssetClass,
   inventory_name: AssetName,
@@ -38,7 +41,7 @@ validator inventory_policy(
             amount == 1,
             list.has(tx.extra_signatories, batcher),
           }
-        BurnInventory -> amount == -1
+        BurnInventory -> amount < 0
       },
     }
   }
@@ -130,16 +133,16 @@ test inventory_receipt_mint_requires_batcher_signature() {
   }
 }
 
-test inventory_receipt_burn_is_exact() {
+test inventory_receipt_burn_allows_batch_exit_burns() {
   let mint = assets.zero |> assets.add(
     test_receipt_policy,
     test_receipt_name,
     -1,
   )
-  let wrong_mint = assets.zero |> assets.add(
+  let invalid_mint = assets.zero |> assets.add(
     test_receipt_policy,
     test_receipt_name,
-    -2,
+    0,
   )
 
   and {
@@ -157,7 +160,15 @@ test inventory_receipt_burn_is_exact() {
       test_batcher,
       BurnInventory,
       test_receipt_policy,
-      test_tx(wrong_mint, []),
+      test_tx(assets.zero |> assets.add(test_receipt_policy, test_receipt_name, -2), []),
+    ),
+    inventory_policy.mint(
+      test_pool_token,
+      test_receipt_name,
+      test_batcher,
+      BurnInventory,
+      test_receipt_policy,
+      test_tx(invalid_mint, []),
     ) == False,
   }
 }

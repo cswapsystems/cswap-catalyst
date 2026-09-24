@@ -2,7 +2,7 @@
 
 ## Current contract status
 
-The currently supported Marketplace is the registry-free shared quote-pool path plus the separate asset-admission registry. Its active validator sources are `asset_registry`, `asset_registry_request`, `one_shot`, `quote_pool`, `lp_policy`, `inventory_policy`, `pool_sell_request`, and `p2p_listing_simple`. See the repository-wide [validator inventory](../../docs/VALIDATOR_INVENTORY.md) before deriving any script.
+The currently supported Marketplace is the registry-free shared quote-pool path plus the separate asset-admission registry. Its active validator sources are `asset_registry`, `asset_registry_request`, `one_shot`, `quote_pool`, `lp_policy`, `inventory_policy`, and `p2p_listing_simple`. `pool_sell_request` remains in the blueprint only to let pre-existing request UTxOs be cancelled; new settlement uses `p2p_listing_simple`. See the repository-wide [validator inventory](../../docs/VALIDATOR_INVENTORY.md) before deriving any script.
 
 The legacy oracle/registry and sharded validator families have been moved to `retired-validators/*.ak.disabled`. They are source history only: Aiken does not build them and the application does not load them for new transactions.
 
@@ -225,60 +225,56 @@ The active smoke checks must target only the active validator set in the validat
 
 ### Registry-free shared quote pool
 
-The registry-free path uses p2p_listing_simple for direct listings and the
-parameterized quote_pool validator for one shared pool per quote asset (for
-example one ADA pool and one USDC pool, not one pool per RWA policy or
-fractionalized asset).
+The supported path uses `p2p_listing_simple` for direct listings and the
+parameterized `quote_pool` validator for one reserve per quote asset. Pool
+prices are stored in the reserve datum by exact RWA asset identity as buy and
+sell ratios. The batcher can update these posted prices on-chain; the contracts
+do not impose a minimum spread. Price updates apply to future acquisitions,
+while each open inventory listing retains its own ask until the batcher reprices
+it.
 
-This is an oracle/RFQ settlement pool, not a constant-product AMM. A seller
-lists an exact asset unit and its minimum quote amount. An allow-listed
-batcher may acquire that listing using pool funds, then recreate the asset as
-pool-owned inventory with the externally determined ask price. Any buyer can
-consume that inventory listing; the quote payment and its ADA buffer return to
-the same pool. The exact asset unit and price remain in the orderbook datum,
-so the pool can trade many fractionalized assets without a separate
-PolicyId/quote pool.
+A direct P2P listing is marked `Direct`: its escrow contains only the listed
+asset and locked ADA. An instant-sell listing is marked `InstantSell` and
+includes the reserve token plus the seller's minimum acceptable total payout.
+The batcher can buy it only when the reserve's posted buy price meets that
+minimum and enough quote cash remains above the protected reserve. The same
+transaction pays the seller, creates the pool-owned listing at the posted sell
+price, mints its one-unit inventory receipt, and updates reserve accounting.
+The seller can cancel or edit an unfilled instant-sell listing.
 
-SimpleListingDatum.settlement is either Direct or QuotePool { pool_token,
-inventory_token }. The one-unit inventory_token receipt is minted by the
-parameterized inventory policy when the batcher acquires a listing and is
-burned when that inventory is sold. The pool datum's inventory_value is the sum
-of the prices of all open
-pool-owned inventory listings, marked at their ask prices. Pool acquisition
-increments it and inventory sale decrements it. LP add/remove and pool close
-are rejected while it is non-zero, preventing liquidity providers from
-ignoring outstanding pool inventory. Pool-owned listings cannot be cancelled
-or edited through the generic orderbook path; they must be sold so the pool
-accounting changes atomically.
+Pool-owned listings are marked `QuotePool` and hold the RWA, locked ADA, and
+one inventory receipt. Their datum records the pool identity, receipt identity,
+and acquisition cost. Buyers must purchase atomically with the reserve update;
+the payment returns to that reserve and the receipt is burned. The reserve
+datum tracks open listing acquisition cost, current asking value, and listing
+count. The asking value is for reporting; it is not cash or guaranteed revenue.
+The batcher can reprice an open listing on-chain, atomically updating the
+listing and aggregate asking value while preserving acquisition cost.
 
-The application presents direct listings and pool inventory in one marketplace
-screen. The client-side builder parameterizes quote_pool with the configured
-orderbook address before preparing a pool inventory buy. Set
-NEXT_PUBLIC_SIMPLE_ORDERBOOK_ADDRESS after deploying the registry-free
-orderbook; pool addresses/tokens are read from the inventory listing and pool
-UTxO datum.
-
-For seller-only instant sell, `pool_sell_request` is parameterized with the
-shared pool address. A seller locks an exact RWA asset and a minimum payout in
-that request rather than creating a publicly purchasable listing. The pool
-batcher later consumes the request together with the pool, pays at least the
-minimum, and creates the pool-owned inventory listing. The seller can cancel
-the request with its payment key.
+LP deposits mint shares against reserve cash plus open inventory acquisition
+cost. LPs can burn shares at any time; the validator pays their pro-rata share of
+cash above the protected reserve (which can be zero), even while inventory
+remains open. The final LP starts a reserve wind-down by burning all remaining shares and
+withdrawing available cash. While wind-down is active, each receipt-backed
+inventory listing is consumed in a separate transaction and its unsold RWA is
+returned to that LP. The LP then closes the empty reserve. A permissionless
+reserve top-up adds quote cash without minting LP shares. Existing
+`pool_sell_request` UTxOs can only be cancelled; new instant sells use the P2P
+listing contract.
 
 ## Current application workflows
 
 The `/marketplace` seller control exposes both contract paths:
 
 - **List at my price** creates a public `Direct` listing.
-- **Instant sell to pool** creates a `pool_sell_request` with a seller-selected
-  minimum payout; it remains pending until the batcher settles or the seller
+- **Instant sell to pool** creates an `InstantSell` P2P listing with a seller
+  minimum payout; it remains escrowed until the batcher settles it or the seller
   cancels.
 
-The `/team` console reads shared-pool cash, protected reserve, inventory value,
-and LP supply before presenting the instant-sell pricing queue and reserve
-controls. It also reads the exact-asset registry and fails closed for an
-unapproved request, but current shared-pool validators do not authenticate that
-registry reference. Batcher settlement still requires the configured batcher
+The `/team` console should read shared-pool cash, protected reserve, posted
+buy/sell prices, inventory cost and ask totals, and LP supply before presenting
+instant-sell and reserve controls. The quote-pool validators admit assets with
+an on-chain price entry; direct listings remain registry-free. Batcher settlement still requires the configured batcher
 signer. An operator may connect that authorized wallet through the console or
 use a separate signing service, but the private key must never appear in
 browser storage, a client bundle, or a `NEXT_PUBLIC_` variable.

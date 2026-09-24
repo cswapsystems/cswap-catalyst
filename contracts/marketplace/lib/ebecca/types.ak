@@ -8,6 +8,14 @@ pub type AssetClass {
   asset_name: AssetName,
 }
 
+// Per-asset fixed pool prices, expressed as quote units per asset quantity.
+// `buy_price` is the pool payout; `sell_price` is the pool inventory ask.
+pub type PoolAssetPrice {
+  asset: AssetClass,
+  buy_price: Ratio,
+  sell_price: Ratio,
+}
+
 pub type SupportedAsset {
   PolicyOnly(PolicyId)
   SpecificAsset(AssetClass)
@@ -143,9 +151,12 @@ pub type ListingDatum {
 // dependency.
 pub type ListingSettlement {
   Direct
+  // The listing's price is the seller's minimum accepted total payout.
+  InstantSell { pool_token: AssetClass }
   QuotePool {
     pool_token: AssetClass,
     inventory_token: AssetClass,
+    acquisition_cost: Int,
   }
 }
 
@@ -181,6 +192,15 @@ pub type AssetRegistryRequestDatum {
   requester_key: VerificationKeyHash,
   assets: List<AssetClass>,
 }
+// Destination and signer identity of the LP who initiated the final exit.
+pub type PoolExit {
+  recipient: Address,
+  provider_key: VerificationKeyHash,
+}
+
+// Single-UTxO reserve state. LP shares include open inventory at acquisition
+// cost basis; inventory_value separately tracks its combined asking price and
+// is informational, not spendable cash.
 pub type QuotePoolDatum {
   admin: VerificationKeyHash,
   batcher: VerificationKeyHash,
@@ -188,13 +208,18 @@ pub type QuotePoolDatum {
   lp_token: AssetClass,
   inventory_token: AssetClass,
   quote_asset: AssetClass,
+  // Batcher's on-chain fixed buy and sell prices, keyed by exact asset ID.
+  prices: List<PoolAssetPrice>,
   total_lp_supply: Int,
   min_cash_reserve: Int,
   paused: Bool,
-  // Sum of the prices of all pool-owned inventory listings currently open.
-  // This is marked at the external batcher's ask price, not the pool's
-  // acquisition cost, and prevents LP state changes while inventory is open.
+  // Aggregate bookkeeping for open listings. Neither field is reserve cash.
+  inventory_cost: Int,
   inventory_value: Int,
+  inventory_count: Int,
+  // Present after the final LP burns shares; each remaining listing is returned
+  // to this LP before the reserve identity can be closed.
+  closing: Option<PoolExit>,
 }
 
 pub type VaultDatum {

@@ -103,6 +103,8 @@ fn registry_transition_is_approved(
   }
 }
 
+/// Holds permissionless proposals until the issuer approves, rejects, or the
+/// requester cancels them. Approval must include the exact registry update.
 validator asset_registry_request(
   registry_address: Address,
   registry_token: AssetClass,
