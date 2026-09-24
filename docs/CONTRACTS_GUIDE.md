@@ -212,8 +212,8 @@ of those open listings.
 The registry/oracle/sharded marketplace families below are archived source
 history. They are retained in the guide only to explain old artifacts; they
 are not compiled, exposed through the application, or eligible for new
-deployments. The active Marketplace uses the asset registry, `quote_pool`,
-`pool_sell_request`, and `p2p_listing_simple` listed in the
+deployments. The active Marketplace uses the asset registry, `quote_pool`, and
+`p2p_listing_simple` listed in the
 [validator inventory](VALIDATOR_INVENTORY.md).
 
 This path is implemented by:
@@ -450,29 +450,28 @@ The pool-owned listing is bound to the pool by all of these fields:
 - listing seller key equals the batcher key;
 - listing price asset equals the pool quote asset.
 
-### 8.4 Seller-only instant-sale requests
+### 8.4 Seller-only Instant Sell listings
 
-[`pool_sell_request.ak`](../contracts/marketplace/validators/pool_sell_request.ak)
-is parameterized by the shared-pool address. It keeps an instant-sale request
-separate from a public P2P listing. Its datum binds the seller and cancellation
-key, the pool identity token, exact RWA unit and quantity, quote asset, and
-minimum payout.
+Instant Sell is an orderbook listing with `InstantSell { pool_token }`
+settlement in
+[`p2p_listing_simple.ak`](../contracts/marketplace/validators/p2p_listing_simple.ak).
+It is not publicly purchasable: its `price` is the seller's minimum total
+payout.
 
 ```text
-1. Seller locks RWA + its ADA buffer in a pool-sell-request UTxO.
+1. Seller locks RWA + its ADA buffer in an InstantSell orderbook listing.
 2. The seller can cancel at any time with its payment-key signature.
-3. The allow-listed batcher chooses to accept a request.
-4. One transaction spends the request and shared pool, pays the seller at
-   least the stated minimum, mints the inventory receipt, and creates a
-   pool-owned orderbook listing.
+3. The batcher chooses to acquire it at the pool's posted buy price.
+4. One transaction spends exactly that listing and the shared pool, pays the
+   seller at least the minimum plus the ADA buffer, mints one inventory
+   receipt, and creates a pool-owned orderbook listing at the posted ask.
 ```
 
-The request validator requires the authenticated pool to be spent in the
-settlement transaction and requires the seller's payout. The quote-pool
-validator separately requires its batcher signature, checks that the exact
-request asset becomes inventory, and debits the reserve by the settled amount
-plus the request's ADA buffer. This keeps the batcher key off the browser while
-making a seller's minimum payout and cancellation right enforceable on-chain.
+`quote_pool` `BatcherAcquire` requires the batcher signature, exactly one
+Instant Sell listing for the pool, a posted price for the exact asset, and cash
+above `min_cash_reserve` after the payout. The earlier separate request
+validator (`pool_sell_request`) is archived; see the
+[validator inventory](VALIDATOR_INVENTORY.md).
 
 ### 8.5 Inventory sale flow
 

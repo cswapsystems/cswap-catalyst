@@ -170,20 +170,6 @@ pub type SimpleListingDatum {
   price: Int,
 }
 
-// A seller-owned escrow submitted to the shared quote pool. Unlike a direct
-// listing, it is not publicly purchasable: the pool batcher either settles it
-// atomically against the pool or the seller cancels and recovers the asset.
-pub type PoolSellRequestDatum {
-  seller: Address,
-  seller_key: VerificationKeyHash,
-  pool_token: AssetClass,
-  rwa: AssetClass,
-  quantity: Int,
-  quote_asset: AssetClass,
-  min_payout: Int,
-}
-
-
 // A permissionless proposal to add one or more exact units to the basic
 // Team-managed asset registry. The request validator binds approval to an
 // authenticated batched registry transition; this datum itself is not approval.

@@ -5,12 +5,12 @@ This handover describes the frontend work needed to integrate with the updated M
 ## Files that need frontend updates
 
 - `src/app/_components/marketplace-workbench.tsx` discovers and buys listings. Its decoder treats settlement constructor 1 as pool inventory. In the updated schema constructor 1 is Instant Sell; pool-owned inventory is constructor 2. Its buy path and listing management redeemers must distinguish all three settlement variants.
-- `src/app/_components/portfolio-sale.tsx` currently submits Instant Sell to `pool_sell_request`. New Instant Sell must create a seller-owned orderbook listing with `InstantSell { pool_token }` and the seller's minimum total payout in `price`.
+- Done: `src/app/_components/portfolio-sale.tsx` creates Instant Sell as a seller-owned orderbook listing with `InstantSell { pool_token }` and the seller's minimum total payout in `price` (it previously submitted to the now-archived `pool_sell_request`).
 - `src/app/_components/reserves-workbench.tsx` and `src/lib/protocol/shared-pool-client.ts` still parse a 10-field pool datum and block all liquidity actions when inventory is open. The current datum has 14 fields and allows deposits and cash-only LP withdrawals while listings remain open.
 - `src/app/_components/team-workbench.tsx` currently operates the old request settlement flow. Replace settlement with the atomic P2P `BatcherAcquire` flow; keep request cancellation support only for legacy request UTxOs.
 - Review `src/app/_components/team-console.tsx`, `src/lib/protocol/inventory.ts`, and marketplace UI tests for old pool field positions and settlement constructor assumptions.
 
-The browser API still exposes the `pool_sell_request` validator so owners can cancel old request outputs. The validator's `Settle` action now always fails. Do not build new order flows with it.
+The `pool_sell_request` source is archived and no longer in the blueprint. Owners cancel old request outputs through `/api/marketplace-recovery`, which serves the pinned compiled script.
 
 ## On-chain data layout
 

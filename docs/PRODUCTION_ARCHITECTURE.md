@@ -25,7 +25,7 @@ seller -> pool-sell request -> batcher settlement -> pool-owned inventory -> buy
                                       +-- cash debit        +-- cash return on sale
 ```
 
-The Team console reads the exact-asset registry before it builds an Instant Sell settlement, while direct listings remain registry-free. The current `quote_pool` and `pool_sell_request` validators do not consume a registry reference, so registry admission is a fail-closed client/operator control rather than an on-chain settlement guarantee. The batcher pays at least the seller minimum, chooses the actual bid and inventory ask, and mints one inventory receipt. The receipt and `inventory_value` bind the pool-owned listing to the pool. A later buyer burns that receipt and returns the listing payment to the pool.
+The Team console reads the exact-asset registry before it builds an Instant Sell settlement, while direct listings remain registry-free. The current `quote_pool` and `p2p_listing_simple` validators do not consume a registry reference, so registry admission is a fail-closed client/operator control rather than an on-chain settlement guarantee. The batcher pays at least the seller minimum, chooses the actual bid and inventory ask, and mints one inventory receipt. The receipt and `inventory_value` bind the pool-owned listing to the pool. A later buyer burns that receipt and returns the listing payment to the pool.
 
 ### Permissionless asset-admission requests
 

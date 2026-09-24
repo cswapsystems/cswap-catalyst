@@ -1,0 +1,27 @@
+[
+  {
+    "kind": "registry",
+    "address": "addr_test1wpvmzq5wvwyz4xt2pht725d47sngwjll7ajegx3rpy5y75gvpdr46",
+    "token": "872c22cf727de60c032888cf4d2db617d5b9ded73763659a9f2fff3143535741505f5245474953545259"
+  },
+  {
+    "kind": "orderbook",
+    "address": "addr_test1wrk2gm3tpe7yk7xe2h7xh439hurxx58l0znu4lj0fxamvucjnc43g"
+  },
+  {
+    "kind": "quote-pool",
+    "address": "addr_test1wq4xkn0pn3w8r2pwu4rz6s88lsntpfgnkls3ejv3r5j7uxg92crkk"
+  },
+  {
+    "kind": "vault",
+    "address": "addr_test1wz96ux27ax6qqcmmhd3em60p386l809k7quxf6wt39t6shqvvuevh"
+  },
+  {
+    "kind": "dex-factory",
+    "address": "addr_test1wpxmpcx5q54qcwtn54cljvm6fky0t40epdfwgugweeue3jchdzmcz"
+  },
+  {
+    "kind": "dex-pool",
+    "address": "addr_test1wphmytuzd0da0qfgl85h2ag2azpdas7a9ve6dk2fcjn3v5qpwdjz9"
+  }
+]

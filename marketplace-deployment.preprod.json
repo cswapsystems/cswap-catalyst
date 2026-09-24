@@ -3,7 +3,7 @@
   "network": "preprod",
   "team": "6b88f592b89de5b5fac9359aa273184519ea23a538d776565c7220a1",
   "batcher": "6b88f592b89de5b5fac9359aa273184519ea23a538d776565c7220a1",
-  "blueprintDigest": "b5aa4925072819dba5cc755c08e99e898b69b0afa065b5e699907aee20f3787c",
+  "blueprintDigest": "f9c2266b08c7fa58e72848fbbcd94b7abacbfd8e71b65b1c32f4269b6cc39a9f",
   "registry": {
     "token": "872c22cf727de60c032888cf4d2db617d5b9ded73763659a9f2fff3143535741505f5245474953545259",
     "issuer": "6b88f592b89de5b5fac9359aa273184519ea23a538d776565c7220a1",
@@ -16,56 +16,113 @@
     "transaction": "65034d1554e3c56d6e2df241037f45107dbdbbb4bc0e53db22254d2254103e7c"
   },
   "pool": {
-    "token": "e84dabebb5bb251040672485de348d92d7657d5b6f81865c744cb63443535741505f51554f54455f504f4f4c",
-    "lpToken": "7b46c333fa0026eda0ebebc0c8c162cebd59bd8ecccf402d53e3b33843535741505f504f4f4c5f4c50",
-    "inventoryToken": "857abcde9a77960e7ada1adadf73fc2936cebdbda7110ec4c3a51b7243535741505f494e56454e544f5259",
+    "token": "ca6bba2f3e9af421476ecc8a9caead7f101a34e8b2030876b70edd9343535741505f51554f54455f504f4f4c",
+    "identitySeed": {
+      "txHash": "0d0d221ccb58a030d2cba3fc56af7fb73c73d3fff35cf243d08e25c8ec952322",
+      "outputIndex": 1
+    },
+    "lpToken": "e6c9a33bf186da466a4f81f9fd9cb126b899a48d681d69e81418aa6b43535741505f504f4f4c5f4c50",
+    "inventoryToken": "83f671ae89cd78ec785a3c539b7b349732f955f83640615a07f87d9f43535741505f494e56454e544f5259",
     "quoteUnit": "lovelace",
     "minCashReserve": "20000000",
-    "address": "addr_test1wr4cu3mx8g2dupeatrt6mlculvusvwpu27m783tp0sat69gtmkku6",
-    "transaction": "65034d1554e3c56d6e2df241037f45107dbdbbb4bc0e53db22254d2254103e7c"
+    "address": "addr_test1wq4xkn0pn3w8r2pwu4rz6s88lsntpfgnkls3ejv3r5j7uxg92crkk",
+    "transaction": "4c73fe171272e18b84eb1ed2b760652cf210c83e92d61adc5cc04cb703aebfdb"
   },
   "referenceScripts": [
     {
-      "txHash": "bece461c309d4494a5cd3bc160dc481a7d4ab717b8c894d9d1e695e3f7486347",
+      "txHash": "507ad296a0e0327ea5883ef73c36b127dd5f6f2df2694de1c04fe1a39058acaf",
       "outputIndex": 0
     },
     {
-      "txHash": "9775bb04ad1695b87723c9a9e08af4d7b7d426142ab2a6f36c999b7d495295b3",
+      "txHash": "1697993ddda02ca6f066b4606e19f99bd37bd3a5b32c7283b0dddd85382a368a",
       "outputIndex": 0
     },
     {
-      "txHash": "2e15b4281c7e5cdbc931b8d3fa338a44b6405630b4ec6f46023e9ba4b1a53af6",
+      "txHash": "3fe1818493f106f264bc54f7dedecf9a6e3075144c2dd9095c6a5f0d57ea32a3",
       "outputIndex": 0
     },
     {
-      "txHash": "1c7d4d6478fcc272f15a5d8d3ce41f9be34083fc05def8d7e278014b3bdbeaed",
+      "txHash": "451941f389349d32251eec6a92e144c85e17605c3912e491d86394e22c57d9b6",
       "outputIndex": 0
     }
   ],
   "supersedes": {
+    "schemaVersion": 14,
     "network": "preprod",
     "team": "6b88f592b89de5b5fac9359aa273184519ea23a538d776565c7220a1",
     "batcher": "6b88f592b89de5b5fac9359aa273184519ea23a538d776565c7220a1",
-    "orderbookAddress": "addr_test1wzcxcdqwde4uw9rd2rcnyeuycprpk3e4rkketuhv00ffzaqh4zhpn",
+    "blueprintDigest": "b5aa4925072819dba5cc755c08e99e898b69b0afa065b5e699907aee20f3787c",
     "registry": {
-      "token": "24a243c3a921e55b01f865c002505f1262b179ccc4e4fb3ef16e82d643535741505f5245474953545259",
+      "token": "872c22cf727de60c032888cf4d2db617d5b9ded73763659a9f2fff3143535741505f5245474953545259",
       "issuer": "6b88f592b89de5b5fac9359aa273184519ea23a538d776565c7220a1",
-      "address": "addr_test1wq3jzptm3qpslktvlalqcvcy28rzssggfwvks33sf0dwv7qpmf3f2",
-      "transaction": "62ca56465ec5741a1e83215a2220fa999fbf1cf08ef7f1cd2599debe14cdfb7e",
-      "lastUpdateTransaction": "c848fe3fd241da84206ea092aa4d93e871b82fa937dbb2aec9f98269804b3966"
+      "initialDatum": "d8799f019fd8799f581c0ca6a26383f5d5bf726ffcb75adca6eb5b97b4ca66a51b17b49c7031555257412d434f4e444f2d323032362d303030312d46ffffff",
+      "copiedFrom": {
+        "txHash": "c848fe3fd241da84206ea092aa4d93e871b82fa937dbb2aec9f98269804b3966",
+        "outputIndex": 0
+      },
+      "address": "addr_test1wpvmzq5wvwyz4xt2pht725d47sngwjll7ajegx3rpy5y75gvpdr46",
+      "transaction": "65034d1554e3c56d6e2df241037f45107dbdbbb4bc0e53db22254d2254103e7c"
     },
     "pool": {
-      "token": "300cbde45feb8641a8c9ddd8582db9396144306be9c9dcb416b5b57f43535741505f51554f54455f504f4f4c",
-      "address": "addr_test1wpexym4uwfp0ms0qn7s6yvr6zrwfgqzuftf4gvgghfq0uaszacs2t",
-      "lpToken": "747e6e0150ea2a683aaf69cde2cd72bc0a3365cfdf046be6cb137f5643535741505f504f4f4c5f4c50",
-      "inventoryToken": "79f7110cc735755ed0ba7098198ea10c6dbac6fb32707acf7e56a0d743535741505f494e56454e544f5259",
+      "token": "e84dabebb5bb251040672485de348d92d7657d5b6f81865c744cb63443535741505f51554f54455f504f4f4c",
+      "lpToken": "7b46c333fa0026eda0ebebc0c8c162cebd59bd8ecccf402d53e3b33843535741505f504f4f4c5f4c50",
+      "inventoryToken": "857abcde9a77960e7ada1adadf73fc2936cebdbda7110ec4c3a51b7243535741505f494e56454e544f5259",
       "quoteUnit": "lovelace",
       "minCashReserve": "20000000",
-      "transaction": "62ca56465ec5741a1e83215a2220fa999fbf1cf08ef7f1cd2599debe14cdfb7e",
-      "fundingTransaction": "446e8c93586ea7a85458bd4cc1bedf37af85f0a6b8a337858e41c5f481281843"
+      "address": "addr_test1wr4cu3mx8g2dupeatrt6mlculvusvwpu27m783tp0sat69gtmkku6",
+      "transaction": "65034d1554e3c56d6e2df241037f45107dbdbbb4bc0e53db22254d2254103e7c"
+    },
+    "referenceScripts": [
+      {
+        "txHash": "bece461c309d4494a5cd3bc160dc481a7d4ab717b8c894d9d1e695e3f7486347",
+        "outputIndex": 0
+      },
+      {
+        "txHash": "9775bb04ad1695b87723c9a9e08af4d7b7d426142ab2a6f36c999b7d495295b3",
+        "outputIndex": 0
+      },
+      {
+        "txHash": "2e15b4281c7e5cdbc931b8d3fa338a44b6405630b4ec6f46023e9ba4b1a53af6",
+        "outputIndex": 0
+      },
+      {
+        "txHash": "1c7d4d6478fcc272f15a5d8d3ce41f9be34083fc05def8d7e278014b3bdbeaed",
+        "outputIndex": 0
+      }
+    ],
+    "supersedes": {
+      "network": "preprod",
+      "team": "6b88f592b89de5b5fac9359aa273184519ea23a538d776565c7220a1",
+      "batcher": "6b88f592b89de5b5fac9359aa273184519ea23a538d776565c7220a1",
+      "orderbookAddress": "addr_test1wzcxcdqwde4uw9rd2rcnyeuycprpk3e4rkketuhv00ffzaqh4zhpn",
+      "registry": {
+        "token": "24a243c3a921e55b01f865c002505f1262b179ccc4e4fb3ef16e82d643535741505f5245474953545259",
+        "issuer": "6b88f592b89de5b5fac9359aa273184519ea23a538d776565c7220a1",
+        "address": "addr_test1wq3jzptm3qpslktvlalqcvcy28rzssggfwvks33sf0dwv7qpmf3f2",
+        "transaction": "62ca56465ec5741a1e83215a2220fa999fbf1cf08ef7f1cd2599debe14cdfb7e",
+        "lastUpdateTransaction": "c848fe3fd241da84206ea092aa4d93e871b82fa937dbb2aec9f98269804b3966"
+      },
+      "pool": {
+        "token": "300cbde45feb8641a8c9ddd8582db9396144306be9c9dcb416b5b57f43535741505f51554f54455f504f4f4c",
+        "address": "addr_test1wpexym4uwfp0ms0qn7s6yvr6zrwfgqzuftf4gvgghfq0uaszacs2t",
+        "lpToken": "747e6e0150ea2a683aaf69cde2cd72bc0a3365cfdf046be6cb137f5643535741505f504f4f4c5f4c50",
+        "inventoryToken": "79f7110cc735755ed0ba7098198ea10c6dbac6fb32707acf7e56a0d743535741505f494e56454e544f5259",
+        "quoteUnit": "lovelace",
+        "minCashReserve": "20000000",
+        "transaction": "62ca56465ec5741a1e83215a2220fa999fbf1cf08ef7f1cd2599debe14cdfb7e",
+        "fundingTransaction": "446e8c93586ea7a85458bd4cc1bedf37af85f0a6b8a337858e41c5f481281843"
+      }
+    },
+    "orderbookAddress": "addr_test1wqarm03kvk5fexqy98ht50gnajfnupjs35e3tmlvdgvkj6gd74ae0",
+    "referenceCustody": {
+      "address": "addr_test1wr9cp7ppnp5ve22w74xcqxwd527rw4jgjlkavn5lwp083qgh55eq4",
+      "script": {
+        "type": "Native",
+        "script": "8200581c6b88f592b89de5b5fac9359aa273184519ea23a538d776565c7220a1"
+      }
     }
   },
-  "orderbookAddress": "addr_test1wqarm03kvk5fexqy98ht50gnajfnupjs35e3tmlvdgvkj6gd74ae0",
+  "orderbookAddress": "addr_test1wrk2gm3tpe7yk7xe2h7xh439hurxx58l0znu4lj0fxamvucjnc43g",
   "referenceCustody": {
     "address": "addr_test1wr9cp7ppnp5ve22w74xcqxwd527rw4jgjlkavn5lwp083qgh55eq4",
     "script": {

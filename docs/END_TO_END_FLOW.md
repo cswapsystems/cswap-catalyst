@@ -139,7 +139,7 @@ LP removal burns LP tokens and only withdraws quote liquidity above the protecte
    | 1. Portfolio > Sell / List > Instant Sell to pool.
    |    Review the operator bid and request it as the minimum payout.
    v
-{pool_sell_request}
+{simple_orderbook · InstantSell listing}
   value: seller RWA + ADA buffer
   datum: pool identity, exact RWA, quantity, quote asset, minimum payout
    |
@@ -164,7 +164,7 @@ The seller accepts an on-chain floor, not a completed sale. The operator publish
 
 ### Reserve-protection boundary
 
-The Team UI refuses a settlement that would take the configured ADA pool below min_cash_reserve. The existing quote-pool validator does not enforce that post-settlement floor for the batcher-acquire/Instant Sell path. This is therefore an operational guard, not sufficient on-chain protection. Do not use custom batcher transactions to bypass it. On-chain price bands and reserve-floor enforcement require an upgraded validator and a deliberate replacement-pool deployment.
+The quote-pool validator enforces the post-settlement floor: `BatcherAcquire` fails unless cash stays at or above `min_cash_reserve` after the payout, and the Team UI checks the same rule before signing. Prices, however, are posted by the batcher without on-chain bands; price discipline remains an operator control.
 
 ## 6. Buy pool-owned inventory
 

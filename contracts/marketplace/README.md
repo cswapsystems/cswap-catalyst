@@ -2,7 +2,7 @@
 
 ## Current contract status
 
-The currently supported Marketplace is the registry-free shared quote-pool path plus the separate asset-admission registry. Its active validator sources are `asset_registry`, `asset_registry_request`, `one_shot`, `quote_pool`, `lp_policy`, `inventory_policy`, and `p2p_listing_simple`. `pool_sell_request` remains in the blueprint only to let pre-existing request UTxOs be cancelled; new settlement uses `p2p_listing_simple`. See the repository-wide [validator inventory](../../docs/VALIDATOR_INVENTORY.md) before deriving any script.
+The currently supported Marketplace is the registry-free shared quote-pool path plus the separate asset-admission registry. Its active validator sources are `asset_registry`, `asset_registry_request`, `one_shot`, `quote_pool`, `lp_policy`, `inventory_policy`, and `p2p_listing_simple`. The legacy `pool_sell_request` source is archived; pre-existing request UTxOs are cancelled through the pinned script in `legacy-request-recovery.json`. See the repository-wide [validator inventory](../../docs/VALIDATOR_INVENTORY.md) before deriving any script.
 
 The legacy oracle/registry and sharded validator families have been moved to `retired-validators/*.ak.disabled`. They are source history only: Aiken does not build them and the application does not load them for new transactions.
 
@@ -259,8 +259,8 @@ withdrawing available cash. While wind-down is active, each receipt-backed
 inventory listing is consumed in a separate transaction and its unsold RWA is
 returned to that LP. The LP then closes the empty reserve. A permissionless
 reserve top-up adds quote cash without minting LP shares. Existing
-`pool_sell_request` UTxOs can only be cancelled; new instant sells use the P2P
-listing contract.
+legacy request UTxOs can only be cancelled (via the pinned recovery script);
+Instant Sell uses `InstantSell` orderbook listings.
 
 ## Current application workflows
 

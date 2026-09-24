@@ -1,8 +1,25 @@
+// Archived: legacy Instant Sell request escrow, superseded by
+// p2p_listing_simple `InstantSell` listings. Owner cancellation of existing
+// request outputs uses the pinned compiled script in
+// ../legacy-request-recovery.json, not this source. Do not deploy.
 use aiken/collection/list
 use cardano/address.{Address}
 use cardano/assets
 use cardano/transaction.{Output, OutputReference, Transaction, find_input}
-use ebecca/types.{AssetClass, PoolSellRequestDatum, ada, quantity_of}
+use ebecca/types.{AssetClass, ada, quantity_of}
+
+// A seller-owned escrow submitted to the shared quote pool. Unlike a direct
+// listing, it is not publicly purchasable: the pool batcher either settles it
+// atomically against the pool or the seller cancels and recovers the asset.
+pub type PoolSellRequestDatum {
+  seller: Address,
+  seller_key: VerificationKeyHash,
+  pool_token: AssetClass,
+  rwa: AssetClass,
+  quantity: Int,
+  quote_asset: AssetClass,
+  min_payout: Int,
+}
 
 pub type PoolSellRequestRedeemer {
   // Retained only so existing request UTxOs can be cancelled and recovered.

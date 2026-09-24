@@ -18,7 +18,6 @@ fresh deployment before its newest source is live on Preprod.
 | Shared pool | `contracts/marketplace/validators/quote_pool.ak` | Shared quote reserve, LP accounting, and pool inventory state | Used by reserve and Team flows. |
 | Shared pool | `contracts/marketplace/validators/lp_policy.ak` | Shared-pool LP mint/burn policy | Used with `quote_pool`. |
 | Shared pool | `contracts/marketplace/validators/inventory_policy.ak` | Receipt policy for pool-owned inventory | Used for batcher acquisition, public sale, and LP wind-down. |
-| Shared pool (legacy compatibility) | `contracts/marketplace/validators/pool_sell_request.ak` | Lets sellers cancel pre-existing request UTxOs; settlement is disabled | Retained in the blueprint only while legacy requests may exist. New Instant Sell uses `p2p_listing_simple`. |
 | Direct marketplace | `contracts/marketplace/validators/p2p_listing_simple.ak` | Registry-free fixed-price listing escrow | Used by the Marketplace listing/buy/cancel flow. |
 | FT DEX | `contracts/dex/validators/factory_bootstrap.ak` | One-shot factory-state NFT policy | Used once per DEX deployment. |
 | FT DEX | `contracts/dex/validators/factory_state.ak` | Factory sequence, pause state, Team admin, and pool-creation authority | Three-party bootstrap source requires a fresh DEX deployment. |
@@ -38,7 +37,13 @@ new deployments.
 | --- | --- |
 | Marketplace legacy/oracle path | `registry`, `oracle`, `marketplace`, `p2p_listing` |
 | Marketplace sharded prototype path | `registry_root`, `policy_shard`, `asset_shard`, `policy_shard_policy`, `asset_shard_policy`, `marketplace_sharded` |
+| Marketplace legacy Instant Sell request | `pool_sell_request` (superseded by `p2p_listing_simple` `InstantSell` listings) |
 | Minter prototype | `stt_one_shot` |
+
+Owners can still cancel pre-existing legacy request and listing outputs from
+Portfolio. Those recovery paths load pinned compiled scripts
+(`contracts/marketplace/legacy-request-recovery.json` and
+`legacy-p2p-listing-simple.json`), never the archived sources.
 
 ## Practical rule
 
