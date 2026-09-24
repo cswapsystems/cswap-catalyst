@@ -18,6 +18,8 @@
 /test-results/
 /playwright-report/
 /dex-deployment.preprod.pending.json
+/marketplace-deployment.preprod.pending.json*
+/marketplace-deployment.preprod.json.tmp
 
 # next.js
 /.next/

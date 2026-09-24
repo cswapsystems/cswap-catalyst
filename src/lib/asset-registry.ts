@@ -1,4 +1,5 @@
 import type { LucidEvolution, Script, UTxO } from "@lucid-evolution/lucid";
+import deployment from "../../marketplace-deployment.preprod.json" with { type: "json" };
 
 type Tools = typeof import("@lucid-evolution/lucid");
 export type RegistryState = { utxo: UTxO; version: bigint; entries: string[]; script: Script; address: string; issuer: string; token: string };
@@ -8,8 +9,8 @@ export const MAX_REGISTRY_ENTRIES = 50;
 export const REGISTRY_REQUEST_DEPOSIT = BigInt(3_000_000);
 // Environment overrides keep emulator/test deployments possible; the fallback
 // is the authenticated identity recorded in marketplace-deployment.preprod.json.
-export const registryToken = process.env.NEXT_PUBLIC_ASSET_REGISTRY_TOKEN || "24a243c3a921e55b01f865c002505f1262b179ccc4e4fb3ef16e82d643535741505f5245474953545259";
-export const registryIssuer = process.env.NEXT_PUBLIC_ASSET_REGISTRY_ISSUER || "6b88f592b89de5b5fac9359aa273184519ea23a538d776565c7220a1";
+export const registryToken = process.env.NEXT_PUBLIC_ASSET_REGISTRY_TOKEN || deployment.registry.token;
+export const registryIssuer = process.env.NEXT_PUBLIC_ASSET_REGISTRY_ISSUER || deployment.registry.issuer;
 export const registryConfigured = Boolean(registryToken && registryIssuer);
 
 export function normalizeUnit(value: string): string {

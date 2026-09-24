@@ -33,11 +33,11 @@ export async function readSharedPool(lucid: LucidEvolution, tools: Tools) {
   // Never pretend one_shot can burn. Final exit remains gated until one is reviewed.
   const scripts: MarketScripts = { orderbook, pool: script, lp, inventory, orderbookAddress: marketplaceOrderbookAddress, poolAddress: marketplacePoolAddress };
   const refs = (marketplaceDeployment as unknown as { referenceScripts?: { txHash: string; outputIndex: number }[] }).referenceScripts || [];
-  if (refs.length) {
-    const outputs = await lucid.utxosByOutRef(refs);
-    if (outputs.length !== refs.length || outputs.some((output) => !output.scriptRef || ![orderbook, script, lp, inventory].some((expected) => tools.validatorToScriptHash(expected) === tools.validatorToScriptHash(output.scriptRef!)))) throw new Error("Configured Marketplace reference scripts are missing or incompatible.");
-    scripts.references = outputs;
-  }
+  if (refs.length !== 4) throw new Error("All four Marketplace reference scripts must be configured before signing.");
+  const outputs = await lucid.utxosByOutRef(refs);
+  const hashes = outputs.map(output => output.scriptRef && tools.validatorToScriptHash(output.scriptRef));
+  if (outputs.length !== 4 || [orderbook, script, lp, inventory].some(expected => !hashes.includes(tools.validatorToScriptHash(expected)))) throw new Error("Configured Marketplace reference scripts are missing or incompatible.");
+  scripts.references = outputs;
   return { ...pool, script, scripts };
 }
 export async function assertMarketWallet(lucid: LucidEvolution, address: string) {

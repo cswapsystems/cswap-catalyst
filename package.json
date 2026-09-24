@@ -5,11 +5,12 @@
   "scripts": {
     "dev": "next dev",
     "build": "next build",
+    "build:preprod": "node scripts/build-preprod.mjs",
     "start": "next start",
     "lint": "eslint",
-    "test:marketplace": "node --experimental-strip-types --test tests/marketplace.test.mjs",
+    "test:marketplace": "node --experimental-strip-types --test tests/marketplace.test.mjs tests/marketplace-deployment.test.mjs",
     "test:registry": "node --experimental-strip-types --test tests/asset-registry.test.mjs",
-    "test:wallet": "node --experimental-strip-types --test tests/wallet-session.test.mjs tests/browser-chain-provider.test.mjs",
+    "test:wallet": "node --experimental-strip-types --test tests/wallet-session.test.mjs tests/browser-chain-provider.test.mjs tests/operator-access.test.mjs",
     "test:wallet-assets": "node --experimental-strip-types --test tests/wallet-assets.test.mjs",
     "test:dex": "node --experimental-strip-types --test tests/dex.test.mjs tests/dex-bootstrap.test.mjs",
     "test:ui": "node --experimental-strip-types --test tests/ui-regressions.test.mjs tests/operator-controls.test.mjs tests/price-book.test.mjs tests/bootstrap-review.test.mjs",
@@ -18,7 +19,7 @@
     "test:navigation": "node --experimental-strip-types --test tests/navigation.test.mjs",
     "test:browser": "playwright test",
     "dex:preprod": "node scripts/dex-preprod.mjs",
-    "marketplace:preprod": "node scripts/marketplace-preprod.mjs"
+    "marketplace:preprod": "node --experimental-strip-types scripts/marketplace-preprod.mjs"
   },
   "dependencies": {
     "@aws-sdk/client-s3": "3.1137.0",

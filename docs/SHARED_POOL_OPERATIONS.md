@@ -4,11 +4,31 @@ This guide implements [the contracts handover](MARKETPLACE_UI_HANDOVER.md). It s
 
 ## Deployment gate
 
-The committed Preprod manifest still describes the previous contracts. New UI signing requires matching orderbook/pool addresses and matching LP/inventory policies derived from the supplied blueprint. Incompatible state is reported as unavailable, never as zero balances. Do not replace addresses without a reviewed deployment and asset migration plan.
+The Preprod manifest records a fresh 14-field marketplace deployment. UI signing requires matching orderbook/pool addresses and matching LP/inventory policies derived from the supplied blueprint. Incompatible state is reported as unavailable, never as zero balances. Do not replace addresses without a reviewed deployment and asset migration plan. The previous deployment is preserved in `supersedes`; its listings, pool funds, registry and requests were not consumed or migrated.
 
-Combined pool/listing transactions need reference scripts to fit ledger limits. After deploying reviewed scripts, add a top-level `referenceScripts` array to the marketplace deployment JSON: entries are exact `{ "txHash": "...", "outputIndex": 0 }` references. The reader fetches and verifies each script hash. Deploy references for orderbook, quote pool, LP policy and inventory policy; the UI does not publish them automatically.
+Combined pool/listing transactions need reference scripts to fit ledger limits. The manifest's `referenceScripts` array contains exact output references for orderbook, quote pool, LP policy and inventory policy. Readers require all four distinct hashes. References live at the separate `referenceCustody` native-script address, recoverable by the Team signature; ordinary wallet coin selection cannot consume them. Do not recover these outputs while this deployment is in use.
 
-The supplied `one_shot` pool identity policy has no burn path. Final LP exit cannot complete with that identity. The UI blocks starting final exit until a reviewed burn-capable identity artifact is integrated. The closing builders are emulator-tested with a **test-only** burn-capable identity, not evidence that the current deployment can close. No contract, identity or deployment is replaced by this UI change.
+The supplied `one_shot` pool identity policy has no burn path. Final LP exit cannot complete with that identity. The UI blocks starting final exit until a reviewed burn-capable identity artifact is integrated. The closing builders are emulator-tested with a **test-only** burn-capable identity, not evidence that this testnet deployment can close. Do not treat this as a production-ready identity policy.
+
+## Deployment and recovery commands
+
+1. Run `npm run marketplace:preprod -- plan-redeploy --replace-registry` for a read-only plan. It builds/evaluates the bootstrap without signing, reports public override mismatches and estimates required test ADA. Omit `--replace-registry` when the existing registry already matches the blueprint.
+2. After explicit approval to spend test ADA and leave old positions untouched, run `npm run marketplace:preprod -- redeploy --confirm-fresh-testnet --replace-registry`. A replacement registry copies the exact approved list/version and issuer from its authenticated prior output. That output is referenced by the bootstrap so a concurrent registry update invalidates the transaction instead of copying stale state.
+3. The ignored `marketplace-deployment.preprod.pending.json` records signed transactions **before** submission. Rerun the same command after a timeout; never delete the journal or manually create a new identity to resolve ambiguous confirmation. A signed reference transaction is rebuilt only when another confirmed journal transaction provably consumed its input; rejected attempts remain in the journal. A leftover `.lock` after a killed process needs inspection before removal; never run concurrent deployers.
+4. The public manifest is atomically replaced only after pool, registry, identities and all four references verify on-chain. Run `npm run marketplace:preprod -- status` to recheck it. `fund <lovelace>` uses the same 14-field transaction builder as the UI and refuses incompatible state. Deployment itself supplies only the 20 tADA protected reserve; it does not create liquidity-provider shares or post prices.
+5. Rebuild/publish the application. Amplify uses `npm run build:preprod`, which takes all marketplace addresses/registry identities from the committed manifest, overriding stale hosting values as one coherent set. Ordinary local `npm run build` still supports explicit `.env.local` overrides; remove stale values or copy the manifest's public values. Never copy the admin seed or the entire local environment into hosting.
+
+The fresh request-enabled registry does not discover or migrate requests against the previous registry. Old requests and old pool funds require their original validators and a separate recovery plan. Publishing new prices, adding LP liquidity and configuring durable off-chain acquisition limits are subsequent operator actions, not part of deployment.
+
+The Operator Console menu and every `/team/...` route require the connected marketplace batcher, configured Team recovery key or DEX factory administrator. Account changes/disconnection revoke UI access. This is a navigation guard; transaction validators and API signature checks remain the authorization boundary. Public registry requests remain available to ordinary wallets.
+
+### Verified fresh Preprod deployment
+
+Bootstrap transaction: `65034d1554e3c56d6e2df241037f45107dbdbbb4bc0e53db22254d2254103e7c`. Exact identities and all four confirmed reference outputs are in `marketplace-deployment.preprod.json`.
+
+Post-deployment checks found 20 tADA cash/protected reserve, zero LP supply, no posted prices, and four matching reference scripts. The replacement registry retained the prior datum exactly (one approved asset and its version). The previous registry output was unchanged; the previous pool still held 120 tADA at its original funding output. No listings, LP balances or old requests were migrated. The reference-script deposits total 88.461920 tADA at the Team-controlled native-script address.
+
+The deployment exposed a Blockfrost indexing delay: transaction confirmation preceded updates to the wallet/address UTxO listings. One rejected reference transaction reused an already-spent input; the journal preserved it and recorded its replacement only after the conflicting input was proven spent by a confirmed transaction. No second pool or registry was created.
 
 ## Roles and pricing
 

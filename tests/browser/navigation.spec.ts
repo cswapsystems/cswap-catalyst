@@ -1,5 +1,6 @@
-import { test, expect } from "@playwright/test";
+import { test, expect, type Page } from "@playwright/test";
 import { CML, PROTOCOL_PARAMETERS_DEFAULT } from "@lucid-evolution/lucid";
+import deployment from "../../marketplace-deployment.preprod.json";
 
 test.beforeEach(async ({ page }) => {
   // Never depend on real credentials or submit a transaction in navigation tests.
@@ -39,9 +40,10 @@ test("More menu works by keyboard, closes on Escape/outside click, and resets af
   await page.getByRole("heading", { name: "Your holdings" }).click();
   await expect(disclosure).not.toHaveAttribute("open", "");
   await summary.click();
-  await page.getByRole("link", { name: "Operator console Approvals, pricing and pool controls" }).click();
-  await expect(page).toHaveURL(/\/team$/);
-  await expect(page.getByRole("navigation", { name: "Operations navigation", exact: true }).getByRole("link", { name: "Overview & requests" })).toHaveAttribute("aria-current", "page");
+  await expect(page.getByRole("link", { name: /Operator console/ })).toHaveCount(0);
+  await expect(page.locator(".header-menu-disabled")).toHaveAttribute("aria-disabled", "true");
+  await page.getByRole("link", { name: "Protocol overview Public deployment statistics" }).click();
+  await expect(page).toHaveURL(/\/protocol$/);
   await expect(page.locator("details[open]")).toHaveCount(0);
 });
 
@@ -93,9 +95,8 @@ test("provider failures remain actionable in the header", async ({ page }) => {
   await expect(page.locator("header").getByRole("alert")).not.toContainText("BigInt");
 });
 
-test("connected wallet menu does not disconnect on open and fits mobile", async ({ page }) => {
-  const addressHex = "60" + "ab".repeat(28);
-  const address = CML.Address.from_hex(addressHex).to_bech32();
+async function mockWallet(page: Page, key = "ab".repeat(28)) {
+  const addressHex = "60" + key;
   await page.route("**/api/blockfrost/epochs/latest/parameters", route => route.fulfill({ json: {
     protocol_major_ver: 10, protocol_minor_ver: 0, min_fee_a: 44, min_fee_b: 155381, max_tx_size: 16384, max_val_size: 5000,
     key_deposit: "2000000", pool_deposit: "500000000", drep_deposit: "500000000", gov_action_deposit: "1000000000",
@@ -103,11 +104,18 @@ test("connected wallet menu does not disconnect on open and fits mobile", async 
     collateral_percent: 150, max_collateral_inputs: 3, min_fee_ref_script_cost_per_byte: 15, cost_models_raw: PROTOCOL_PARAMETERS_DEFAULT.costModels,
   } }));
   await page.addInitScript(hex => {
+    const state = window as typeof window & { testWalletHex: string };
+    state.testWalletHex = hex;
     Object.defineProperty(window, "cardano", { value: { eternl: {
       isEnabled: async () => false,
-      enable: async () => ({ getNetworkId: async () => 0, getUsedAddresses: async () => [hex], getUnusedAddresses: async () => [], getChangeAddress: async () => hex, getUtxos: async () => [], getCollateral: async () => [], getBalance: async () => "00", signTx: async () => { throw new Error("Signing is forbidden in this test"); } }),
+      enable: async () => ({ getNetworkId: async () => 0, getUsedAddresses: async () => [state.testWalletHex], getUnusedAddresses: async () => [], getChangeAddress: async () => state.testWalletHex, getUtxos: async () => [], getCollateral: async () => [], getBalance: async () => "00", signTx: async () => { throw new Error("Signing is forbidden in this test"); } }),
     } } });
   }, addressHex);
+  return CML.Address.from_hex(addressHex).to_bech32();
+}
+
+test("connected wallet menu does not disconnect on open and fits mobile", async ({ page }) => {
+  const address = await mockWallet(page);
   await page.setViewportSize({ width: 320, height: 800 });
   await page.goto("/my-assets");
   await page.locator("header").getByRole("button", { name: "Connect Eternl" }).click();
@@ -119,4 +127,42 @@ test("connected wallet menu does not disconnect on open and fits mobile", async 
   await expect(page.getByRole("link", { name: "Wallet details Address and connection information" })).toBeVisible();
   await page.getByRole("button", { name: "Disconnect wallet", exact: true }).click();
   await expect(page.locator("header").getByRole("button", { name: "Connect Eternl" })).toBeVisible();
+});
+
+test("disconnected direct operator URLs stay locked, while public requests remain available", async ({ page }) => {
+  for (const path of ["/team", "/team/dex", "/team/inventory", "/team/controls", "/team/recovery"]) {
+    await page.goto(path);
+    await expect(page.getByRole("heading", { name: "Connect an operator or Team wallet" })).toBeVisible();
+    await expect(page.getByRole("navigation", { name: "Operations navigation", exact: true })).toHaveCount(0);
+    await expect(page.locator(".team-hero, .price-book-panel, .shared-pool-workspace")).toHaveCount(0);
+  }
+  await page.goto("/registry");
+  await expect(page.locator(".operator-access-card")).toHaveCount(0);
+});
+
+test("ordinary wallet cannot enter the operator console", async ({ page }) => {
+  await mockWallet(page);
+  await page.goto("/team");
+  await page.locator("header").getByRole("button", { name: "Connect Eternl" }).click();
+  await expect(page.getByRole("heading", { name: "This wallet does not have operator access" })).toBeVisible();
+  await expect(page.getByRole("navigation", { name: "Operations navigation", exact: true })).toHaveCount(0);
+});
+
+test("operator access is enabled only while the authorized wallet remains connected", async ({ page }) => {
+  await mockWallet(page, deployment.batcher);
+  await page.goto("/team");
+  await page.locator("header").getByRole("button", { name: "Connect Eternl" }).click();
+  await expect(page.getByRole("heading", { name: "Shared pool capacity" })).toBeVisible();
+  await expect(page.getByRole("navigation", { name: "Operations navigation", exact: true })).toBeVisible();
+  await page.locator("summary").filter({ hasText: "More" }).click();
+  await expect(page.getByRole("link", { name: /Operator console Approvals/ })).toBeVisible();
+  await page.keyboard.press("Escape");
+  await page.evaluate(() => {
+    (window as typeof window & { testWalletHex: string }).testWalletHex = "60" + "ab".repeat(28);
+    window.dispatchEvent(new Event("focus"));
+  });
+  await expect(page.getByRole("heading", { name: "This wallet does not have operator access" })).toBeVisible();
+  await expect(page.getByRole("heading", { name: "Shared pool capacity" })).toHaveCount(0);
+  await page.locator(".operator-access-card").getByRole("button", { name: "Disconnect wallet" }).click();
+  await expect(page.getByRole("heading", { name: "Connect an operator or Team wallet" })).toBeVisible();
 });
