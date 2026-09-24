@@ -48,9 +48,9 @@ async function fixture() {
   const poolPolicyId = t.mintingPolicyToId(poolPolicy);
   const deployment = { admin: key(admin.address), factoryToken, factoryAddress, ammAddress, lpPolicyId, poolPolicyId, bootstrapOfferAddress: offerAddress };
   await submit(lucid.newTx().collectFrom([seed]).mintAssets({ [factoryToken]: 1n }, t.Data.to(data([]))).attach.MintingPolicy(identity).pay.ToContract(factoryAddress, { kind: 'inline', value: t.Data.to(data([asset(factoryToken), key(admin.address), poolPolicyId, 0n, data([])])) }, { lovelace: 5_000_000n, [factoryToken]: 1n }).addSigner(admin.address));
-  async function offer(quote = 'lovelace', buffer = 4_000_000n) {
+  async function offer(quote = 'lovelace', buffer = 4_000_000n, declaredLovelace = buffer) {
     select(owner);
-    await submit(lucid.newTx().pay.ToContract(offerAddress, { kind: 'inline', value: t.Data.to(data([addressData(owner.address), key(owner.address), asset(factoryToken), asset(ft), 1000n, asset(quote), 10_000_000n, buffer, 5000n])) }, { lovelace: buffer, [ft]: 1000n }));
+    await submit(lucid.newTx().pay.ToContract(offerAddress, { kind: 'inline', value: t.Data.to(data([addressData(owner.address), key(owner.address), asset(factoryToken), asset(ft), 1000n, asset(quote), 10_000_000n, declaredLovelace, 5000n])) }, { lovelace: buffer, [ft]: 1000n }));
     return (await lucid.utxosAt(offerAddress))[0];
   }
   async function accept(offerUtxo, quote = 'lovelace', options = {}) {
@@ -139,6 +139,28 @@ test('FT provider may cancel an offer but the Team wallet cannot substitute for 
   f.select(f.owner);
   await f.submit(cancel(f.owner));
   assert.equal((await f.lucid.utxosAt(f.deployment.bootstrapOfferAddress)).length, 0);
+});
+
+test('R04: owner recovers a mismatched-value escrow; non-owners cannot', async () => {
+  const f = await fixture();
+  // Escrow holds 4 ADA + 1,000 FT while its datum declares only 3 ADA, so it
+  // can never be accepted, but the authenticated owner must still recover it.
+  const offer = await f.offer('lovelace', 4_000_000n, 3_000_000n);
+  assert.equal(offer.assets.lovelace, 4_000_000n);
+  assert.equal(offer.assets[ft], 1000n);
+  await assert.rejects(f.accept(offer), /./, 'mismatched escrow must remain unacceptable');
+  const cancel = (who, to = f.owner) => f.lucid.newTx().collectFrom([offer], t.Data.to(new t.Constr(1, []))).attach.SpendingValidator(f.offerScript).pay.ToAddress(to.address, { ...offer.assets }).addSigner(who.address);
+  for (const other of [f.admin, f.provider]) {
+    f.select(other);
+    await assert.rejects(cancel(other).complete(), /./, 'non-owner signer must not cancel');
+    await assert.rejects(cancel(other, other).complete(), /./, 'non-owner must not redirect the escrow');
+  }
+  f.select(f.owner);
+  const before = (await f.lucid.wallet().getUtxos()).reduce((sum, u) => sum + (u.assets[ft] ?? 0n), 0n);
+  await f.submit(cancel(f.owner));
+  assert.equal((await f.lucid.utxosAt(f.deployment.bootstrapOfferAddress)).length, 0);
+  const after = (await f.lucid.wallet().getUtxos()).reduce((sum, u) => sum + (u.assets[ft] ?? 0n), 0n);
+  assert.equal(after - before, 1000n);
 });
 
 test('standard admin creation uses Bootstrap LP redeemer, not MintLp', async () => {

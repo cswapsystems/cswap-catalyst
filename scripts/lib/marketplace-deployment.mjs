@@ -22,6 +22,15 @@ export function deploymentScripts(code, deployment) {
   return { orderbook, orderbookAddress, pool, poolAddress: t.validatorToAddress('Preprod', pool), lp, inventory, registry, registryAddress: t.validatorToAddress('Preprod', registry) };
 }
 
+// Burn-capable one_shot identity, rebuilt from the recorded seed. Deployments
+// without a seed (or minted by an older one_shot) cannot complete closure.
+export function poolIdentity(code, deployment) {
+  const seed = deployment.pool.identitySeed;
+  if (!seed) return undefined;
+  const identity = script(code, 'one_shot.one_shot.mint', [new t.Constr(0, [seed.txHash, BigInt(seed.outputIndex)]), deployment.pool.token.slice(56)]);
+  return t.mintingPolicyToId(identity) === deployment.pool.token.slice(0, 56) ? { script: identity, redeemer: t.Data.to(new t.Constr(0, [])) } : undefined;
+}
+
 export function initialPoolDatum(deployment) {
   return t.Data.to(new t.Constr(0, [deployment.team, deployment.batcher,
     data(deployment.pool.token), data(deployment.pool.lpToken), data(deployment.pool.inventoryToken), new t.Constr(0, ['', '']),
@@ -38,7 +47,7 @@ export function freshDeployment(code, previous, seed, teamKey, registrySnapshot)
   const deployment = {
     schemaVersion: 14, network: 'preprod', team: previous.team, batcher: previous.batcher,
     blueprintDigest: blueprintDigest(code), registry: { ...previous.registry },
-    pool: { token, lpToken: '0'.repeat(56) + lpName, inventoryToken: '0'.repeat(56) + inventoryName, quoteUnit: 'lovelace', minCashReserve: '20000000' },
+    pool: { token, identitySeed: { txHash: seed.txHash, outputIndex: seed.outputIndex }, lpToken: '0'.repeat(56) + lpName, inventoryToken: '0'.repeat(56) + inventoryName, quoteUnit: 'lovelace', minCashReserve: '20000000' },
     referenceScripts: [], supersedes: previous,
   };
   let derived = deploymentScripts(code, deployment), registryIdentity;
@@ -95,5 +104,5 @@ export function assertDeployment(code, deployment, poolUtxo, references) {
   if (marketUnit(pool.poolToken) !== deployment.pool.token || pool.lpUnit !== deployment.pool.lpToken || marketUnit(pool.inventoryToken) !== deployment.pool.inventoryToken || marketUnit(pool.quote) !== deployment.pool.quoteUnit || pool.admin !== deployment.team || pool.batcher !== deployment.batcher) throw new Error('Pool datum does not match deployment identities/roles.');
   const hashes = references.map(ref => ref.scriptRef && t.validatorToScriptHash(ref.scriptRef));
   if (references.length !== 4 || referenceNames.some(name => !hashes.includes(t.validatorToScriptHash(derived[name])))) throw new Error('All four distinct marketplace reference scripts must be present.');
-  return { pool, scripts: { ...derived, references } };
+  return { pool, scripts: { ...derived, references, identity: poolIdentity(code, deployment) } };
 }

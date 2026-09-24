@@ -44,7 +44,14 @@ test('fresh deployment uses real one-shot identities, preserves registry entries
   poolUtxo = await lucid.utxoByUnit(f.deployment.pool.token);
   const pool = decodeSharedPool(t, poolUtxo);
   assert.equal(pool.supply, 50_000_000n);
-  assert.throws(() => buildMarketAction(lucid, t, verified.scripts, account.address, { kind: 'withdraw', burned: pool.supply, acceptZero: true }, pool), /identity policy/);
+  assert.ok(verified.scripts.identity, 'fresh deployments record a burn-capable identity');
+  assert.equal(assertDeployment(code, { ...f.deployment, pool: { ...f.deployment.pool, identitySeed: undefined } }, poolUtxo, refs).scripts.identity, undefined);
+  await submit(buildMarketAction(lucid, t, verified.scripts, account.address, { kind: 'withdraw', burned: pool.supply, acceptZero: true }, pool));
+  const closing = decodeSharedPool(t, await lucid.utxoByUnit(f.deployment.pool.token));
+  assert.equal(closing.supply, 0n);
+  await submit(buildMarketAction(lucid, t, verified.scripts, account.address, { kind: 'complete' }, closing));
+  assert.equal((await lucid.utxosAt(f.deployment.pool.address)).length, 0);
+  assert.equal((await lucid.wallet().getUtxos()).some(u => u.assets[f.deployment.pool.token]), false);
 });
 
 test('submission recovery reuses persisted bytes and never rebuilds an ambiguous transaction', async () => {

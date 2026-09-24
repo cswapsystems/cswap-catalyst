@@ -2,6 +2,7 @@
 
 import { useEffect, useState } from "react";
 import { useWallet } from "./wallet-context";
+import { assertWalletSession } from "@/lib/wallet-guard";
 
 type WalletUtxo = { amount?: Array<{ unit?: string; quantity?: string }> };
 type WalletAsset = { unit: string; quantity: string; name: string; fractionUnit?: string; requiredFractions?: string; owner?: string; recoveryAdmin?: string };
@@ -183,7 +184,7 @@ export default function FractionalizeForm({ initialMode = "split", initialAssetU
       const blueprint = await blueprintResponse.json() as Blueprint & { error?: string };
       if (!blueprintResponse.ok || !blueprint.ftCompiledCode || !blueprint.vaultCompiledCode) throw new Error(blueprint.error || "Unable to load the fractionalization validators.");
       const walletAddress = await lucid.wallet().address();
-      if (walletAddress !== address) throw new Error("The connected wallet changed. Refresh the asset list and try again.");
+      await assertWalletSession(lucid, address);
 
       const vaultValidator = { type: "PlutusV3" as const, script: blueprint.vaultCompiledCode };
       const vaultAddress = validatorToAddress("Preprod", vaultValidator);
@@ -234,6 +235,7 @@ export default function FractionalizeForm({ initialMode = "split", initialAssetU
           .pay.ToAddress(mode === "combine" ? walletAddress : datum.owner, { [datum.nftUnit]: BigInt(1) })
           .addSigner(walletAddress)
           .complete();
+        await assertWalletSession(lucid, address);
         const txHash = await (await tx.sign.withWallet().complete()).submit();
         setMessage((mode === "combine" ? "Combine" : "Partial recovery") + " submitted: " + txHash + ". The fractions were burned and the original asset was returned to " + (mode === "combine" ? "this wallet." : "the recorded owner."));
         setSelectedUnit("");
@@ -264,6 +266,7 @@ export default function FractionalizeForm({ initialMode = "split", initialAssetU
         .pay.ToContract(vaultAddress, { kind: "inline", value: Data.to(vaultDatum) }, { lovelace: BigInt(3_000_000), [selectedAsset.unit]: BigInt(1) })
         .pay.ToAddress(walletAddress, { [fractionUnit]: fractionTotal })
         .complete();
+      await assertWalletSession(lucid, address);
       const txHash = await (await tx.sign.withWallet().complete()).submit();
       setMessage("Fractionalization submitted: " + txHash + ". The NFT is locked in the vault and fractions were sent to your wallet.");
       setSelectedUnit("");

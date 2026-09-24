@@ -1,3 +1,5 @@
+import { gatewayHeaders, sniffGatewayMedia } from "@/lib/ipfs-content";
+
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
 
@@ -11,13 +13,10 @@ export async function GET(_request: Request, context: RouteContext<"/api/ipfs/ga
   for (const gateway of gateways) {
     try {
       const response = await fetch(gateway + cid, { cache: "force-cache" });
-      if (!response.ok || !response.body) continue;
-      return new Response(response.body, {
-        headers: {
-          "content-type": response.headers.get("content-type") ?? "application/octet-stream",
-          "cache-control": "public, max-age=31536000, immutable",
-        },
-      });
+      if (!response.ok) continue;
+      // Upstream content type is attacker-controlled; classify by magic bytes.
+      const body = new Uint8Array(await response.arrayBuffer());
+      return new Response(body, { headers: gatewayHeaders(cid, sniffGatewayMedia(body.subarray(0, 16))) });
     } catch {
       // Try the next gateway; the CID makes every successful response immutable.
     }

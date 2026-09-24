@@ -13,7 +13,7 @@ Parameters:
     Type: String
   WatchedAddresses:
     Type: String
-    Description: JSON array of kind/address objects
+    Description: JSON array of kind/address objects; the registry entry also requires token (identity NFT unit from the deployment manifest registry.token)
   BlockfrostSecretArn:
     Type: String
   EnableIndexer:

@@ -65,13 +65,18 @@ function constructorFields(value) {
   return value.value;
 }
 
+const maxRegistryEntries = 50;
+
+// Mirrors decodeRegistryDatum in src/lib/asset-registry.ts: Constr 0 [version >= 0, [Constr 0 [policy, name]]].
 export function decodeRegistryDatum(hex) {
-  const root = constructorFields(decodePlutusData(hex));
-  if (root.length !== 2 || typeof root[0] !== "bigint" || !Array.isArray(root[1])) throw new Error("Invalid registry datum.");
+  const decoded = decodePlutusData(hex);
+  const root = constructorFields(decoded);
+  if (decoded.tag !== 121 || root.length !== 2 || typeof root[0] !== "bigint" || root[0] < 0n || !Array.isArray(root[1]) || root[1].length > maxRegistryEntries) throw new Error("Invalid registry datum.");
   const assets = root[1].map((entry) => {
     const fields = constructorFields(entry);
-    if (fields.length !== 2 || !(fields[0] instanceof Uint8Array) || !(fields[1] instanceof Uint8Array) || fields[0].length !== 28) throw new Error("Invalid registry asset.");
+    if (entry.tag !== 121 || fields.length !== 2 || !(fields[0] instanceof Uint8Array) || !(fields[1] instanceof Uint8Array) || fields[0].length !== 28 || fields[1].length > 32) throw new Error("Invalid registry asset.");
     return Buffer.from(fields[0]).toString("hex") + Buffer.from(fields[1]).toString("hex");
   });
+  if (new Set(assets).size !== assets.length) throw new Error("Duplicate registry entries.");
   return { version: root[0].toString(), assets };
 }

@@ -8,6 +8,7 @@ import { reviewedOrderbook, readSharedPool } from "@/lib/protocol/shared-pool-cl
 import { fetchPriceBook } from "@/lib/price-book";
 import { scanOutputs } from "@/lib/safe-scan";
 import { formatAda } from "@/lib/ada";
+import { createBrowserChainProvider } from "@/lib/browser-chain-provider";
 
 type Section = { name: string; metrics?: { label: string; value: string }[]; error?: string; note?: string };
 export default function ProtocolStatistics() {
@@ -21,7 +22,7 @@ export default function ProtocolStatistics() {
       const tools = await import("@lucid-evolution/lucid");
       // Read-only instance: protocol parameters are not used for UTxO queries.
       // Avoid making every independent statistic depend on a parameters request.
-      const lucid = await tools.Lucid(new tools.Blockfrost("/api/blockfrost", ""), "Preprod", { presetProtocolParameters: tools.PROTOCOL_PARAMETERS_DEFAULT });
+      const lucid = await tools.Lucid(createBrowserChainProvider(tools), "Preprod", { presetProtocolParameters: tools.PROTOCOL_PARAMETERS_DEFAULT });
       const sources: { name: string; read: () => Promise<Omit<Section, "name"> > }[] = [
         { name: "Marketplace", read: async () => {
           const script = await reviewedOrderbook(tools);

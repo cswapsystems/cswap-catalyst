@@ -123,8 +123,31 @@ fn listing_datum(output: Output) -> Option<SimpleListingDatum> {
   }
 }
 
-fn find_orderbook_input(inputs: List<Input>, address: Address) -> Option<Input> {
-  list.find(inputs, fn(input) { input.output.address == address })
+/// Orderbook inputs settling against this pool: pool-owned inventory
+/// (`inventory == True`) or Instant Sell requests. Sale, acquisition and
+/// closure transitions require exactly one so the pool's accounting and
+/// payment checks cannot be shared across several listings.
+fn pool_orderbook_inputs(
+  inputs: List<Input>,
+  address: Address,
+  pool_token: AssetClass,
+  inventory: Bool,
+) -> List<Input> {
+  list.filter(
+    inputs,
+    fn(input) {
+      input.output.address == address && when listing_datum(input.output) is {
+        Some(found) ->
+          when found.settlement is {
+            QuotePool { pool_token: listed, inventory_token: _, acquisition_cost: _ } ->
+              inventory && listed == pool_token
+            InstantSell { pool_token: listed } -> !inventory && listed == pool_token
+            Direct -> False
+          }
+        None -> False
+      }
+    },
+  )
 }
 
 fn find_orderbook_output(
@@ -417,7 +440,8 @@ validator quote_pool(orderbook_address: Address) {
       }
 
       ReturnClosingInventory { listing, next } -> {
-        expect Some(listing_input) = find_orderbook_input(tx.inputs, orderbook_address)
+        expect [listing_input] =
+          pool_orderbook_inputs(tx.inputs, orderbook_address, pool.pool_token, True)
         expect Some(current_listing) = listing_datum(listing_input.output)
         expect QuotePool {
           pool_token: listing_pool_token,
@@ -427,25 +451,6 @@ validator quote_pool(orderbook_address: Address) {
         expect Some(exit) = pool.closing
         expect Some(next_output) = find_pool_output(tx.outputs, pool_address, next)
         let locked_lovelace = listing_input.output.value |> quantity_of(ada())
-        let inventory_input_count = list.length(
-          list.filter(
-            tx.inputs,
-            fn(input) {
-              if input.output.address == orderbook_address {
-                when listing_datum(input.output) is {
-                  Some(found) -> when found.settlement is {
-                    QuotePool { pool_token, inventory_token: _, acquisition_cost: _ } ->
-                      pool_token == pool.pool_token
-                    _ -> False
-                  }
-                  None -> False
-                }
-              } else {
-                False
-              }
-            },
-          ),
-        )
 
         and {
           pool_token_is_held,
@@ -457,7 +462,6 @@ validator quote_pool(orderbook_address: Address) {
           current_listing.price > 0,
           acquisition_cost > 0,
           listing_input.output.value == listing_value(current_listing, locked_lovelace),
-          inventory_input_count == 1,
           listing.settlement == current_listing.settlement,
           listing.seller == current_listing.seller,
           listing.seller_key == current_listing.seller_key,
@@ -527,7 +531,8 @@ validator quote_pool(orderbook_address: Address) {
       }
 
       BatcherAcquire { inventory, next } -> {
-        expect Some(listing_input) = find_orderbook_input(tx.inputs, orderbook_address)
+        expect [listing_input] =
+          pool_orderbook_inputs(tx.inputs, orderbook_address, pool.pool_token, False)
         expect Some(listing) = listing_datum(listing_input.output)
         expect InstantSell { pool_token } = listing.settlement
         expect Some(price) = quote_for(listing.rwa, pool.prices)
@@ -591,7 +596,8 @@ validator quote_pool(orderbook_address: Address) {
       }
 
       InventorySale { buyer, next } -> {
-        expect Some(listing_input) = find_orderbook_input(tx.inputs, orderbook_address)
+        expect [listing_input] =
+          pool_orderbook_inputs(tx.inputs, orderbook_address, pool.pool_token, True)
         expect Some(listing) = listing_datum(listing_input.output)
         expect Some(next_output) = find_pool_output(tx.outputs, pool_address, next)
         let locked_lovelace = listing_input.output.value |> quantity_of(ada())
@@ -637,7 +643,8 @@ validator quote_pool(orderbook_address: Address) {
       }
 
       Reprice { listing, next } -> {
-        expect Some(listing_input) = find_orderbook_input(tx.inputs, orderbook_address)
+        expect [listing_input] =
+          pool_orderbook_inputs(tx.inputs, orderbook_address, pool.pool_token, True)
         expect Some(current_listing) = listing_datum(listing_input.output)
         expect QuotePool {
           pool_token: listing_pool_token,
@@ -747,4 +754,171 @@ validator quote_pool(orderbook_address: Address) {
   else(_) {
     fail
   }
+}
+
+// Regression fixtures: InventorySale settles exactly one pool-owned listing.
+const reg_pool_address: Address =
+  address.Address {
+    payment_credential: address.Script(
+      #"11111111111111111111111111111111111111111111111111111111",
+    ),
+    stake_credential: None,
+  }
+
+const reg_orderbook_address: Address =
+  address.Address {
+    payment_credential: address.Script(
+      #"22222222222222222222222222222222222222222222222222222222",
+    ),
+    stake_credential: None,
+  }
+
+const reg_buyer: Address =
+  address.Address {
+    payment_credential: address.VerificationKey(
+      #"33333333333333333333333333333333333333333333333333333333",
+    ),
+    stake_credential: None,
+  }
+
+const reg_batcher: VerificationKeyHash =
+  #"99999999999999999999999999999999999999999999999999999999"
+
+const reg_pool_token: AssetClass =
+  AssetClass {
+    policy_id: #"55555555555555555555555555555555555555555555555555555555",
+    asset_name: "POOL",
+  }
+
+const reg_inventory_token: AssetClass =
+  AssetClass {
+    policy_id: #"77777777777777777777777777777777777777777777777777777777",
+    asset_name: "INV",
+  }
+
+const reg_rwa: AssetClass =
+  AssetClass {
+    policy_id: #"88888888888888888888888888888888888888888888888888888888",
+    asset_name: "RWA",
+  }
+
+fn reg_ref(index: Int) -> OutputReference {
+  OutputReference {
+    transaction_id: #"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+    output_index: index,
+  }
+}
+
+fn reg_pool(inventory_count: Int) -> QuotePoolDatum {
+  QuotePoolDatum {
+    admin: reg_batcher,
+    batcher: reg_batcher,
+    pool_token: reg_pool_token,
+    lp_token: AssetClass {
+      policy_id: #"66666666666666666666666666666666666666666666666666666666",
+      asset_name: "LP",
+    },
+    inventory_token: reg_inventory_token,
+    quote_asset: ada(),
+    prices: [],
+    total_lp_supply: 100_000_000,
+    min_cash_reserve: 5_000_000,
+    paused: False,
+    inventory_cost: 40_000_000 * inventory_count,
+    inventory_value: 50_000_000 * inventory_count,
+    inventory_count,
+    closing: None,
+  }
+}
+
+fn reg_listing() -> SimpleListingDatum {
+  SimpleListingDatum {
+    seller: reg_pool_address,
+    seller_key: reg_batcher,
+    settlement: QuotePool {
+      pool_token: reg_pool_token,
+      inventory_token: reg_inventory_token,
+      acquisition_cost: 40_000_000,
+    },
+    rwa: reg_rwa,
+    quantity: 1,
+    price_asset: ada(),
+    price: 50_000_000,
+  }
+}
+
+fn reg_pool_value(lovelace: Int) -> assets.Value {
+  assets.from_lovelace(lovelace)
+    |> assets.add(reg_pool_token.policy_id, reg_pool_token.asset_name, 1)
+}
+
+fn reg_listing_input(index: Int) -> Input {
+  Input {
+    output_reference: reg_ref(index),
+    output: Output {
+      address: reg_orderbook_address,
+      value: listing_value(reg_listing(), 2_000_000),
+      datum: InlineDatum(reg_listing()),
+      reference_script: None,
+    },
+  }
+}
+
+fn reg_sale(listing_count: Int) -> (QuotePoolDatum, QuotePoolDatum, Transaction) {
+  let pool = reg_pool(listing_count)
+  let next =
+    QuotePoolDatum {
+      ..pool,
+      inventory_cost: pool.inventory_cost - 40_000_000,
+      inventory_value: pool.inventory_value - 50_000_000,
+      inventory_count: pool.inventory_count - 1,
+    }
+  let listings =
+    list.map(list.range(1, listing_count), fn(index) { reg_listing_input(index) })
+  let tx =
+    Transaction {
+      ..transaction.placeholder,
+      inputs: [
+        Input {
+          output_reference: reg_ref(0),
+          output: Output {
+            address: reg_pool_address,
+            value: reg_pool_value(100_000_000),
+            datum: InlineDatum(pool),
+            reference_script: None,
+          },
+        },
+        ..listings
+      ],
+      outputs: [
+        Output {
+          address: reg_pool_address,
+          value: reg_pool_value(152_000_000),
+          datum: InlineDatum(next),
+          reference_script: None,
+        },
+        Output {
+          address: reg_buyer,
+          value: assets.from_asset(reg_rwa.policy_id, reg_rwa.asset_name, 1),
+          datum: transaction.NoDatum,
+          reference_script: None,
+        },
+      ],
+      mint: assets.from_asset(
+        reg_inventory_token.policy_id,
+        reg_inventory_token.asset_name,
+        -1,
+      ),
+    }
+  (pool, next, tx)
+}
+
+test inventory_sale_accepts_single_listing() {
+  let (pool, next, tx) = reg_sale(1)
+  quote_pool.spend(reg_orderbook_address, Some(pool), InventorySale { buyer: reg_buyer, next }, reg_ref(0), tx)
+}
+
+test inventory_sale_rejects_several_pool_listings() fail {
+  let (pool, next, tx) = reg_sale(2)
+  quote_pool.spend(reg_orderbook_address, Some(pool), InventorySale { buyer: reg_buyer, next }, reg_ref(0), tx)
 }

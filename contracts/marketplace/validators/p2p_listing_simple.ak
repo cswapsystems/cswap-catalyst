@@ -104,6 +104,27 @@ fn seller_receives_quantity(
   }
 }
 
+/// Owner recovery must not depend on the escrow matching its datum: a
+/// listing holding extra ADA or tokens is returned whole to the seller.
+fn seller_receives_escrow(
+  outputs: List<Output>,
+  seller: Address,
+  escrow: assets.Value,
+) -> Bool {
+  list.any(
+    outputs,
+    fn(output) {
+      output.address == seller && list.all(
+        assets.flatten(escrow),
+        fn(entry) {
+          let (policy_id, asset_name, quantity) = entry
+          assets.quantity_of(output.value, policy_id, asset_name) >= quantity
+        },
+      )
+    },
+  )
+}
+
 fn listing_is_valid(listing: SimpleListingDatum) -> Bool {
   and {
     listing.quantity > 0,
@@ -166,18 +187,59 @@ fn seller_is_paid(
   }
 }
 
+/// Direct purchases tag the seller payment with the listing's own output
+/// reference. Without the tag one payment output could satisfy several
+/// listings from the same seller in a single transaction.
+fn seller_is_paid_for(
+  outputs: List<Output>,
+  listing: SimpleListingDatum,
+  locked_lovelace: Int,
+  own_ref: OutputReference,
+) -> Bool {
+  list.any(
+    outputs,
+    fn(output) {
+      and {
+        output.address == listing.seller,
+        output.datum == InlineDatum(own_ref),
+        if listing.price_asset == ada() {
+          quantity_of(output.value, ada()) >= listing.price + locked_lovelace
+        } else {
+          and {
+            quantity_of(output.value, listing.price_asset) >= listing.price,
+            quantity_of(output.value, ada()) >= locked_lovelace,
+          }
+        },
+      }
+    },
+  )
+}
+
+/// A pool-owned listing may only be bought through the pool's `InventorySale`
+/// transition. Every pool redeemer fixes the exact receipt mint, and only
+/// `InventorySale` / `ReturnClosingInventory` burn one, so requiring a single
+/// burn with no receipt left in any output rules out e.g. a 1-lovelace
+/// `AddFunds` whose existing balance would otherwise "pay" the listing. By
+/// balance it also limits the transaction to one receipt-backed listing.
+fn pool_receipt_is_burned(tx: Transaction, listing: SimpleListingDatum) -> Bool {
+  when listing.settlement is {
+    QuotePool { inventory_token, pool_token: _, acquisition_cost: _ } ->
+      and {
+        quantity_of(tx.mint, inventory_token) == -1,
+        list.all(
+          tx.outputs,
+          fn(output) { quantity_of(output.value, inventory_token) == 0 },
+        ),
+      }
+    _ -> False
+  }
+}
+
 fn seller_can_manage_listing(listing: SimpleListingDatum) -> Bool {
   when listing.settlement is {
     Direct -> True
     InstantSell { pool_token: _ } -> True
     QuotePool { pool_token: _, inventory_token: _, acquisition_cost: _ } -> False
-  }
-}
-
-fn is_direct_listing(listing: SimpleListingDatum) -> Bool {
-  when listing.settlement is {
-    Direct -> True
-    _ -> False
   }
 }
 
@@ -286,31 +348,27 @@ validator p2p_listing_simple {
 
         and {
           listing_is_valid(listing),
-          is_direct_listing(listing) || when listing.settlement is {
-            QuotePool { pool_token: _, inventory_token: _, acquisition_cost: _ } -> True
-            _ -> False
-          },
           listing_escrow_is_exact(own_input.output.value, listing, locked_lovelace),
-          seller_is_paid(tx.outputs, listing, locked_lovelace),
-          pool_sale_is_atomic(tx, listing),
+          when listing.settlement is {
+            Direct ->
+              seller_is_paid_for(tx.outputs, listing, locked_lovelace, own_ref)
+            QuotePool { pool_token: _, inventory_token: _, acquisition_cost: _ } ->
+              and {
+                seller_is_paid(tx.outputs, listing, locked_lovelace),
+                pool_sale_is_atomic(tx, listing),
+                pool_receipt_is_burned(tx, listing),
+              }
+            InstantSell { pool_token: _ } -> False
+          },
           paid_at_least(tx.outputs, buyer, listing.rwa, listing.quantity),
         }
       }
 
       Cancel -> {
-        let locked_lovelace = own_input.output.value |> quantity_of(ada())
-
         and {
           seller_can_manage_listing(listing),
-          listing_escrow_is_exact(own_input.output.value, listing, locked_lovelace),
           list.has(tx.extra_signatories, listing.seller_key),
-          seller_receives_quantity(
-            tx.outputs,
-            listing.seller,
-            listing.rwa,
-            listing.quantity,
-          ),
-          paid_at_least(tx.outputs, listing.seller, ada(), locked_lovelace),
+          seller_receives_escrow(tx.outputs, listing.seller, own_input.output.value),
         }
       }
 
@@ -565,4 +623,305 @@ test pool_listing_escrow_requires_inventory_receipt() {
     listing_escrow_is_exact(exact, listing, 2_000_000),
     listing_escrow_is_exact(missing_receipt, listing, 2_000_000) == False,
   }
+}
+
+// Regression fixtures: a pool-owned listing and direct listings spent together
+// with other inputs, to prove each purchase is paid for exactly once.
+const reg_pool_address: Address =
+  address.Address {
+    payment_credential: address.Script(
+      #"11111111111111111111111111111111111111111111111111111111",
+    ),
+    stake_credential: None,
+  }
+
+const reg_orderbook_address: Address =
+  address.Address {
+    payment_credential: address.Script(
+      #"22222222222222222222222222222222222222222222222222222222",
+    ),
+    stake_credential: None,
+  }
+
+const reg_buyer: Address =
+  address.Address {
+    payment_credential: address.VerificationKey(
+      #"33333333333333333333333333333333333333333333333333333333",
+    ),
+    stake_credential: None,
+  }
+
+const reg_batcher: VerificationKeyHash =
+  #"99999999999999999999999999999999999999999999999999999999"
+
+fn reg_ref(index: Int) -> OutputReference {
+  OutputReference {
+    transaction_id: #"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+    output_index: index,
+  }
+}
+
+fn reg_pool() -> QuotePoolDatum {
+  QuotePoolDatum {
+    admin: reg_batcher,
+    batcher: reg_batcher,
+    pool_token: test_pool_token,
+    lp_token: test_extra_asset,
+    inventory_token: test_inventory_token,
+    quote_asset: ada(),
+    prices: [],
+    total_lp_supply: 100_000_000,
+    min_cash_reserve: 5_000_000,
+    paused: False,
+    inventory_cost: 80_000_000,
+    inventory_value: 100_000_000,
+    inventory_count: 2,
+    closing: None,
+  }
+}
+
+fn reg_pool_listing() -> SimpleListingDatum {
+  SimpleListingDatum {
+    seller: reg_pool_address,
+    seller_key: reg_batcher,
+    settlement: QuotePool {
+      pool_token: test_pool_token,
+      inventory_token: test_inventory_token,
+      acquisition_cost: 40_000_000,
+    },
+    rwa: test_rwa,
+    quantity: 1,
+    price_asset: ada(),
+    price: 50_000_000,
+  }
+}
+
+fn reg_pool_value(lovelace: Int) -> assets.Value {
+  assets.from_lovelace(lovelace)
+    |> assets.add(test_pool_token.policy_id, test_pool_token.asset_name, 1)
+}
+
+fn reg_pool_input() -> Input {
+  Input {
+    output_reference: reg_ref(0),
+    output: Output {
+      address: reg_pool_address,
+      value: reg_pool_value(100_000_000),
+      datum: InlineDatum(reg_pool()),
+      reference_script: None,
+    },
+  }
+}
+
+fn reg_pool_listing_input(index: Int) -> Input {
+  Input {
+    output_reference: reg_ref(index),
+    output: Output {
+      address: reg_orderbook_address,
+      value: listing_escrow_value(reg_pool_listing(), 2_000_000),
+      datum: InlineDatum(reg_pool_listing()),
+      reference_script: None,
+    },
+  }
+}
+
+fn reg_output(to: Address, value: assets.Value) -> Output {
+  Output { address: to, value, datum: transaction.NoDatum, reference_script: None }
+}
+
+fn reg_pool_output(lovelace: Int) -> Output {
+  Output {
+    address: reg_pool_address,
+    value: reg_pool_value(lovelace),
+    datum: InlineDatum(reg_pool()),
+    reference_script: None,
+  }
+}
+
+fn reg_receipt_burn() -> assets.Value {
+  assets.from_asset(
+    test_inventory_token.policy_id,
+    test_inventory_token.asset_name,
+    -1,
+  )
+}
+
+test pool_listing_buy_accepts_inventory_sale_shape() {
+  let tx =
+    Transaction {
+      ..transaction.placeholder,
+      inputs: [reg_pool_input(), reg_pool_listing_input(1)],
+      outputs: [
+        reg_pool_output(152_000_000),
+        reg_output(reg_buyer, assets.from_asset(test_rwa.policy_id, test_rwa.asset_name, 1)),
+      ],
+      mint: reg_receipt_burn(),
+    }
+
+  p2p_listing_simple.spend(Some(reg_pool_listing()), Buy { buyer: reg_buyer }, reg_ref(1), tx)
+}
+
+// The pool is re-created by a 1-lovelace AddFunds; its existing balance used to
+// count as payment while the buyer walked off with the RWA and the receipt.
+test pool_listing_buy_rejects_addfunds_spend() fail {
+  let tx =
+    Transaction {
+      ..transaction.placeholder,
+      inputs: [reg_pool_input(), reg_pool_listing_input(1)],
+      outputs: [
+        reg_pool_output(100_000_001),
+        reg_output(reg_buyer, listing_escrow_value(reg_pool_listing(), 2_000_000)),
+      ],
+    }
+
+  p2p_listing_simple.spend(Some(reg_pool_listing()), Buy { buyer: reg_buyer }, reg_ref(1), tx)
+}
+
+// Two pool listings, one paid sale: the second listing's receipt survives in
+// an output, so the piggybacking purchase is rejected.
+test pool_listing_buy_rejects_second_listing_in_sale() fail {
+  let tx =
+    Transaction {
+      ..transaction.placeholder,
+      inputs: [reg_pool_input(), reg_pool_listing_input(1), reg_pool_listing_input(2)],
+      outputs: [
+        reg_pool_output(152_000_000),
+        reg_output(
+          reg_buyer,
+          listing_escrow_value(reg_pool_listing(), 0)
+            |> assets.add(test_rwa.policy_id, test_rwa.asset_name, 1),
+        ),
+      ],
+      mint: reg_receipt_burn(),
+    }
+
+  p2p_listing_simple.spend(Some(reg_pool_listing()), Buy { buyer: reg_buyer }, reg_ref(2), tx)
+}
+
+fn reg_direct() -> SimpleListingDatum {
+  SimpleListingDatum {
+    seller: test_seller,
+    seller_key: #"eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee",
+    settlement: Direct,
+    rwa: test_rwa,
+    quantity: 1,
+    price_asset: ada(),
+    price: 10_000_000,
+  }
+}
+
+fn reg_direct_input(index: Int) -> Input {
+  Input {
+    output_reference: reg_ref(index),
+    output: Output {
+      address: reg_orderbook_address,
+      value: listing_value(test_rwa, 1, 2_000_000),
+      datum: InlineDatum(reg_direct()),
+      reference_script: None,
+    },
+  }
+}
+
+fn reg_seller_payment(tag: Option<OutputReference>) -> Output {
+  Output {
+    address: test_seller,
+    value: assets.from_lovelace(12_000_000),
+    datum: when tag is {
+      Some(own_ref) -> InlineDatum(own_ref)
+      None -> transaction.NoDatum
+    },
+    reference_script: None,
+  }
+}
+
+test direct_buy_accepts_tagged_payment() {
+  let tx =
+    Transaction {
+      ..transaction.placeholder,
+      inputs: [reg_direct_input(1)],
+      outputs: [
+        reg_seller_payment(Some(reg_ref(1))),
+        reg_output(reg_buyer, listing_value(test_rwa, 1, 2_000_000)),
+      ],
+    }
+
+  p2p_listing_simple.spend(Some(reg_direct()), Buy { buyer: reg_buyer }, reg_ref(1), tx)
+}
+
+test direct_buy_rejects_untagged_payment() fail {
+  let tx =
+    Transaction {
+      ..transaction.placeholder,
+      inputs: [reg_direct_input(1)],
+      outputs: [
+        reg_seller_payment(None),
+        reg_output(reg_buyer, listing_value(test_rwa, 1, 2_000_000)),
+      ],
+    }
+
+  p2p_listing_simple.spend(Some(reg_direct()), Buy { buyer: reg_buyer }, reg_ref(1), tx)
+}
+
+// One 12-ADA payment previously bought two 10-ADA listings from the same seller.
+test direct_buy_rejects_shared_payment() fail {
+  let tx =
+    Transaction {
+      ..transaction.placeholder,
+      inputs: [reg_direct_input(1), reg_direct_input(2)],
+      outputs: [
+        reg_seller_payment(Some(reg_ref(1))),
+        reg_output(reg_buyer, listing_value(test_rwa, 2, 4_000_000)),
+      ],
+    }
+
+  p2p_listing_simple.spend(Some(reg_direct()), Buy { buyer: reg_buyer }, reg_ref(2), tx)
+}
+
+fn reg_cancel_tx(escrow: assets.Value, refund: assets.Value, signer: VerificationKeyHash) -> Transaction {
+  Transaction {
+    ..transaction.placeholder,
+    inputs: [
+      Input {
+        output_reference: reg_ref(1),
+        output: Output {
+          address: reg_orderbook_address,
+          value: escrow,
+          datum: InlineDatum(reg_direct()),
+          reference_script: None,
+        },
+      },
+    ],
+    outputs: [reg_output(test_seller, refund)],
+    extra_signatories: [signer],
+  }
+}
+
+// The escrow holds more than its datum declares; the seller still recovers it.
+test cancel_returns_escrow_with_unlisted_assets() {
+  let escrow =
+    listing_value(test_rwa, 1, 3_000_000)
+      |> assets.add(test_extra_asset.policy_id, test_extra_asset.asset_name, 5)
+  p2p_listing_simple.spend(
+    Some(reg_direct()),
+    Cancel,
+    reg_ref(1),
+    reg_cancel_tx(escrow, escrow, reg_direct().seller_key),
+  )
+}
+
+test cancel_rejects_partial_refund() fail {
+  let escrow =
+    listing_value(test_rwa, 1, 3_000_000)
+      |> assets.add(test_extra_asset.policy_id, test_extra_asset.asset_name, 5)
+  p2p_listing_simple.spend(
+    Some(reg_direct()),
+    Cancel,
+    reg_ref(1),
+    reg_cancel_tx(escrow, listing_value(test_rwa, 1, 3_000_000), reg_direct().seller_key),
+  )
+}
+
+test cancel_rejects_non_seller() fail {
+  let escrow = listing_value(test_rwa, 1, 2_000_000)
+  p2p_listing_simple.spend(Some(reg_direct()), Cancel, reg_ref(1), reg_cancel_tx(escrow, escrow, reg_batcher))
 }

@@ -139,11 +139,6 @@ test inventory_receipt_burn_allows_batch_exit_burns() {
     test_receipt_name,
     -1,
   )
-  let invalid_mint = assets.zero |> assets.add(
-    test_receipt_policy,
-    test_receipt_name,
-    0,
-  )
 
   and {
     inventory_policy.mint(
@@ -161,14 +156,18 @@ test inventory_receipt_burn_allows_batch_exit_burns() {
       BurnInventory,
       test_receipt_policy,
       test_tx(assets.zero |> assets.add(test_receipt_policy, test_receipt_name, -2), []),
-    ),
-    inventory_policy.mint(
-      test_pool_token,
-      test_receipt_name,
-      test_batcher,
-      BurnInventory,
-      test_receipt_policy,
-      test_tx(invalid_mint, []),
-    ) == False,
+    )
   }
+}
+
+// A zero quantity leaves no entry under the policy, so the policy aborts.
+test inventory_receipt_policy_rejects_empty_mint() fail {
+  inventory_policy.mint(
+    test_pool_token,
+    test_receipt_name,
+    test_batcher,
+    BurnInventory,
+    test_receipt_policy,
+    test_tx(assets.zero, []),
+  )
 }

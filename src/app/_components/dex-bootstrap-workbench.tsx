@@ -2,6 +2,7 @@
 
 import { FormEvent, useCallback, useEffect, useMemo, useState } from "react";
 import { useWallet } from "./wallet-context";
+import { assertWalletSession, isWalletChangedError } from "@/lib/wallet-guard";
 import { formatAda } from "@/lib/ada";
 import { reviewBootstrapTransaction } from "@/lib/bootstrap-review";
 import { decodeCardanoAddress } from "@/lib/address-codec";
@@ -59,6 +60,7 @@ type ApprovalRequest = {
   offerId: string;
   transactionCbor: string;
   providerWitness: string;
+  providerAddress: string;
 };
 type TeamReview = Awaited<ReturnType<typeof reviewBootstrapTransaction>>;
 
@@ -187,7 +189,7 @@ async function loadContext(tools: Tools): Promise<Context> {
 }
 
 export default function DexBootstrapWorkbench() {
-  const { address, lucid, connect } = useWallet();
+  const { address, lucid, connect, disconnect } = useWallet();
   const [context, setContext] = useState<Context | null>(null);
   const [offers, setOffers] = useState<Offer[]>([]);
   const [form, setForm] = useState<Form>(initialForm);
@@ -201,6 +203,17 @@ export default function DexBootstrapWorkbench() {
   const [teamAcknowledged, setTeamAcknowledged] = useState(false);
   const [returnedTeamWitness, setReturnedTeamWitness] = useState("");
   const [pendingHash, setPendingHash] = useState("");
+  // Survives the disconnect-triggered refresh so the user sees why a reconnect is required.
+  const [sessionError, setSessionError] = useState("");
+
+  // R07: on an account/network change, drop every prepared request, review and
+  // witness built for the previous account and require an explicit reconnect.
+  function handleSessionChange(cause: unknown) {
+    if (!isWalletChangedError(cause)) return false;
+    setApprovalRequest(null); setTeamReview(null); setTeamAcknowledged(false); setTeamWitness(""); setReturnedTeamWitness("");
+    setOffers([]); setSessionError(cause.message); disconnect();
+    return true;
+  }
 
   const refresh = useCallback(async () => {
     setMessage(null);
@@ -213,6 +226,7 @@ export default function DexBootstrapWorkbench() {
         setOffers([]);
         return;
       }
+      setSessionError("");
       const ownerKey = address && tools.getAddressDetails(address).paymentCredential?.type === "Key" ? tools.getAddressDetails(address).paymentCredential?.hash : undefined;
       const found: Offer[] = [];
       for (const utxo of await lucid.utxosAt(next.bootstrapAddress)) {
@@ -263,6 +277,7 @@ export default function DexBootstrapWorkbench() {
     setLoading(true);
     setMessage(null);
     try {
+      await assertWalletSession(lucid, address);
       const tools = await import("@lucid-evolution/lucid");
       const details = tools.getAddressDetails(address);
       if (details.paymentCredential?.type !== "Key") throw new Error("The FT-owner wallet needs a payment-key address.");
@@ -306,11 +321,14 @@ export default function DexBootstrapWorkbench() {
       const tx = lucid.newTx()
         .pay.ToContract(context.bootstrapAddress, { kind: "inline", value: offerDatum }, offerAssets)
         .addSigner(address);
-      const hash = await (await (await tx.complete()).sign.withWallet().complete()).submit();
+      const completed = await tx.complete();
+      await assertWalletSession(lucid, address);
+      const hash = await (await completed.sign.withWallet().complete()).submit();
       setPendingHash(hash);
       setForm(initialForm);
       await checkConfirmation(hash);
     } catch (cause) {
+      if (handleSessionChange(cause)) return;
       setMessage({ kind: "error", text: cause instanceof Error ? cause.message : "The bootstrap offer could not be submitted." });
     } finally {
       setLoading(false);
@@ -325,6 +343,7 @@ export default function DexBootstrapWorkbench() {
     setLoading(true);
     setMessage(null);
     try {
+      await assertWalletSession(lucid, address);
       const tools = await import("@lucid-evolution/lucid");
       const provider = tools.getAddressDetails(address).paymentCredential;
       if (!provider || provider.type !== "Key") throw new Error("The liquidity-provider wallet needs a payment-key address.");
@@ -364,11 +383,13 @@ export default function DexBootstrapWorkbench() {
       const completed = await tx.complete();
       const reviewed = await reviewBootstrapTransaction(tools, lucid, completed.toCBOR(), context.deployment, decodeCardanoAddress);
       if (!reviewed.result.ok) throw new Error(reviewed.result.issues.join(" "));
+      await assertWalletSession(lucid, address);
       const providerWitness = await completed.partialSign.withWallet();
-      setApprovalRequest({ offerId: offer.id, transactionCbor: completed.toCBOR(), providerWitness });
+      setApprovalRequest({ offerId: offer.id, transactionCbor: completed.toCBOR(), providerWitness, providerAddress: address });
       setReturnedTeamWitness("");
       setMessage({ kind: "success", text: "Quote-side signature created. Send the approval transaction to the Team creator for review and signature." });
     } catch (cause) {
+      if (handleSessionChange(cause)) return;
       setMessage({ kind: "error", text: cause instanceof Error ? cause.message : "The approval request could not be prepared." });
     } finally {
       setLoading(false);
@@ -409,14 +430,16 @@ export default function DexBootstrapWorkbench() {
     if (!teamReview || teamReview.transaction !== transaction || !teamReview.result.ok || !teamAcknowledged) { setMessage({ kind: "error", text: "Review the exact bootstrap transaction and confirm its terms before signing." }); return; }
     setLoading(true); setMessage(null);
     try {
+      await assertWalletSession(lucid, address);
       const team = (await import("@lucid-evolution/lucid")).getAddressDetails(address).paymentCredential;
       if (!team || team.type !== "Key" || team.hash !== context.deployment.admin) throw new Error("Only the configured Team creator can approve this bootstrap transaction.");
       const fresh = await reviewBootstrapTransaction(await import("@lucid-evolution/lucid"), lucid, transaction, context.deployment, decodeCardanoAddress);
       if (!fresh.result.ok) throw new Error(fresh.result.issues.join(" "));
+      await assertWalletSession(lucid, address);
       const witness = await lucid.fromTx(transaction).partialSign.withWallet();
       setTeamWitness(witness);
       setMessage({ kind: "success", text: "Team approval witness created. Return this witness to the liquidity provider for final submission." });
-    } catch (cause) { setMessage({ kind: "error", text: cause instanceof Error ? cause.message : "The Team approval could not be created." }); }
+    } catch (cause) { if (handleSessionChange(cause)) return; setMessage({ kind: "error", text: cause instanceof Error ? cause.message : "The Team approval could not be created." }); }
     finally { setLoading(false); }
   }
 
@@ -428,6 +451,8 @@ export default function DexBootstrapWorkbench() {
     setLoading(true);
     setMessage(null);
     try {
+      // The prepared request pays LP to, and was witnessed by, the provider account.
+      await assertWalletSession(lucid, approvalRequest.providerAddress);
       const team = returnedTeamWitness.trim();
       if (!/^[0-9a-f]+$/i.test(team)) throw new Error("Paste the Team creator's hexadecimal witness before submitting.");
       const review = await reviewBootstrapTransaction(await import("@lucid-evolution/lucid"), lucid, approvalRequest.transactionCbor, context.deployment, decodeCardanoAddress);
@@ -435,12 +460,14 @@ export default function DexBootstrapWorkbench() {
       const signed = await lucid.fromTx(approvalRequest.transactionCbor)
         .assemble([approvalRequest.providerWitness, team])
         .complete();
+      await assertWalletSession(lucid, approvalRequest.providerAddress);
       const hash = await signed.submit();
       setPendingHash(hash);
       setApprovalRequest(null);
       setReturnedTeamWitness("");
       await checkConfirmation(hash);
     } catch (cause) {
+      if (handleSessionChange(cause)) return;
       setMessage({ kind: "error", text: cause instanceof Error ? cause.message : "The Team-approved bootstrap could not be submitted." });
     } finally {
       setLoading(false);
@@ -455,16 +482,20 @@ export default function DexBootstrapWorkbench() {
     setLoading(true);
     setMessage(null);
     try {
+      await assertWalletSession(lucid, address);
       const tools = await import("@lucid-evolution/lucid");
       const tx = lucid.newTx()
         .collectFrom([offer.utxo], tools.Data.to(new tools.Constr(1, []) as import("@lucid-evolution/lucid").Data))
         .attach.SpendingValidator(context.scripts.offer)
         .pay.ToAddress(offer.owner, { ...offer.utxo.assets })
         .addSigner(address);
-      const hash = await (await (await tx.complete()).sign.withWallet().complete()).submit();
+      const completed = await tx.complete();
+      await assertWalletSession(lucid, address);
+      const hash = await (await completed.sign.withWallet().complete()).submit();
       setPendingHash(hash);
       await checkConfirmation(hash);
     } catch (cause) {
+      if (handleSessionChange(cause)) return;
       setMessage({ kind: "error", text: cause instanceof Error ? cause.message : "The offer could not be cancelled." });
     } finally {
       setLoading(false);
@@ -499,6 +530,7 @@ export default function DexBootstrapWorkbench() {
       <fieldset className="dex-quote-choice"><legend>Quote side</legend><div className="segmented-control"><button type="button" className={form.quoteKind === "ada" ? "selected" : ""} onClick={() => update("quoteKind", "ada")}>tADA</button><button type="button" className={form.quoteKind === "usdcx" ? "selected" : ""} onClick={() => update("quoteKind", "usdcx")}>USDCx</button></div><div className="dex-form-grid">{form.quoteKind === "usdcx" && <label className="field field-wide"><span className="field-label">USDCx asset unit</span><input value={form.usdcxUnit} onChange={(event) => update("usdcxUnit", event.target.value)} placeholder="Policy ID + asset name in hex" required /></label>}<label className="field"><span className="field-label">{form.quoteKind === "ada" ? "Final tADA reserve" : "Final USDCx reserve"}</span><input inputMode="numeric" pattern="[0-9]+" value={form.quoteAmount} onChange={(event) => update("quoteAmount", event.target.value)} required /><span className="field-hint">{form.quoteKind === "ada" ? "Whole tADA; the LP funds the balance after the locked buffer." : "Smallest USDCx units; the LP funds the full quote reserve."}</span></label><label className="field"><span className="field-label">Pool ADA buffer</span><input inputMode="numeric" pattern="[0-9]+" value={form.poolAda} onChange={(event) => update("poolAda", event.target.value)} required /><span className="field-hint">At least 2 tADA, locked with the FT to keep the escrow and token/token pool valid.</span></label></div></fieldset>
       <div className="form-footer"><p><span className="status-dot" />{lucid ? " Eternl connected — review the on-chain terms before signing." : " Connect Eternl to lock the FT side."}</p>{!lucid ? <button type="button" className="primary-button" onClick={() => void connect()} disabled={loading}>Connect wallet</button> : <button type="submit" className="primary-button" disabled={loading || !context}>{loading ? "Awaiting wallet…" : "Create bootstrap offer"} <span className="button-arrow">↗</span></button>}</div>
     </form>
+    {sessionError && <p className="form-message error-message" role="alert">{sessionError}</p>}
     {message && <p className={"form-message " + (message.kind === "error" ? "error-message" : "success-message")} role={message.kind === "error" ? "alert" : "status"}>{message.text}</p>}
     {approvalRequest && <section className="dex-bootstrap-handoff">
       <span className="section-kicker">Step 2 complete · send to Team</span><h3>LP signature ready</h3>

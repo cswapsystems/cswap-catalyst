@@ -41,7 +41,7 @@ export default function ReservesWorkbench({ revision = 0 }: { revision?: number 
         const result = lpWithdrawal(pool, BigInt(amount)); final = result.final;
         if (BigInt(amount) > held) throw new Error("Burn exceeds your wallet LP balance.");
         if (result.amount === BigInt(0) && !acceptZero) throw new Error("Confirm the zero-cash burn explicitly.");
-        if (final && !pool.scripts.identity) throw new Error("Final exit is blocked: the handover does not include a reviewed burn-capable pool identity policy. Existing one_shot identities cannot burn.");
+        if (final && !pool.scripts.identity) throw new Error("Final exit is blocked: this deployment records no burn-capable pool identity policy.");
         if (final && !acceptExit) throw new Error("Confirm final exit and inventory recovery.");
         preview = "Burn " + amount + " LP units for " + display(result.amount) + (final ? ". Starts final LP exit." : ". This is cash-only; unsold inventory stays in the pool.");
       } else preview = "Donate " + display(BigInt(amount)) + " to reserve cash. No LP shares minted.";
@@ -64,7 +64,7 @@ export default function ReservesWorkbench({ revision = 0 }: { revision?: number 
       {pool.closing ? <section className="execution-preview"><h3>Final LP exit in progress</h3><code>{pool.closing.recipient}</code><p>{pool.count.toString()} listings still to return, one transaction per listing. Only the recorded LP signs recovery.</p>
         {inventory?.listings.map((listing) => <div className="position-card" key={listing.id}><div><code>{listing.unit}</code><p>{listing.quantity.toString()} units</p></div><button type="button" disabled={blocked || address !== pool.closing?.recipient} onClick={() => void execute({ kind: "return", listing })}>Return to exiting LP</button></div>)}
         <button type="button" className="primary-button" disabled={blocked || Boolean(pool.count || pool.cost || pool.inventory) || address !== pool.closing.recipient || !pool.scripts.identity} onClick={() => void execute({ kind: "complete" })}>Complete exit</button>
-        {!pool.scripts.identity && <p role="alert">Completion requires a reviewed burn-capable identity policy. The current one_shot policy cannot burn; no safe completion script is configured.</p>}
+        {!pool.scripts.identity && <p role="alert">Completion requires a burn-capable pool identity. This deployment predates it, so closure cannot complete.</p>}
       </section> : <fieldset className="module-fieldset" disabled={blocked}>
         <div className="segmented-control">{(["deposit", "withdraw", "topup"] as const).map((item) => <button type="button" className={mode === item ? "selected" : ""} key={item} onClick={() => { setMode(item); setAmount(""); setAcceptZero(false); setAcceptExit(false); }}>{item === "deposit" ? "LP deposit" : item === "withdraw" ? "Cash-only LP withdrawal" : "Top up (no shares)"}</button>)}</div>
         <label className="field"><span>{mode === "withdraw" ? "LP base units to burn" : "Quote base units to add"}</span><input inputMode="numeric" value={amount} onChange={(event) => { setAmount(event.target.value); setAcceptZero(false); setAcceptExit(false); }} /></label>

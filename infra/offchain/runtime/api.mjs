@@ -9,6 +9,11 @@ function publicItem(item) {
   const { PK, SK, GSI1PK, GSI1SK, ...value } = item;
   return value;
 }
+// "synced" = authenticated (possibly empty) registry; "failed" = serving the last good set; "unavailable" = never synced.
+async function registryStatus(store) {
+  const status = await store.get("REGISTRY#STATUS", "STATUS");
+  return status ? publicItem(status) : { state: "unavailable" };
+}
 function encodeCursor(key) { return key ? Buffer.from(JSON.stringify(key)).toString("base64url") : null; }
 function decodeCursor(raw) {
   if (!raw) return undefined;
@@ -28,13 +33,13 @@ export function createApiHandler({ store, network }) {
         return checkpoint ? response(200, publicItem(checkpoint), { "cache-control": "no-store" }) : response(503, { error: "Indexer has not completed its first sync.", network }, { "cache-control": "no-store" });
       }
       if (path === "/v1/registry/assets") {
-        const result = await store.queryPartition("REGISTRY#SUPPORTED");
-        return response(200, { network, items: result.items.map(publicItem), count: result.items.length });
+        const [result, registry] = await Promise.all([store.queryPartition("REGISTRY#SUPPORTED"), registryStatus(store)]);
+        return response(200, { network, registry, items: result.items.map(publicItem), count: result.items.length });
       }
       const assetMatch = path.match(/^\/v1\/registry\/assets\/([0-9a-fA-F]{56,120})$/);
       if (assetMatch) {
         const item = await store.get("REGISTRY#SUPPORTED", `ASSET#${assetMatch[1].toLowerCase()}`);
-        return item ? response(200, publicItem(item)) : response(404, { error: "Asset is not in the supported registry." });
+        return item ? response(200, publicItem(item)) : response(404, { error: "Asset is not in the supported registry.", registry: await registryStatus(store) });
       }
       const stateMatch = path.match(/^\/v1\/state\/([a-z-]+)$/);
       if (stateMatch && allowedKinds.has(stateMatch[1])) {

@@ -6,6 +6,7 @@ import type { LucidEvolution } from "@lucid-evolution/lucid";
 import PlatformHeader from "./platform-header";
 import RegistryGuide from "./registry-guide";
 import { useWallet } from "./wallet-context";
+import { assertWalletSession } from "@/lib/wallet-guard";
 import { summarizeWalletAssets, type WalletAsset } from "@/lib/wallet-assets";
 import { formatAda } from "@/lib/ada";
 import { assetData, checkRegistryNetwork, MAX_REGISTRY_ENTRIES, normalizeUnit, readRegistry, readRegistryRequests, registryBlueprint, registryConfigured, registryDatum, registryIssuer, registryReader, registryRequestDatum, REGISTRY_REQUEST_DEPOSIT, registryRequestScript, registryScript, verifyOriginalMint, type RegistryRequest, type RegistryRequestState, type RegistryState } from "@/lib/asset-registry";
@@ -100,7 +101,7 @@ export default function RegistryWorkbench() {
     const api = await window.cardano.eternl.enable();
     if (await api.getNetworkId() !== 0) throw new Error("Switch Eternl to Preprod.");
     lucid.selectWallet.fromAPI(api);
-    if (await lucid.wallet().address() !== address) throw new Error("Wallet account changed. Reconnect before continuing.");
+    await assertWalletSession(lucid, address);
     return lucid;
   }
 
@@ -144,6 +145,7 @@ export default function RegistryWorkbench() {
       const registryAddress = tools.validatorToAddress("Preprod", script);
       const tx = await wallet.newTx().collectFrom([seed]).mintAssets({ [token]: BigInt(1) }, tools.Data.to(new tools.Constr(0, []))).attach.MintingPolicy(identity)
         .pay.ToContract(registryAddress, { kind: "inline", value: registryDatum(tools, BigInt(0), []) }, { lovelace: BigInt(5000000), [token]: BigInt(1) }).addSigner(address).complete();
+      await assertWalletSession(wallet, address);
       const hash = await (await tx.sign.withWallet().complete()).submit();
       setDeployment({ token, issuer: credential.hash, address: registryAddress });
       await confirmed(wallet, hash);
@@ -169,6 +171,7 @@ export default function RegistryWorkbench() {
       const tx = await wallet.newTx().collectFrom([current.utxo], tools.Data.to(new tools.Constr(action === "register" ? 0 : 1, [assetData(tools, unit)]))).attach.SpendingValidator(current.script)
         .pay.ToContract(current.address, { kind: "inline", value: registryDatum(tools, current.version + BigInt(1), entries) }, { ...current.utxo.assets })
         .addSigner(address).complete();
+      await assertWalletSession(wallet, address);
       const hash = await (await tx.sign.withWallet().complete()).submit();
       await confirmed(wallet, hash);
       setAsset(""); await refresh();
@@ -204,6 +207,7 @@ export default function RegistryWorkbench() {
       const script = registryRequestScript(tools, blueprint.request ?? "", current);
       const requestAddress = tools.validatorToAddress("Preprod", script);
       const tx = await wallet.newTx().pay.ToContract(requestAddress, { kind: "inline", value: registryRequestDatum(tools, address, credential.hash, units) }, { lovelace: REGISTRY_REQUEST_DEPOSIT }).addSigner(address).complete();
+      await assertWalletSession(wallet, address);
       const hash = await (await tx.sign.withWallet().complete()).submit();
       await confirmed(wallet, hash);
       setSelectedRequestUnits([]); await refresh();
@@ -219,6 +223,7 @@ export default function RegistryWorkbench() {
       const { queue, request } = await loadCurrentRequest(wallet, id);
       if (tools.getAddressDetails(address).paymentCredential?.hash !== request.requesterKey) throw new Error("Only the requester payment-key wallet can cancel this request.");
       const tx = await wallet.newTx().collectFrom([request.utxo], tools.Data.to(new tools.Constr(2, []))).attach.SpendingValidator(queue.script).pay.ToAddress(request.requester, { lovelace: request.lockedLovelace }).addSigner(address).complete();
+      await assertWalletSession(wallet, address);
       const hash = await (await tx.sign.withWallet().complete()).submit();
       await confirmed(wallet, hash); await refresh();
     } catch (cause) { setError(cause instanceof Error ? cause.message : "Unable to cancel the request."); }
@@ -234,6 +239,7 @@ export default function RegistryWorkbench() {
       const credential = tools.getAddressDetails(address).paymentCredential;
       if (credential?.type !== "Key" || credential.hash !== registry.issuer) throw new Error("Only the configured registry issuer can reject requests.");
       const tx = await wallet.newTx().collectFrom([request.utxo], tools.Data.to(new tools.Constr(1, []))).attach.SpendingValidator(queue.script).pay.ToAddress(request.requester, { lovelace: request.lockedLovelace }).addSigner(address).complete();
+      await assertWalletSession(wallet, address);
       const hash = await (await tx.sign.withWallet().complete()).submit();
       await confirmed(wallet, hash); await refresh();
     } catch (cause) { setError(cause instanceof Error ? cause.message : "Unable to reject the request."); }
@@ -254,6 +260,7 @@ export default function RegistryWorkbench() {
       const entries = [...request.assets, ...registry.entries];
       const tx = await wallet.newTx().collectFrom([registry.utxo], tools.Data.to(new tools.Constr(2, [request.assets.map((unit) => assetData(tools, unit))]))).collectFrom([request.utxo], tools.Data.to(new tools.Constr(0, []))).attach.SpendingValidator(registry.script).attach.SpendingValidator(queue.script)
         .pay.ToContract(registry.address, { kind: "inline", value: registryDatum(tools, registry.version + BigInt(1), entries) }, { ...registry.utxo.assets }).pay.ToAddress(request.requester, { lovelace: request.lockedLovelace }).addSigner(address).complete();
+      await assertWalletSession(wallet, address);
       const hash = await (await tx.sign.withWallet().complete()).submit();
       await confirmed(wallet, hash); await refresh();
     } catch (cause) { setError(cause instanceof Error ? cause.message : "Unable to approve the request."); }

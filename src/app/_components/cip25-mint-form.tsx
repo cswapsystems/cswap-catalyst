@@ -3,6 +3,7 @@
 import { FormEvent, RefObject, useRef, useState } from "react";
 import { buildRwaManifest, buildRwaManifestPreview, initialRwaMetadataInput, RwaMetadataInput, validateRwaMetadata } from "@/lib/rwa-metadata";
 import { useWallet } from "./wallet-context";
+import { assertWalletSession } from "@/lib/wallet-guard";
 
 type UploadKind = "image" | "proof" | "metadata";
 type MediaType = "image/png" | "image/jpeg" | "image/webp" | "application/pdf" | "application/json";
@@ -117,6 +118,7 @@ export default function Cip25MintForm() {
         } }, version: "1.0",
       };
       const tx = await lucid.newTx().collectFrom([seed]).mintAssets({ [unit]: BigInt(1) }, Data.to(new Constr(0, [[assetName]]))).attach.MintingPolicy(policy).attachMetadata(721, cip25).pay.ToAddress(address, { lovelace: BigInt(2_000_000), [unit]: BigInt(1) }).complete();
+      await assertWalletSession(lucid, address);
       const txHash = await (await tx.sign.withWallet().complete()).submit();
       setStatus(`Image, authenticity proof, and generated ${form.category} manifest pinned to IPFS. Mint submitted: ${txHash}`);
       setForm(initialRwaMetadataInput);

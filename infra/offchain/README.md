@@ -22,6 +22,14 @@ List routes accept `limit` (1-100) and an opaque `cursor`.
 
 ## Secret contract
 
+`WatchedAddresses` is a JSON array of `{"kind","address"}` objects. The single `registry` entry must also carry `token`, the registry identity NFT unit (policy ID + asset name hex), copied with `address` from the deployment manifest's `registry` section, e.g. for Preprod:
+
+```json
+[{"kind":"registry","address":"addr_test1wpvmzq5wvwyz4xt2pht725d47sngwjll7ajegx3rpy5y75gvpdr46","token":"872c22cf727de60c032888cf4d2db617d5b9ded73763659a9f2fff3143535741505f5245474953545259"}]
+```
+
+The indexer trusts only the one output at that address holding exactly one identity token, and schema-validates its inline datum. If authentication or decoding fails, the last authenticated supported-asset set is kept and `registry.state` in `GET /v1/registry/assets` reports `failed` (with `error` and `lastSyncedAt`); `synced` means the served set (possibly empty) is authenticated, and `unavailable` means no sync has completed.
+
 `BlockfrostSecretArn` must identify an AWS Secrets Manager secret whose JSON value is:
 
 ```json

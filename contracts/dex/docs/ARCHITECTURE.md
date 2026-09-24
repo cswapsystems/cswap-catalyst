@@ -88,7 +88,11 @@ An FT provider can lock the fraction asset and exact pool terms in `BootstrapOff
 
 For tADA/FT, the owner buffer is part of the final ADA reserve and the provider funds the remaining ADA. For USDCx/FT, the owner locks the exact ADA buffer while the provider funds the full USDCx reserve. Initial supply is `floor(sqrt(quote_reserve * FT_reserve))`; the owner receives `floor(total_lp * owner_share_bps / 10_000)` and the provider receives the remainder.
 
-The FT provider may cancel an unaccepted offer only with the stored payment-key signature. `AdvanceBootstrap` requires the factory-admin/Team signature and an offer input at the configured validator address; the offer validator independently enforces the pair, reserves, pool ID, buffer, allocation, distinct role keys, LP signer, and Team signer.
+The FT provider may cancel an unaccepted offer only with the stored payment-key signature. Cancellation is independent of acceptance validity (review finding R04): it requires that `owner` is a verification-key address whose payment key equals `owner_key`, that `owner_key` signs, and that the owner's exact address (payment and stake parts) receives at least every asset of the escrowed input — plus every other offer input at this script address naming the same owner in the same transaction, which prevents one refund from satisfying several cancellations. It does not check trading terms or exact datum/value equality, so an escrow with extra ADA, extra assets, a datum/value mismatch, or invalid share/quote terms remains recoverable. The escrow cannot pay the transaction fee; the owner funds fees and collateral from another UTxO. Acceptance still requires exact value equality and valid terms.
+
+Outputs that remain unrecoverable: an escrow whose datum does not decode as `BootstrapOfferDatum` (or is missing), or whose `owner` is a script address or does not match `owner_key`, has no spending path. Offers locked under an earlier `bootstrap_offer` build keep that build's rules: a malformed escrow there cannot be cancelled and cannot be migrated by redeploying — this change only protects outputs created at the new script address. Inventory existing offers at the old address before redeploying.
+
+`AdvanceBootstrap` requires the factory-admin/Team signature and an offer input at the configured validator address; the offer validator independently enforces the pair, reserves, pool ID, buffer, allocation, distinct role keys, LP signer, and Team signer.
 
 ### Swap
 
@@ -135,6 +139,6 @@ aiken check --deny .
 aiken build --out plutus.json .
 ```
 
-The current Aiken unit suite exercises AMM arithmetic and exact token-pool value handling. Add full transaction-level bootstrap cases for FT-provider cancellation, missing LP or Team signature, reused role keys, wrong pair/reserve/buffer, wrong pool ID, wrong LP allocation, unauthorized factory advance, and a legacy deployment record before enabling the flow on Preprod.
+The current Aiken unit suite exercises AMM arithmetic and exact token-pool value handling. `bootstrap_offer.ak` includes transaction-level cancellation cases (valid, extra ADA, extra asset, datum/value mismatch, invalid share and quote terms, non-owner, unsigned, unbound owner key, partial, diverted, restaked and double-satisfied refunds) and acceptance cases (valid, extra ADA, extra asset). Add remaining transaction-level bootstrap cases for missing LP or Team signature, reused role keys, wrong pair/reserve/buffer, wrong pool ID, wrong LP allocation, unauthorized factory advance, and a legacy deployment record before enabling the flow on Preprod.
 
 This repository is not audited production code. Before real-value use, arrange independent audit, network-specific min-UTxO testing, key-management controls for the admin, monitoring for factory state/pool UTxOs, and a documented emergency pause/close process.

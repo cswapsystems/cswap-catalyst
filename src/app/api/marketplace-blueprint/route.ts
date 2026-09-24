@@ -10,6 +10,7 @@ const allowed = new Set([
   "lp_policy.lp_policy.mint",
   "inventory_policy.inventory_policy.mint",
   "pool_sell_request.pool_sell_request.spend",
+  "one_shot.one_shot.mint",
 ]);
 
 export async function GET(request: Request) {

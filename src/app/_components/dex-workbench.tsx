@@ -1,6 +1,7 @@
 "use client";
 
 import { confirmTransaction } from "@/lib/transaction-confirmation";
+import { assertWalletSession, isWalletChangedError } from "@/lib/wallet-guard";
 
 import { FormEvent, useCallback, useEffect, useMemo, useState } from "react";
 import { useWallet } from "./wallet-context";
@@ -10,7 +11,7 @@ import { parseAdaToLovelace, quoteConstantProduct, quoteLiquidityDeposit, quoteL
 import { type Deployment, type Scripts, type Pool, type Action, actions, assetData, assetUnit, parseUnit, parseIntegerAmount, addressData, poolName, integerSqrt, asConstr, decodePool, isAuthenticatedPool, nextDatum, poolValue, reservePayout, displayName, format, loadDex } from "@/lib/protocol/dex-client";
 
 export default function DexWorkbench({ mode = "swap" }: { mode?: "swap" | "liquidity" | "admin" }) {
-  const { lucid, address, connect, status, error: walletError } = useWallet();
+  const { lucid, address, connect, disconnect, status, error: walletError } = useWallet();
   const [deployment, setDeployment] = useState<Deployment | null>(null);
   const [scripts, setScripts] = useState<Scripts | null>(null);
   const [pools, setPools] = useState<Pool[]>([]);
@@ -25,6 +26,8 @@ export default function DexWorkbench({ mode = "swap" }: { mode?: "swap" | "liqui
   const [fractionAmount, setFractionAmount] = useState("100");
   const [loading, setLoading] = useState(false);
   const [message, setMessage] = useState<{ kind: "error" | "success"; text: string } | null>(null);
+  // Survives the disconnect-triggered refresh so the user sees why a reconnect is required.
+  const [sessionError, setSessionError] = useState("");
   const [canCreatePool, setCanCreatePool] = useState(false);
   const pool = useMemo(() => pools.find((item) => item.id === selected) ?? pools[0], [pools, selected]);
   const availableActions = actions.filter((item) => mode === "swap" ? item.id.startsWith("swap") : mode === "liquidity" ? ["add", "remove"].includes(item.id) : ["create", "destroy"].includes(item.id));
@@ -35,6 +38,7 @@ export default function DexWorkbench({ mode = "swap" }: { mode?: "swap" | "liqui
       const tools = await import("@lucid-evolution/lucid");
       const loaded = await loadDex(tools); setDeployment(loaded.deployment); setScripts(loaded.scripts); setCanCreatePool(loaded.canCreatePool);
       if (!lucid) { setPools([]); setBalances({}); setIsAdmin(false); return; }
+      setSessionError("");
       const credential = tools.getAddressDetails(await lucid.wallet().address()).paymentCredential;
       setIsAdmin(credential?.type === "Key" && credential.hash === loaded.deployment.admin);
       const holdings: Record<string, bigint> = {};
@@ -50,7 +54,10 @@ export default function DexWorkbench({ mode = "swap" }: { mode?: "swap" | "liqui
   useEffect(() => { const timer = window.setTimeout(() => void refresh(), 0); return () => window.clearTimeout(timer); }, [refresh]);
 
   async function signSubmit(builder: ReturnType<NonNullable<typeof lucid>["newTx"]>) {
+    if (!lucid) throw new Error("Connect Eternl before submitting a DEX transaction.");
     const completed = await builder.complete();
+    // Re-check immediately before signing: outputs pay the stored context address.
+    await assertWalletSession(lucid, address);
     const hash = await (await completed.sign.withWallet().complete()).submit();
     setPendingHash(hash);
     return hash;
@@ -61,6 +68,7 @@ export default function DexWorkbench({ mode = "swap" }: { mode?: "swap" | "liqui
     try {
       if (!lucid || !address) throw new Error("Connect Eternl before submitting a DEX transaction.");
       if (!deployment || !scripts) throw new Error("DEX deployment is not loaded.");
+      await assertWalletSession(lucid, address);
       const tools = await import("@lucid-evolution/lucid");
       const state = await lucid.utxoByUnit(deployment.factoryToken);
       let builder;
@@ -110,7 +118,14 @@ export default function DexWorkbench({ mode = "swap" }: { mode?: "swap" | "liqui
         if (mint !== BigInt(0)) builder = builder.mintAssets({ [assetUnit(pool.lpToken)]: mint }, tools.Data.to(lpRedeemer!)).attach.MintingPolicy(scripts.lp);
       }
       const hash = await signSubmit(builder); const confirmed = await confirmTransaction(lucid, hash); if (!confirmed) throw new Error(`Transaction was submitted but not confirmed: ${hash}`); await refresh(); setPendingHash(""); setMessage({ kind: "success", text: `Transaction confirmed: ${hash}` });
-    } catch (cause) { setMessage({ kind: "error", text: cause instanceof Error ? cause.message : "DEX transaction failed." }); }
+    } catch (cause) {
+      if (isWalletChangedError(cause)) {
+        // Invalidate the prepared quote and wallet-derived state; require an explicit reconnect.
+        setAmount(""); setPools([]); setBalances({}); setIsAdmin(false); setSessionError(cause.message); disconnect();
+        return;
+      }
+      setMessage({ kind: "error", text: cause instanceof Error ? cause.message : "DEX transaction failed." });
+    }
     finally { setLoading(false); }
   }
 
@@ -150,6 +165,6 @@ export default function DexWorkbench({ mode = "swap" }: { mode?: "swap" | "liqui
     {mode === "swap" && <div className="swap-quote-note" aria-live="polite">{preview && amount.trim() && <>{preview.lines.slice(2).map((line) => <p key={line}>{line}</p>)}{preview.warning && <p>{preview.warning}</p>}{preview.error && <p role="alert" className="form-message error-message">{preview.error}</p>}</>}<p>{!lucid ? "Connect your wallet to load available pairs and balances." : !pool ? "No active swap pairs are available in this deployment." : "Network fees are separate. Keep ADA available for fees and output deposits."}</p></div>}
     {mode === "admin" && !isAdmin && <p className="dex-warning">Connect the configured factory administrator to use these controls.</p>}{action === "destroy" && <div className="dex-warning">Destroying requires the admin wallet to hold and burn the pool&apos;s entire LP supply. All reserves return to that wallet.</div>}
     {mode === "swap" ? <div className="swap-submit">{!lucid ? <button className="primary-button" type="button" disabled={loading || status === "connecting" || Boolean(pendingHash)} onClick={() => void connect()}>{status === "connecting" ? "Connecting…" : "Connect wallet"}</button> : <button className="primary-button" type="submit" disabled={loading || Boolean(pendingHash) || !pool || !amount.trim() || Boolean(preview?.error) || !estimate}>{loading ? "Working…" : pendingHash ? "Awaiting confirmation" : !pool ? "No available pairs" : !amount.trim() ? "Enter an amount" : "Swap"}</button>}{walletError && !lucid && <p className="form-message error-message" role="alert">{walletError}</p>}</div> : <div className="form-footer"><p><span className="status-dot" /> {pools.length} active pool{pools.length === 1 ? "" : "s"}</p><button className="primary-button" type="submit" disabled={loading || Boolean(pendingHash) || !lucid || Boolean(preview?.error) || (mode === "admin" && !isAdmin) || (action === "create" && !canCreatePool) || (!pool && action !== "create")}>{loading ? "Working…" : availableActions.find((item) => item.id === action)?.label} <span className="button-arrow">↗</span></button></div>}
-  </fieldset></form>{pendingHash && <p className="form-message" role="status">Submitted; waiting for confirmation. <a href={`https://preprod.cardanoscan.io/transaction/${pendingHash}`} target="_blank" rel="noreferrer">View transaction</a> <button type="button" onClick={() => void checkPending().catch(() => setMessage({ kind: "error", text: "Unable to check confirmation. Try again." }))} disabled={loading}>Check confirmation</button></p>}{message && <p className={`form-message ${message.kind === "error" ? "error-message" : "success-message"}`}>{message.text}</p>}</div>
+  </fieldset></form>{pendingHash && <p className="form-message" role="status">Submitted; waiting for confirmation. <a href={`https://preprod.cardanoscan.io/transaction/${pendingHash}`} target="_blank" rel="noreferrer">View transaction</a> <button type="button" onClick={() => void checkPending().catch(() => setMessage({ kind: "error", text: "Unable to check confirmation. Try again." }))} disabled={loading}>Check confirmation</button></p>}{sessionError && <p className="form-message error-message" role="alert">{sessionError}</p>}{message && <p className={`form-message ${message.kind === "error" ? "error-message" : "success-message"}`}>{message.text}</p>}</div>
   <div className="dex-pools"><div className="dex-pools-head"><div><span className="section-kicker">On-chain state</span><h3>Active pools</h3></div><button type="button" className="refresh-button" onClick={() => void refresh()} disabled={loading}>Refresh</button></div>{!lucid ? <p className="dex-empty">Connect Eternl to read and operate the deployed pools.</p> : pools.length === 0 ? <p className="dex-empty">No active pool is currently indexed.</p> : pools.map((item) => <article className="dex-pool" key={item.id}><div><strong>{displayName(item.assetB)} / {displayName(item.assetA)}</strong><code>{assetUnit(item.assetB)}</code></div><dl><div><dt>{displayName(item.assetA)} reserve</dt><dd>{item.assetA.policyId ? format(item.reserveA) : formatAda(item.reserveA)}</dd></div><div><dt>Fraction reserve</dt><dd>{format(item.reserveB)}</dd></div><div><dt>LP supply</dt><dd>{format(item.liquidity)}</dd></div><div><dt>Fee</dt><dd>{Number(item.feeD - item.feeN) / Number(item.feeD) * 100}%</dd></div></dl></article>)}{deployment && <a className="explorer-link" href={`https://preprod.cardanoscan.io/address/${deployment.ammAddress}`} target="_blank" rel="noreferrer">Inspect DEX on Cardanoscan <span className="button-arrow">↗</span></a>}</div></section>;
 }

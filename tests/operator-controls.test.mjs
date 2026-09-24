@@ -19,3 +19,14 @@ test("factory pause preserves pool sequence and factory identity", () => {
   assert.equal(fields[4], false);
   assert.throws(() => factoryPauseFields(["factoryNFT", "admin", "policy", "42", false], true), /Malformed/);
 });
+
+test("protected reserve rejects ADA-quoted values below 2 ADA", async () => {
+  const { parseProtectedReserve, MIN_ADA_PROTECTED_RESERVE } = await import("../src/lib/operator-controls.ts");
+  assert.equal(parseProtectedReserve("2", false), MIN_ADA_PROTECTED_RESERVE);
+  assert.equal(parseProtectedReserve("10.5", false), 10_500_000n);
+  for (const value of ["0", "0.000000", "1.999999", "1"]) assert.throws(() => parseProtectedReserve(value, false), /at least 2 ADA/);
+  assert.throws(() => parseProtectedReserve("abc", false), /six decimal places/);
+  assert.equal(parseProtectedReserve("0", true), 0n);
+  assert.equal(parseProtectedReserve("25", true), 25n);
+  assert.throws(() => parseProtectedReserve("1.5", true), /whole quote-asset base units/);
+});

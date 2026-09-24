@@ -71,7 +71,7 @@ async function plan(ctx, previous) {
     minimumWalletLovelace: minimum.toString(), bootstrapFeeLovelace: unsigned.toTransaction().body().fee().toString(),
     previousStateUntouched: { pool: `${pool.txHash}#${pool.outputIndex}`, cashLovelace: pool.assets.lovelace.toString(), orderbookOutputs: listings.length },
     stalePublicOverrides: publicOverrides(fresh.deployment),
-    limitation: 'No migration of old listings or liquidity. Final LP exit remains disabled: the reviewed one_shot identity cannot burn.',
+    limitation: 'No migration of old listings or liquidity. Final LP exit requires the recorded burn-capable pool identity seed.',
   }, null, 2));
   return { ...fresh, seed };
 }

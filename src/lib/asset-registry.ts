@@ -120,8 +120,9 @@ export function registryRequestScript(tools: Tools, code: string, registry: Pick
 
 export async function registryReader(): Promise<LucidEvolution> {
   checkRegistryNetwork();
-  const tools = await import("@lucid-evolution/lucid");
-  return tools.Lucid(new tools.Blockfrost("/api/blockfrost", ""), "Preprod");
+  const [tools, { createBrowserChainProvider }] = await Promise.all([import("@lucid-evolution/lucid"), import("./browser-chain-provider")]);
+  // Validated provider: protocol-parameter/provider failures surface actionable errors (R09).
+  return tools.Lucid(createBrowserChainProvider(tools), "Preprod");
 }
 
 export async function readRegistry(lucid?: LucidEvolution): Promise<RegistryState> {

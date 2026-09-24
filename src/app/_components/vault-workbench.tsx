@@ -5,6 +5,7 @@ import { useCallback, useEffect, useState } from "react";
 import type { UTxO } from "@lucid-evolution/lucid";
 import PlatformHeader from "./platform-header";
 import { formatAda } from "@/lib/ada";
+import { createBrowserChainProvider } from "@/lib/browser-chain-provider";
 
 type DataConstr = { index: number; fields: unknown[] };
 type VaultDatum = { owner: string; recoveryAdmin: string; originalUnit: string; fractionUnit: string; totalFractions: bigint; seed: string };
@@ -68,7 +69,7 @@ export default function VaultWorkbench() {
       const blueprint = await blueprintResponse.json() as { vaultCompiledCode?: string; error?: string };
       if (!blueprintResponse.ok || !blueprint.vaultCompiledCode) throw new Error(blueprint.error ?? "Fractionalization vault validator unavailable.");
       const vaultAddress = tools.validatorToAddress(network, { type: "PlutusV3", script: blueprint.vaultCompiledCode });
-      const lucid = await tools.Lucid(new tools.Blockfrost("/api/blockfrost", ""), network);
+      const lucid = await tools.Lucid(createBrowserChainProvider(tools), network);
       const discovered = await lucid.utxosAt(vaultAddress);
       setAddress(vaultAddress);
       setUtxos(discovered.map((utxo) => {

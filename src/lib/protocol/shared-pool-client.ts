@@ -1,7 +1,7 @@
 import type { LucidEvolution, Script } from "@lucid-evolution/lucid";
 import { marketplaceDeployment, marketplaceOrderbookAddress, marketplacePoolAddress } from "./marketplace-deployment";
 import { addressData, type Tools } from "./dex-client";
-import { decodeSharedPool, marketAssetData, marketUnit, outputRef, type MarketScripts } from "../marketplace";
+import { decodeSharedPool, marketAssetData, marketUnit, outputRef, type MarketAsset, type MarketScripts } from "../marketplace";
 
 export async function marketplaceCode(name: string): Promise<string> {
   const response = await fetch("/api/marketplace-blueprint?validator=" + encodeURIComponent(name), { cache: "no-store" });
@@ -29,9 +29,7 @@ export async function readSharedPool(lucid: LucidEvolution, tools: Tools) {
   const lp: Script = { type: "PlutusV3", script: tools.applyParamsToScript(lpCode, [marketAssetData(tools, pool.poolToken), pool.lpToken.assetName]) };
   const inventory: Script = { type: "PlutusV3", script: tools.applyParamsToScript(inventoryCode, [marketAssetData(tools, pool.poolToken), pool.inventoryToken.assetName, pool.batcher]) };
   if (tools.mintingPolicyToId(lp) !== pool.lpToken.policyId || tools.mintingPolicyToId(inventory) !== pool.inventoryToken.policyId) throw new Error("Pool LP / inventory policies do not match the reviewed blueprint.");
-  // No burn-capable identity artifact is supplied by the contracts handover.
-  // Never pretend one_shot can burn. Final exit remains gated until one is reviewed.
-  const scripts: MarketScripts = { orderbook, pool: script, lp, inventory, orderbookAddress: marketplaceOrderbookAddress, poolAddress: marketplacePoolAddress };
+  const scripts: MarketScripts = { orderbook, pool: script, lp, inventory, orderbookAddress: marketplaceOrderbookAddress, poolAddress: marketplacePoolAddress, identity: await poolIdentity(tools, pool.poolToken) };
   const refs = (marketplaceDeployment as unknown as { referenceScripts?: { txHash: string; outputIndex: number }[] }).referenceScripts || [];
   if (refs.length !== 4) throw new Error("All four Marketplace reference scripts must be configured before signing.");
   const outputs = await lucid.utxosByOutRef(refs);
@@ -39,6 +37,14 @@ export async function readSharedPool(lucid: LucidEvolution, tools: Tools) {
   if (outputs.length !== 4 || [orderbook, script, lp, inventory].some(expected => !hashes.includes(tools.validatorToScriptHash(expected)))) throw new Error("Configured Marketplace reference scripts are missing or incompatible.");
   scripts.references = outputs;
   return { ...pool, script, scripts };
+}
+// Final exit burns the pool identity, so it needs the burn-capable one_shot
+// rebuilt from the manifest's seed. Older deployments record no seed and stay gated.
+async function poolIdentity(tools: Tools, token: MarketAsset): Promise<MarketScripts["identity"]> {
+  const seed = (marketplaceDeployment.pool as { identitySeed?: { txHash: string; outputIndex: number } }).identitySeed;
+  if (!seed) return undefined;
+  const script: Script = { type: "PlutusV3", script: tools.applyParamsToScript(await marketplaceCode("one_shot.one_shot.mint"), [new tools.Constr(0, [seed.txHash, BigInt(seed.outputIndex)]), token.assetName]) };
+  return tools.mintingPolicyToId(script) === token.policyId ? { script, redeemer: tools.Data.to(new tools.Constr(0, [])) } : undefined;
 }
 export async function assertMarketWallet(lucid: LucidEvolution, address: string) {
   if (await lucid.wallet().address() !== address || lucid.config().network !== "Preprod") throw new Error("Wallet account/network changed. Reconnect and review the transaction.");

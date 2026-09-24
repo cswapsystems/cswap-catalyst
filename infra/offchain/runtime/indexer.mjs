@@ -17,9 +17,24 @@ export function toStateItem(network, watched, utxo, indexedAt, tip) {
   };
 }
 
-function supportedAssetsFrom(utxos) {
-  const datum = utxos.find((utxo) => utxo.inline_datum)?.inline_datum;
-  return datum ? decodeRegistryDatum(datum) : { version: "0", assets: [] };
+function quantityOf(utxo, unit) {
+  return (utxo.amount || []).filter((entry) => entry.unit === unit).map((entry) => String(entry.quantity));
+}
+
+// Only the unique output at the registry address holding exactly one identity NFT is authoritative.
+export function authenticatedRegistry(network, watched, utxos) {
+  if (!watched.token) throw new Error("Registry identity token is not configured.");
+  if (!watched.address.startsWith(network === "mainnet" ? "addr1" : "addr_test1")) throw new Error(`Registry address is not a ${network} address.`);
+  const holders = utxos.filter((utxo) => quantityOf(utxo, watched.token).length);
+  const invalid = holders.filter((utxo) => {
+    const quantities = quantityOf(utxo, watched.token);
+    return quantities.length !== 1 || quantities[0] !== "1" || (utxo.address !== undefined && utxo.address !== watched.address);
+  });
+  if (invalid.length) throw new Error(`Registry identity token has an invalid quantity or address at ${invalid.map(utxoReference).join(", ")}.`);
+  if (holders.length !== 1) throw new Error(holders.length ? `Registry identity token found in ${holders.length} outputs.` : "Registry identity token not found at the registry address.");
+  const [utxo] = holders;
+  if (!utxo.inline_datum) throw new Error(`Registry output ${utxoReference(utxo)} has no inline datum.`);
+  return { ...decodeRegistryDatum(utxo.inline_datum), reference: utxoReference(utxo) };
 }
 
 async function reconcile(store, network, watched, utxos, indexedAt, tip) {
@@ -34,8 +49,22 @@ async function reconcile(store, network, watched, utxos, indexedAt, tip) {
   return { current: current.size, deleted: requests.filter((item) => item.DeleteRequest).length };
 }
 
-async function reconcileRegistry(store, network, utxos, indexedAt, tip) {
-  const registry = supportedAssetsFrom(utxos);
+const registryStatusKey = { PK: "REGISTRY#STATUS", SK: "STATUS" };
+
+async function reconcileRegistry(store, network, watched, utxos, indexedAt, tip) {
+  const previous = await store.get(registryStatusKey.PK, registryStatusKey.SK);
+  const status = { ...registryStatusKey, entity: "registry-status", network, address: watched.address, token: watched.token, tipSlot: tip.slot, tipHash: tip.hash };
+  let registry;
+  try {
+    registry = authenticatedRegistry(network, watched, utxos);
+  } catch (error) {
+    // Keep the last authenticated supported-asset set; report the failure instead of serving unauthenticated data.
+    console.error("Registry synchronization failed", error);
+    const failed = { ...status, state: "failed", error: error.message, failedAt: indexedAt,
+      lastSyncedAt: previous?.lastSyncedAt || null, registryVersion: previous?.registryVersion ?? null, registryReference: previous?.registryReference ?? null, assetCount: previous?.assetCount ?? null };
+    await store.put(failed);
+    return { state: "failed", error: error.message, lastSyncedAt: failed.lastSyncedAt };
+  }
   const existing = await store.queryPartition("REGISTRY#SUPPORTED");
   const desired = new Set(registry.assets);
   const requests = [];
@@ -45,7 +74,9 @@ async function reconcileRegistry(store, network, utxos, indexedAt, tip) {
     entity: "supported-asset", network, unit, registryVersion: registry.version, tipSlot: tip.slot, tipHash: tip.hash, indexedAt,
   } } });
   await store.batchWrite(requests);
-  return registry.assets.length;
+  await store.put({ ...status, state: "synced", error: null, failedAt: null, lastSyncedAt: indexedAt,
+    registryVersion: registry.version, registryReference: registry.reference, assetCount: registry.assets.length });
+  return { state: "synced", registryVersion: registry.version, supportedAssets: registry.assets.length };
 }
 
 export function createIndexer({ store, blockfrost, watchedAddresses, network, now = () => new Date().toISOString() }) {
@@ -64,7 +95,7 @@ export function createIndexer({ store, blockfrost, watchedAddresses, network, no
       for (const watched of watchedAddresses) {
         const utxos = await blockfrost.addressUtxos(watched.address);
         const result = await reconcile(store, network, watched, utxos, indexedAt, tip);
-        if (watched.kind === "registry") result.supportedAssets = await reconcileRegistry(store, network, utxos, indexedAt, tip);
+        if (watched.kind === "registry") result.registry = await reconcileRegistry(store, network, watched, utxos, indexedAt, tip);
         results.push({ ...watched, ...result });
       }
       await store.put({ PK: `NETWORK#${network}`, SK: "CHECKPOINT", entity: "checkpoint", network,

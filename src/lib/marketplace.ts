@@ -149,7 +149,9 @@ export function buildMarketAction(lucid: LucidEvolution, tools: Tools, scripts: 
   if (action.kind === "buy" && action.listing.settlement.kind === "direct") {
     const listing = action.listing;
     consumeListing(listing, c(0, [address]));
-    return tx.pay.ToAddress(listing.seller, delta({ lovelace: listing.lockedLovelace }, marketUnit(listing.priceAsset), listing.price)).pay.ToAddress(owner, { [marketUnit(listing.rwa)]: listing.quantity });
+    // The validator requires the seller payment to carry this listing's output reference, so one payment cannot settle two listings.
+    const tag = data(c(0, [listing.utxo.txHash, BigInt(listing.utxo.outputIndex)]));
+    return tx.pay.ToAddressWithData(listing.seller, { kind: "inline", value: tag }, delta({ lovelace: listing.lockedLovelace }, marketUnit(listing.priceAsset), listing.price)).pay.ToAddress(owner, { [marketUnit(listing.rwa)]: listing.quantity });
   }
   if (!pool) throw new Error("An authenticated current pool is required.");
   const unit = marketUnit(pool.quote);
@@ -191,7 +193,7 @@ export function buildMarketAction(lucid: LucidEvolution, tools: Tools, scripts: 
   if (action.kind === "withdraw") {
     const quote = lpWithdrawal(pool, action.burned);
     if (quote.amount === BigInt(0) && !action.acceptZero) throw new Error("Explicitly confirm burning LP shares for zero cash.");
-    if (quote.final && !scripts.identity) throw new Error("Final exit disabled: this deployment has no reviewed burn-capable identity policy. The legacy one_shot policy cannot complete closure.");
+    if (quote.final && !scripts.identity) throw new Error("Final exit disabled: this deployment records no burn-capable pool identity policy, so closure could never complete.");
     const next = nextPool(tools, pool, { supply: pool.supply - action.burned, closing: quote.final ? { recipient: owner, key: signer } : null });
     continuePool(pool, quote.final ? c(3, [quote.amount, address, signer, next]) : c(2, [quote.amount, action.burned, address, signer, next]), next, delta(pool.utxo.assets, unit, -quote.amount)); mintLp(pool, -action.burned);
     if (quote.amount > BigInt(0)) tx = tx.pay.ToAddress(owner, { [unit]: quote.amount });
@@ -207,7 +209,7 @@ export function buildMarketAction(lucid: LucidEvolution, tools: Tools, scripts: 
   }
   if (action.kind === "complete") {
     if (!pool.closing || signer !== pool.closing.key || pool.supply || pool.cost || pool.inventory || pool.count) throw new Error("Complete exit requires the recorded LP and zero shares/inventory accounting.");
-    if (!scripts.identity || tools.mintingPolicyToId(scripts.identity.script) !== pool.poolToken.policyId) throw new Error("No reviewed burn-capable identity policy is configured. Legacy one_shot identities cannot burn.");
+    if (!scripts.identity || tools.mintingPolicyToId(scripts.identity.script) !== pool.poolToken.policyId) throw new Error("No burn-capable pool identity policy is configured for this deployment.");
     const assets = { ...pool.utxo.assets }; delete assets[marketUnit(pool.poolToken)];
     spend(scripts.pool);
     return tx.collectFrom([pool.utxo], data(c(5))).mintAssets({ [marketUnit(pool.poolToken)]: -BigInt(1) }, scripts.identity.redeemer).attach.MintingPolicy(scripts.identity.script).pay.ToAddress(pool.closing.recipient, assets).addSigner(owner);

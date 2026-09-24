@@ -90,6 +90,7 @@ From the repository root, `npm run test:dex` executes the compiled bootstrap,
 factory, pool-NFT and LP validators in a Lucid emulator with independently
 funded participant wallets. It covers ADA and native-token quotes, missing
 and reused signer identities, incorrect allocations, cancellation ownership,
+owner recovery of a mismatched-value escrow (R04),
 minimum-buffer boundaries, standard admin creation, and stale or malicious
 Team approval CBOR. `npm run test:ui` covers review arithmetic and UI helpers.
 These tests do not replace a real Eternl multi-wallet acceptance check.
@@ -153,7 +154,12 @@ is `floor(total_lp * owner_share_bps / 10_000)` and the LP receives the
 remainder. The offer validator rejects a different asset pair, reserve, ADA
 buffer, pool identity, LP allocation, missing LP signature, missing Team
 signature, or reused FT-provider/LP/Team payment key. The FT provider can
-cancel an unaccepted offer with its payment-key signature.
+cancel an unaccepted offer with its payment-key signature by returning the
+entire escrowed value (every asset, at least the locked quantity) to its
+datum address; cancellation does not depend on valid terms or an exact
+datum/value match, so malformed escrows stay recoverable. Escrows with an
+undecodable datum or a script/mismatched owner remain unspendable; see
+`docs/ARCHITECTURE.md`.
 
 | Quote pair | FT provider locks | LP provider supplies |
 | --- | --- | --- |

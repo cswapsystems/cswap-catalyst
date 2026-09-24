@@ -3,7 +3,9 @@ use aiken/crypto.{VerificationKeyHash}
 use aiken/primitive/bytearray
 use cardano/address
 use cardano/assets
-use cardano/transaction.{InlineDatum, Input, OutputReference, Transaction}
+use cardano/transaction.{
+  InlineDatum, Input, NoDatum, Output, OutputReference, Transaction,
+}
 use ebecca/amm_helpers.{ada, has_one, total_paid}
 use ebecca/dex_types.{
   AcceptBootstrap, AssetId, BootstrapOfferAction, BootstrapOfferDatum,
@@ -32,12 +34,7 @@ validator bootstrap_offer {
       )
 
     when action is {
-      CancelBootstrap -> and {
-          valid_offer(offer, own_input.output.value),
-          list.has(tx.extra_signatories, offer.owner_key),
-          total_paid(tx.outputs, offer.owner, offer.fraction_asset) >= offer.fraction_amount,
-          total_paid(tx.outputs, offer.owner, ada) >= offer.pool_lovelace,
-        }
+      CancelBootstrap -> valid_cancel(offer, own_ref, own_input, tx)
       AcceptBootstrap { liquidity_provider, liquidity_provider_key } ->
         valid_accept(
           offer,
@@ -52,6 +49,96 @@ validator bootstrap_offer {
   else(_) {
     False
   }
+}
+
+/// Cancellation is deliberately independent of acceptance validity (R04).
+///
+/// It does not inspect trading terms or require the escrow to hold exactly the
+/// datum-derived value, so an owner can recover an escrow with extra ADA,
+/// extra assets, a datum/value mismatch, or invalid share/quote terms. It does
+/// require:
+/// - a trustworthy owner binding: `owner` must be a verification-key address
+///   whose payment key is `owner_key`, and `owner_key` must sign;
+/// - a full refund: the owner's exact address (payment and stake parts) must
+///   receive at least every asset of every offer input in this transaction at
+///   this script address whose datum names the same owner. Aggregating those
+///   inputs prevents one refund output from satisfying several cancellations
+///   (double satisfaction).
+fn valid_cancel(
+  offer: BootstrapOfferDatum,
+  own_ref: OutputReference,
+  own_input: Input,
+  tx: Transaction,
+) -> Bool {
+  let owner_escrow =
+    owner_escrow_value(tx.inputs, own_ref, own_input.output, offer.owner)
+  let refunded = value_paid_to(tx.outputs, offer.owner)
+  and {
+    owner_matches_key(offer.owner, offer.owner_key),
+    list.has(tx.extra_signatories, offer.owner_key),
+    covers(refunded, owner_escrow),
+  }
+}
+
+/// Sum of the own input and every other input at the same script address
+/// whose inline datum decodes as a bootstrap offer for `owner`.
+fn owner_escrow_value(
+  inputs: List<Input>,
+  own_ref: OutputReference,
+  own_output: Output,
+  owner: address.Address,
+) -> assets.Value {
+  list.foldl(
+    inputs,
+    own_output.value,
+    fn(input: Input, total) {
+      if input.output_reference == own_ref || input.output.address != own_output.address {
+        total
+      } else {
+        when input.output.datum is {
+          InlineDatum(raw) ->
+            if raw is other: BootstrapOfferDatum {
+              if other.owner == owner {
+                assets.merge(total, input.output.value)
+              } else {
+                total
+              }
+            } else {
+              total
+            }
+          _ -> total
+        }
+      }
+    },
+  )
+}
+
+fn value_paid_to(
+  outputs: List<Output>,
+  recipient: address.Address,
+) -> assets.Value {
+  list.foldl(
+    outputs,
+    assets.zero,
+    fn(output: Output, total) {
+      if output.address == recipient {
+        assets.merge(total, output.value)
+      } else {
+        total
+      }
+    },
+  )
+}
+
+/// True when `paid` holds at least the quantity of every asset in `required`.
+fn covers(paid: assets.Value, required: assets.Value) -> Bool {
+  list.all(
+    assets.flatten(required),
+    fn(entry) {
+      let (policy_id, asset_name, quantity) = entry
+      assets.quantity_of(paid, policy_id, asset_name) >= quantity
+    },
+  )
 }
 
 fn expected_offer_value(offer: BootstrapOfferDatum) -> assets.Value {
@@ -153,4 +240,396 @@ test bootstrap_offer_requires_two_ada_buffer() {
     has_minimum_pool_buffer(2_000_000),
     has_minimum_pool_buffer(1_999_999) == False,
   }
+}
+
+// ---------------------------------------------------------------------------
+// Transaction-level fixtures for cancellation (R04) and acceptance.
+// ---------------------------------------------------------------------------
+
+const owner_vk: VerificationKeyHash =
+  #"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+
+const provider_vk: VerificationKeyHash =
+  #"bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"
+
+const admin_vk: VerificationKeyHash =
+  #"eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee"
+
+const test_offer_script: ByteArray =
+  #"0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f"
+
+const test_factory_script: ByteArray =
+  #"1e1e1e1e1e1e1e1e1e1e1e1e1e1e1e1e1e1e1e1e1e1e1e1e1e1e1e1e"
+
+const test_pool_script: ByteArray =
+  #"2d2d2d2d2d2d2d2d2d2d2d2d2d2d2d2d2d2d2d2d2d2d2d2d2d2d2d2d"
+
+const test_ft =
+  AssetId {
+    policy_id: #"abababababababababababababababababababababababababababab",
+    asset_name: #"01",
+  }
+
+const test_extra_asset =
+  AssetId {
+    policy_id: #"cdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcd",
+    asset_name: #"02",
+  }
+
+const test_factory_token =
+  AssetId {
+    policy_id: #"fafafafafafafafafafafafafafafafafafafafafafafafafafafafa",
+    asset_name: "CSWAP_DEX_FACTORY",
+  }
+
+const test_pool_nft_policy: ByteArray =
+  #"c0c0c0c0c0c0c0c0c0c0c0c0c0c0c0c0c0c0c0c0c0c0c0c0c0c0c0c0"
+
+const test_lp_policy: ByteArray =
+  #"d0d0d0d0d0d0d0d0d0d0d0d0d0d0d0d0d0d0d0d0d0d0d0d0d0d0d0d0"
+
+const test_offer_ref =
+  OutputReference {
+    transaction_id: #"0101010101010101010101010101010101010101010101010101010101010101",
+    output_index: 0,
+  }
+
+fn test_owner() -> address.Address {
+  address.from_verification_key(owner_vk)
+}
+
+fn test_provider() -> address.Address {
+  address.from_verification_key(provider_vk)
+}
+
+fn test_offer() -> BootstrapOfferDatum {
+  BootstrapOfferDatum {
+    owner: test_owner(),
+    owner_key: owner_vk,
+    factory_token: test_factory_token,
+    fraction_asset: test_ft,
+    fraction_amount: 1000,
+    quote_asset: ada,
+    quote_amount: 10_000_000,
+    pool_lovelace: 4_000_000,
+    owner_share_bps: 5000,
+  }
+}
+
+fn escrow_output(offer: BootstrapOfferDatum, value: assets.Value) -> Output {
+  Output {
+    address: address.from_script(test_offer_script),
+    value,
+    datum: InlineDatum(offer),
+    reference_script: None,
+  }
+}
+
+fn pay(to: address.Address, value: assets.Value) -> Output {
+  Output { address: to, value, datum: NoDatum, reference_script: None }
+}
+
+fn with_ft(value: assets.Value, amount: Int) -> assets.Value {
+  assets.add(value, test_ft.policy_id, test_ft.asset_name, amount)
+}
+
+fn with_extra(value: assets.Value) -> assets.Value {
+  assets.add(value, test_extra_asset.policy_id, test_extra_asset.asset_name, 7)
+}
+
+/// The R04 reproduction value: 4 ADA + 1,000 FT.
+fn r04_value() -> assets.Value {
+  assets.from_lovelace(4_000_000) |> with_ft(1000)
+}
+
+fn cancel_tx(
+  escrow: Output,
+  outputs: List<Output>,
+  signers: List<VerificationKeyHash>,
+) -> Transaction {
+  Transaction {
+    ..transaction.placeholder,
+    inputs: [Input { output_reference: test_offer_ref, output: escrow }],
+    outputs,
+    extra_signatories: signers,
+  }
+}
+
+fn run_cancel(
+  offer: BootstrapOfferDatum,
+  value: assets.Value,
+  outputs: List<Output>,
+  signers: List<VerificationKeyHash>,
+) -> Bool {
+  bootstrap_offer.spend(
+    Some(offer),
+    CancelBootstrap,
+    test_offer_ref,
+    cancel_tx(escrow_output(offer, value), outputs, signers),
+  )
+}
+
+fn refund_all(value: assets.Value) -> List<Output> {
+  [pay(test_owner(), value)]
+}
+
+test cancel_valid_offer_by_owner() {
+  run_cancel(test_offer(), r04_value(), refund_all(r04_value()), [owner_vk])
+}
+
+test cancel_r04_datum_declares_less_ada_than_locked() {
+  // Datum declares 3 ADA, escrow holds 4 ADA + 1,000 FT.
+  let offer = BootstrapOfferDatum { ..test_offer(), pool_lovelace: 3_000_000 }
+  run_cancel(offer, r04_value(), refund_all(r04_value()), [owner_vk])
+}
+
+test cancel_with_extra_ada() {
+  let value = assets.from_lovelace(9_000_000) |> with_ft(1000)
+  run_cancel(test_offer(), value, refund_all(value), [owner_vk])
+}
+
+test cancel_with_extra_asset() {
+  let value = r04_value() |> with_extra
+  run_cancel(test_offer(), value, refund_all(value), [owner_vk])
+}
+
+test cancel_with_invalid_share_terms() {
+  let offer = BootstrapOfferDatum { ..test_offer(), owner_share_bps: 10_000 }
+  run_cancel(offer, r04_value(), refund_all(r04_value()), [owner_vk])
+}
+
+test cancel_with_invalid_quote_terms() {
+  let offer =
+    BootstrapOfferDatum {
+      ..test_offer(),
+      quote_asset: test_ft,
+      quote_amount: 0,
+    }
+  run_cancel(offer, r04_value(), refund_all(r04_value()), [owner_vk])
+}
+
+test cancel_refund_may_be_split_across_owner_outputs() {
+  let value = r04_value() |> with_extra
+  run_cancel(
+    test_offer(),
+    value,
+    [
+      pay(test_owner(), assets.from_lovelace(2_000_000) |> with_ft(1000)),
+      pay(test_owner(), assets.from_lovelace(2_000_000) |> with_extra),
+    ],
+    [owner_vk],
+  )
+}
+
+test cancel_rejects_non_owner_signer() {
+  !run_cancel(
+    test_offer(),
+    r04_value(),
+    refund_all(r04_value()),
+    [provider_vk, admin_vk],
+  )
+}
+
+test cancel_rejects_unsigned() {
+  !run_cancel(test_offer(), r04_value(), refund_all(r04_value()), [])
+}
+
+test cancel_rejects_owner_key_not_bound_to_owner_address() {
+  // An attacker-controlled key cannot be paired with someone else's address,
+  // nor can a script-address owner be "authenticated" by an arbitrary key.
+  let mismatched =
+    BootstrapOfferDatum { ..test_offer(), owner_key: provider_vk }
+  let script_owner =
+    BootstrapOfferDatum {
+      ..test_offer(),
+      owner: address.from_script(test_offer_script),
+    }
+  and {
+    !run_cancel(mismatched, r04_value(), refund_all(r04_value()), [provider_vk]),
+    !run_cancel(
+      script_owner,
+      r04_value(),
+      [pay(address.from_script(test_offer_script), r04_value())],
+      [owner_vk],
+    ),
+  }
+}
+
+test cancel_rejects_partial_ada_refund() {
+  let value = assets.from_lovelace(9_000_000) |> with_ft(1000)
+  !run_cancel(
+    test_offer(),
+    value,
+    [pay(test_owner(), assets.from_lovelace(4_000_000) |> with_ft(1000))],
+    [owner_vk],
+  )
+}
+
+test cancel_rejects_missing_extra_asset() {
+  let value = r04_value() |> with_extra
+  !run_cancel(test_offer(), value, refund_all(r04_value()), [owner_vk])
+}
+
+test cancel_rejects_diverted_refund() {
+  !run_cancel(
+    test_offer(),
+    r04_value(),
+    [pay(test_provider(), r04_value())],
+    [owner_vk],
+  )
+}
+
+test cancel_rejects_refund_to_owner_key_with_other_stake() {
+  let restaked =
+    address.from_verification_key(owner_vk)
+      |> address.with_delegation_key(provider_vk)
+  !run_cancel(
+    test_offer(),
+    r04_value(),
+    [pay(restaked, r04_value())],
+    [owner_vk],
+  )
+}
+
+test cancel_rejects_double_satisfaction_across_owner_escrows() {
+  let second_ref = OutputReference { ..test_offer_ref, output_index: 1 }
+  let tx =
+    Transaction {
+      ..transaction.placeholder,
+      inputs: [
+        Input {
+          output_reference: test_offer_ref,
+          output: escrow_output(test_offer(), r04_value()),
+        },
+        Input {
+          output_reference: second_ref,
+          output: escrow_output(test_offer(), r04_value()),
+        },
+      ],
+      outputs: [
+        pay(test_owner(), r04_value()),
+        pay(test_provider(), r04_value()),
+      ],
+      extra_signatories: [owner_vk],
+    }
+  let both_refunded =
+    Transaction {
+      ..tx,
+      outputs: [pay(test_owner(), assets.merge(r04_value(), r04_value()))],
+    }
+  and {
+    !bootstrap_offer.spend(
+      Some(test_offer()),
+      CancelBootstrap,
+      test_offer_ref,
+      tx,
+    ),
+    bootstrap_offer.spend(
+      Some(test_offer()),
+      CancelBootstrap,
+      test_offer_ref,
+      both_refunded,
+    ),
+  }
+}
+
+fn accept_tx(offer_value: assets.Value) -> Transaction {
+  let pool_nft =
+    AssetId {
+      policy_id: test_pool_nft_policy,
+      asset_name: bytearray.from_int_big_endian(0, 8),
+    }
+  let lp_token =
+    AssetId { policy_id: test_lp_policy, asset_name: pool_nft.asset_name }
+  let factory =
+    FactoryDatum {
+      factory_token: test_factory_token,
+      admin: admin_vk,
+      pool_nft_policy: test_pool_nft_policy,
+      next_pool_id: 0,
+      paused: False,
+    }
+  let pool =
+    PoolDatum {
+      pool_nft,
+      asset_a: ada,
+      asset_b: test_ft,
+      lp_token,
+      fee_numerator: 997,
+      fee_denominator: 1000,
+      reserve_a: 10_000_000,
+      reserve_b: 1000,
+      total_liquidity: 100_000,
+      pool_lovelace: 10_000_000,
+    }
+  let factory_value =
+    assets.from_lovelace(5_000_000)
+      |> assets.add(
+          test_factory_token.policy_id,
+          test_factory_token.asset_name,
+          1,
+        )
+  let lp =
+    fn(n) { assets.from_asset(lp_token.policy_id, lp_token.asset_name, n) }
+  Transaction {
+    ..transaction.placeholder,
+    inputs: [
+      Input {
+        output_reference: test_offer_ref,
+        output: escrow_output(test_offer(), offer_value),
+      },
+      Input {
+        output_reference: OutputReference { ..test_offer_ref, output_index: 1 },
+        output: Output {
+          address: address.from_script(test_factory_script),
+          value: factory_value,
+          datum: InlineDatum(factory),
+          reference_script: None,
+        },
+      },
+    ],
+    outputs: [
+      Output {
+        address: address.from_script(test_factory_script),
+        value: factory_value,
+        datum: InlineDatum(FactoryDatum { ..factory, next_pool_id: 1 }),
+        reference_script: None,
+      },
+      Output {
+        address: address.from_script(test_pool_script),
+        value: assets.from_lovelace(10_000_000)
+          |> with_ft(1000)
+          |> assets.add(pool_nft.policy_id, pool_nft.asset_name, 1),
+        datum: InlineDatum(pool),
+        reference_script: None,
+      },
+      pay(test_owner(), lp(50_000)),
+      pay(test_provider(), lp(50_000)),
+    ],
+    extra_signatories: [provider_vk, admin_vk],
+  }
+}
+
+fn run_accept(offer_value: assets.Value) -> Bool {
+  bootstrap_offer.spend(
+    Some(test_offer()),
+    AcceptBootstrap {
+      liquidity_provider: test_provider(),
+      liquidity_provider_key: provider_vk,
+    },
+    test_offer_ref,
+    accept_tx(offer_value),
+  )
+}
+
+test accept_valid_offer_still_passes() {
+  run_accept(r04_value())
+}
+
+test accept_still_rejects_extra_ada() {
+  !run_accept(assets.from_lovelace(5_000_000) |> with_ft(1000))
+}
+
+test accept_still_rejects_extra_asset() {
+  !run_accept(r04_value() |> with_extra)
 }
