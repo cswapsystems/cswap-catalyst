@@ -31,4 +31,6 @@ Use this JSON as the existing stack's `WatchedAddresses` parameter. Preserve its
 
 Passed before submission: 50 Marketplace Aiken tests, 24 DEX Aiken tests, 88 application tests and 23 off-chain tests. An additional regression test checks that the committed watched-address configuration follows both deployment manifests and includes the registry token.
 
+Post-deployment verification passed all 89 application tests, all 14 browser tests and the Preprod production build. Read-only chain checks authenticated the new factory and pool, matched every reference/policy, confirmed the old pool and factory were unchanged, and authenticated the registry through the indexer code. DEX UI derivation confirms factory creation and bootstrap-offer compatibility.
+
 Real Eternl account switching during wallet approval still needs a manual test: stage an action with the expected account, switch accounts before approving, and verify the app rejects/requires reconnection rather than completing under the wrong wallet. Automated wallet guards and mock-wallet browser tests do not replace that extension-level test. The multi-wallet Preprod acceptance scripts create additional test transactions and were not run as part of this deployment-only operation.
