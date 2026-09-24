@@ -1,20 +1,22 @@
 import type { LucidEvolution } from "@lucid-evolution/lucid";
-import { asAsset, asConstr, assetUnit, type Tools } from "./dex-client";
+import { decodeMarketListing, marketUnit, type SharedPool, type MarketListing } from "../marketplace";
+import { type Tools } from "./dex-client";
 import { marketplaceDeployment, marketplaceOrderbookAddress } from "./marketplace-deployment";
+import { reviewedOrderbook } from "./shared-pool-client";
 
-export async function readInventory(lucid: LucidEvolution, tools: Tools) {
+export async function readInventory(lucid: LucidEvolution, tools: Tools, pool?: SharedPool) {
+  await reviewedOrderbook(tools);
   const holdings: Record<string, bigint> = {};
-  const listings: { id: string; unit: string; quantity: bigint; ask: bigint }[] = [];
+  const listings: (MarketListing & { unit: string; ask: bigint })[] = [];
   for (const utxo of await lucid.utxosAt(marketplaceOrderbookAddress)) {
     if (!utxo.assets[marketplaceDeployment.pool.inventoryToken]) continue;
-    if (!utxo.datum) throw new Error("Pool inventory cannot be verified: a receipt output has no datum.");
-    const root = asConstr(tools.Data.from(utxo.datum), "pool inventory");
-    const settlement = asConstr(root.fields[2], "pool settlement");
-    if (root.index !== 0 || root.fields.length !== 7 || settlement.index !== 1 || assetUnit(asAsset(settlement.fields[0], "pool identity")) !== marketplaceDeployment.pool.token || assetUnit(asAsset(settlement.fields[1], "inventory receipt")) !== marketplaceDeployment.pool.inventoryToken || typeof root.fields[4] !== "bigint" || root.fields[4] <= BigInt(0) || typeof root.fields[6] !== "bigint") throw new Error("Pool inventory has an unreadable receipt. Reconcile before accepting more assets.");
-    const unit = assetUnit(asAsset(root.fields[3], "inventory asset"));
-    if ((utxo.assets[unit] || BigInt(0)) < root.fields[4]) throw new Error("Pool inventory quantity does not match its datum.");
-    holdings[unit] = (holdings[unit] || BigInt(0)) + root.fields[4];
-    listings.push({ id: `${utxo.txHash}#${utxo.outputIndex}`, unit, quantity: root.fields[4], ask: root.fields[6] });
+    const listing = decodeMarketListing(tools, utxo), s = listing.settlement;
+    if (s.kind !== "pool" || marketUnit(s.poolToken) !== marketplaceDeployment.pool.token || marketUnit(s.inventoryToken) !== marketplaceDeployment.pool.inventoryToken) throw new Error("Unreconciled pool inventory receipt.");
+    if (pool && (listing.seller !== pool.utxo.address || listing.sellerKey !== pool.batcher || marketUnit(listing.priceAsset) !== marketUnit(pool.quote))) throw new Error("Pool inventory binding mismatch.");
+    const unit = marketUnit(listing.rwa);
+    holdings[unit] = (holdings[unit] || BigInt(0)) + listing.quantity;
+    listings.push({ ...listing, unit, ask: listing.price });
   }
+  if (pool && (BigInt(listings.length) !== pool.count || listings.reduce((sum, listing) => sum + (listing.settlement.kind === "pool" ? listing.settlement.cost : BigInt(0)), BigInt(0)) !== pool.cost || listings.reduce((sum, listing) => sum + listing.ask, BigInt(0)) !== pool.inventory)) throw new Error("Inventory totals do not match the pool snapshot. Refresh before signing.");
   return { holdings, listings };
 }

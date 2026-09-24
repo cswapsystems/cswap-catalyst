@@ -11,7 +11,7 @@ for (const width of [320, 390, 768, 1440]) {
     await page.setViewportSize({ width, height: 900 });
     const errors: string[] = [];
     page.on("pageerror", error => errors.push(error.message));
-    for (const path of ["/my-assets", "/team", "/dex", "/mint", "/portfolio/orders", "/fractionalize", "/marketplace", "/wallet", "/protocol", "/team/dex"]) {
+    for (const path of ["/my-assets", "/team", "/dex", "/mint", "/portfolio/orders", "/fractionalize", "/marketplace", "/wallet", "/protocol", "/team/dex", "/team/inventory", "/team/controls", "/portfolio/reserves"]) {
       await page.goto(path);
       await expect(page.getByRole("navigation", { name: "Main navigation", exact: true }).getByRole("link")).toHaveText(["Marketplace", "Swap", "Portfolio", "Create"]);
       expect(await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth + 1), path).toBe(true);

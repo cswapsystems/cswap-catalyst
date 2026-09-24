@@ -1,5 +1,6 @@
 "use client";
 
+import { buildMarketAction } from "@/lib/marketplace";
 import { confirmTransaction } from "@/lib/transaction-confirmation";
 
 import { useCallback, useEffect, useState } from "react";
@@ -7,7 +8,7 @@ import { useWallet } from "./wallet-context";
 import { readSharedPool } from "@/lib/protocol/shared-pool-client";
 import { asConstr, loadDex } from "@/lib/protocol/dex-client";
 import { parseAdaToLovelace } from "@/lib/dex";
-import { factoryPauseFields, sharedPoolUpdateFields } from "@/lib/operator-controls";
+import { factoryPauseFields } from "@/lib/operator-controls";
 
 type Snapshot = { owner: string; admin: string; paused: boolean; reserve: string; nativeQuote: boolean; ref: string };
 
@@ -62,9 +63,7 @@ export default function ProtocolControls({ protocol, onConfirmed }: { protocol: 
         const pool = await readSharedPool(lucid, tools);
         if (`${pool.utxo.txHash}#${pool.utxo.outputIndex}` !== current.ref) throw new Error("Pool state changed. Refresh and review before signing.");
         const minimum = /^0(?:\.0{1,6})?$/.test(reserve) ? BigInt(0) : pool.quote.policyId ? (/^\d+$/.test(reserve) ? BigInt(reserve) : (() => { throw new Error("Use whole quote-asset base units."); })()) : parseAdaToLovelace(reserve);
-        const fields = sharedPoolUpdateFields(pool.raw.fields, minimum, pool.cash, new tools.Constr(paused ? 1 : 0, []));
-        const next = new tools.Constr(0, fields);
-        builder = lucid.newTx().collectFrom([pool.utxo], tools.Data.to(new tools.Constr(5, [next]))).attach.SpendingValidator(pool.script).pay.ToContract(pool.utxo.address, { kind: "inline", value: tools.Data.to(next) }, { ...pool.utxo.assets }).addSigner(address);
+        builder = buildMarketAction(lucid, tools, pool.scripts, address, { kind: "configure", minimum, paused }, pool);
       } else {
         const { deployment, scripts } = await loadDex(tools);
         if (!scripts.factoryState) throw new Error("Factory migration is required.");
@@ -97,7 +96,7 @@ export default function ProtocolControls({ protocol, onConfirmed }: { protocol: 
       <form onSubmit={(event) => { event.preventDefault(); void submit(); }}><fieldset className="module-fieldset" disabled={busy || !authorized || Boolean(hash && !confirmed)}>
         <label className="field"><span>Desired state</span><select value={paused ? "paused" : "live"} onChange={(event) => setPaused(event.target.value === "paused")}><option value="live">Live</option><option value="paused">Paused</option></select></label>
         {protocol === "shared" && <label className="field"><span>Protected reserve ({current.nativeQuote ? "quote base units" : "ADA"})</span><input required inputMode="decimal" value={reserve} onChange={(event) => setReserve(event.target.value)} /></label>}
-        <p>{protocol === "shared" ? "Pause affects shared-pool trading and liquidity. Direct listings are separate. Registry admission and the Instant Sell reserve floor remain operator checks." : "Pausing the factory prevents creation and normal AMM transitions, including liquidity changes. Review pending activity before pausing."}</p>
+        <p>{protocol === "shared" ? "Pause blocks trading and deposits; cash-only withdrawals, top-ups and price updates remain available. Direct listings are separate. The contract enforces the reserve floor; quantity limits remain off-chain operator controls." : "Pausing the factory prevents creation and normal AMM transitions, including liquidity changes. Review pending activity before pausing."}</p>
         <button type="submit" className="primary-button">{busy ? "Working…" : "Sign configuration update"}</button>
       </fieldset></form>{!authorized && <p className="registry-action-blocked">Only the administrator shown above can sign changes.</p>}</>}
     {hash && <p role="status">{confirmed ? "Confirmed" : "Submitted; awaiting confirmation"}: <a href={`https://preprod.cardanoscan.io/transaction/${hash}`} target="_blank" rel="noreferrer">View transaction</a>{!confirmed && <button type="button" onClick={() => void check()} disabled={busy}>Check confirmation</button>}</p>}

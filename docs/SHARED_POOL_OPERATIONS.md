@@ -1,98 +1,57 @@
 # Shared-pool Marketplace operations
 
-This guide covers the registry-free shared quote pool used by `/marketplace`, `/team`, and `/reserves`. It does not replace the legacy oracle/USDM procedure in `contracts/marketplace/OPERATOR_RUNBOOK.md`.
+This guide implements [the contracts handover](MARKETPLACE_UI_HANDOVER.md). It supersedes the earlier ten-field pool / separate request workflow. The legacy oracle/USDM runbook is not this deployment.
 
-For the complete lifecycle map, see [the end-to-end flow diagram](END_TO_END_FLOW.md).
+## Deployment gate
 
-## Scope and roles
+The committed Preprod manifest still describes the previous contracts. New UI signing requires matching orderbook/pool addresses and matching LP/inventory policies derived from the supplied blueprint. Incompatible state is reported as unavailable, never as zero balances. Do not replace addresses without a reviewed deployment and asset migration plan.
 
-| Role | Key requirement | Responsibility |
-| --- | --- | --- |
-| Marketplace seller | Owns the listed asset | Creates a direct listing or an Instant Sell request; may cancel an unaccepted request. |
-| Marketplace buyer | Funds the quoted price | Buys a direct listing or pool-owned inventory. |
-| Registry administrator | Registry admin key | Approves/revokes exact asset units used by the Team admission check. |
-| Batcher | Quote-pool batcher key | Accepts eligible Instant Sell requests; selects bid and resale ask; signs the settlement transaction. |
-| LP | Holds quote asset and LP tokens | Adds reserve or burns its LP position subject to pool rules. |
+Combined pool/listing transactions need reference scripts to fit ledger limits. After deploying reviewed scripts, add a top-level `referenceScripts` array to the marketplace deployment JSON: entries are exact `{ "txHash": "...", "outputIndex": 0 }` references. The reader fetches and verifies each script hash. Deploy references for orderbook, quote pool, LP policy and inventory policy; the UI does not publish them automatically.
 
-Keep these keys separate. The browser transaction builder does not replace the signer checks in the contracts, and no batcher private key belongs in browser storage or a `NEXT_PUBLIC_` environment variable. The Team console reads the exact-asset registry and fails closed for an unapproved request, but current shared-pool validators do not consume a registry reference; this is an operator control, not an on-chain permission check.
+The supplied `one_shot` pool identity policy has no burn path. Final LP exit cannot complete with that identity. The UI blocks starting final exit until a reviewed burn-capable identity artifact is integrated. The closing builders are emulator-tested with a **test-only** burn-capable identity, not evidence that the current deployment can close. No contract, identity or deployment is replaced by this UI change.
 
-## What the pool tracks
+## Roles and pricing
 
-The authenticated quote-pool UTxO contains an inline `QuotePoolDatum`. The operator console exposes the values that determine whether it is safe to accept another seller request:
+- Sellers create Direct or InstantSell listings from Portfolio. Both can be edited/cancelled before settlement. InstantSell is a seller-owned marketplace listing, not publicly buyable.
+- Buyers purchase Direct or QuotePool inventory listings.
+- The batcher posts on-chain prices, acquires InstantSell listings and reprices inventory.
+- The administrator changes reserve floor / pause state.
+- LPs deposit, withdraw cash, or recover inventory during an already-started closing sequence.
 
-| Value | Meaning |
-| --- | --- |
-| Pool cash | Current quote-asset balance in the pool UTxO. |
-| Protected reserve | `min_cash_reserve`, which a settlement or LP withdrawal must not breach. |
-| Available for bids | Pool cash less protected reserve; not a promise that a particular request can settle. |
-| Open inventory value | Sum of asks for pool-owned listings that have not yet sold. |
-| LP supply | Total outstanding claim token supply. |
+On-chain price entries contain an exact asset plus positive integer buy and sell ratios. For quantity Q, bid and ask are respectively `floor(Q * numerator / denominator)` in quote-asset base units. Zero-rounded results are rejected. At most 50 unique assets may be priced. Removing an entry disables new acquisitions for that asset on-chain; existing inventory remains independently priced.
 
-The current Team health card presents the configured ADA pool in tADA. The liquidity workbench reads the quote asset from the live datum and uses its smallest units. Operators must not infer decimal places from a token ticker.
+The separate off-chain controls retain maximum units per request, maximum units held in pool inventory and active status, as requested. They are signed operator messages, not validator guarantees. Existing storage price fields remain for compatibility but are never executable prices in the new flow. Pending listings reserve no capacity.
 
 ## Operator workflow
 
-### 1. Read state before pricing
+1. Connect the batcher at `/team/inventory`. Review pool identity, quote unit and current state.
+2. Stage buy/sell ratios and sign the on-chain price update. Updates are allowed while paused, but not during closing.
+3. Publish the separate off-chain limits and active switches. Neither the registry nor an oracle determines executable prices.
+4. At `/team`, review pending listings, exact units, minimum payout, current bid/ask, cash and limits. Enter an approval reference.
+5. Sign acquisition. The transaction consumes the seller listing and pool, pays the bid plus the old listing deposit to the seller, mints a receipt and creates inventory with stored acquisition cost. The operator funds the new inventory ADA deposit; pool quote cash falls by the bid only.
+6. Confirm and archive the downloadable approval receipt. It records the pool/listing references, limits revision, prices and transaction hash; downloading alone does not prove confirmation.
+7. Reprice existing inventory at `/team/inventory`. This atomically changes its ask and aggregate pool ask value, preserving acquisition cost.
 
-1. Connect the intended team wallet at `/team`.
-2. Refresh shared-pool state and confirm the pool is live, not paused, and uses the expected deployment.
-3. Record pool cash, protected reserve, available bidding balance, open inventory value, and LP supply.
-4. Refresh the registry and confirm the exact `(policy ID, asset name)` is approved by the Team admission check. This does not replace a validator-level registry reference.
-5. Refresh the Marketplace request queue immediately before building a transaction. A stale pool or request UTxO must be rebuilt.
+Prices and the acquisition reserve floor are enforced on-chain. Quantity caps and active switches are additional off-chain controls. The queue remains visible if limit storage fails, but acquisition is disabled until limits and inventory can be verified.
 
-### 2. Price and settle an Instant Sell request
+## LP accounting
 
-An Instant Sell request is not a completed sale. The seller has escrowed an exact asset and set only a minimum payout.
+The 14-field pool tracks cash, protected reserve, LP supply, inventory **cost**, inventory **ask**, inventory **count**, posted prices and optional closing recipient.
 
-1. Inspect the exact asset unit, quantity, requested minimum, and quote asset.
-2. Confirm the asset approval and any off-chain price/risk approval required by the operating policy.
-3. Publish prices at `/team/inventory`: ADA buy price and resale price per base token unit, maximum units per request, maximum units held in inventory, and active status. Stage changes, then sign and publish with the configured operator wallet. The queue uses this shared price book; the resulting total bid must meet the seller minimum.
-4. Ensure the post-settlement pool quote balance remains at or above `min_cash_reserve` and that the ask/inventory exposure is acceptable.
-5. Use the Team pricing queue with the batcher wallet. The transaction consumes the request and pool together, pays the seller, mints one inventory receipt, creates the pool-owned listing, and advances pool accounting atomically.
-6. Wait for confirmation, refresh both Team and Marketplace, and archive the transaction hash, request out-ref, price source, bid, ask, and operator approval.
+- Deposits mint against cash plus acquisition cost, not resale asks; deposits can proceed with open inventory but not while paused/closing.
+- Partial withdrawals pay only the burned fraction of cash above the reserve floor. They can proceed with open inventory or while paused. Burning shares gives up their inventory exposure.
+- A rounded-zero cash withdrawal requires explicit acknowledgment.
+- Permissionless top-ups add quote funds without LP shares; allowed while paused, not closing.
+- A final LP exit burns all LP shares, pays available cash and records the exiting LP. Each remaining inventory listing is then returned with its ADA deposit to that LP, decrementing cost/ask/count and burning its receipt. The final transaction burns pool identity and returns remaining assets, including the reserve floor. **Starting this sequence remains gated by the identity-policy blocker above.**
 
-The on-chain path rejects an under-minimum seller payout or a listing that is not bound to the pool inventory receipt. The current acquisition path does **not** enforce registry admission, the post-acquisition reserve floor, or the new per-asset limits on-chain. The application checks these operational rules before signing. Do not bypass those checks. Price changes apply to future acquisitions, not existing on-chain inventory asks. Pending requests do not reserve capacity; acquisitions are rechecked against current inventory.
+Inventory return requires the exiting LP, not the batcher. Public inventory sales add ask payment and the inventory deposit to the pool and decrement all inventory accounting.
 
-### 3. Manage liquidity
+## Recovery and reconciliation
 
-LP operations are available from `/portfolio/reserves`; administrators use `/team/controls`:
+`/portfolio/orders` independently scans historical request escrows using the archived exact validator from revision `aadedf5`. It offers owner cancellation only, even when new deployment checks fail. This does not migrate old pool inventory or discover every historical deployment.
 
-- **Add reserves:** deposits the configured quote asset and mints the calculated LP amount.
-- **Remove reserves:** burns LP tokens and withdraws only from the amount above the protected reserve.
+After confirmation verify pool identity, all three inventory counters, supply, seller/LP payments, receipt mint/burn and exact asset units. Rebuild if any referenced state changes. Session pending hashes have manual confirmation controls but are not a durable cross-page transaction journal.
 
-Do not try to change liquidity while open inventory exists. `inventory_value != 0` blocks add, remove, and close operations by design. Sell the inventory or use the documented inventory unwind procedure before changing LP state.
+Off-chain limits require private durable production storage: server-only `PRICE_BOOK_BUCKET`, `PRICE_BOOK_KEY` (default `preprod/instant-sell.json`) and `AWS_REGION`, narrowly scoped S3 GetObject/PutObject permissions and versioning. Revision-checked writes prevent lost updates. Development fallback uses ignored `.data/instant-sell-preprod.json`; production without S3 fails closed. No cloud resources are provisioned here.
 
-### 4. Marketplace operations
-
-- Sellers use **Sell / List** on a holding in `/my-assets` to create a public direct listing with a chosen quantity. They edit/cancel direct listings in Marketplace or `/portfolio/orders`.
-- Sellers choose **Instant Sell to pool** in Portfolio to review the current published bid and request that payout as their on-chain minimum. Settlement still needs an operator signature. They can cancel from `/portfolio/orders` before acceptance.
-- Buyers may purchase either a direct listing or a pool-owned inventory listing. A pool-owned purchase returns payment to the pool and burns the corresponding inventory receipt.
-
-## Reconciliation checklist
-
-After every operator transaction, verify from the confirmed transaction and new UTxOs:
-
-1. The expected pool identity token is in exactly one continuing pool UTxO.
-2. The inline pool datum has the expected LP supply, reserve, and inventory value.
-3. Seller or LP output matches the agreed amount and asset unit.
-4. Inventory receipt mint or burn matches the inventory listing transition.
-5. The exact asset unit in the listing/request is the one moved in the transaction.
-6. The new pool cash remains at or above `min_cash_reserve` where that rule applies.
-7. The record includes input references, signer role, transaction hash, price source, and approval reference.
-
-## Failure handling
-
-| Symptom | Safe response |
-| --- | --- |
-| Pool/request input changed | Refresh state and rebuild. Do not sign a transaction built against a stale UTxO. |
-| Asset is not approved | Do not settle. Have the registry administrator approve the exact unit first. |
-| Bid would breach protected reserve | Decline or reprice the request; do not override the reserve rule. |
-| Open inventory prevents LP action | Complete or unwind all pool-owned listings, then retry with fresh state. |
-| Connected wallet is not the batcher | Use the correct authorized wallet; do not attempt to proxy or export its signing key. |
-| Legacy deployment data | Stop and verify the deployment manifest and script address before any transaction. |
-
-## Security boundary
-
-The shared price book requires durable production storage. Set server-only `PRICE_BOOK_BUCKET`, `PRICE_BOOK_KEY` (default `preprod/instant-sell.json`) and `AWS_REGION`; grant the app role GetObject/PutObject on that private object, and enable bucket versioning. No private wallet key is stored server-side. Publishing requires a fresh wallet message signature and a matching revision. Development without S3 uses `.data/instant-sell-preprod.json`; production without S3 disables publishing and quotes explicitly. See [UI modules](UI_MODULES.md) for storage and operational boundaries.
-
-The shared pool is a coordinated service with a trusted pricing/batcher role. It is not a permissionless AMM, and the UI does not turn a batcher decision into an oracle. Treat price approvals, inventory valuation, key custody, and transaction reconciliation as operational controls. The contracts are not audited; complete transaction-level Preprod tests and independent review before real-value use.
+Run `npm run test:marketplace` for compiled-validator emulator checks. Real wallet-signed Preprod acceptance and independent review remain necessary before operational use.

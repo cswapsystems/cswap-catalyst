@@ -1,7 +1,8 @@
 import type { LucidEvolution, UTxO } from "@lucid-evolution/lucid";
 import { addressData, asAsset, asConstr, assetUnit, decodePool, isAuthenticatedPool, displayName, loadDex, type Tools } from "./protocol/dex-client";
-import { marketplaceOrderbookAddress, marketplacePoolAddress, marketplaceDeployment } from "./protocol/marketplace-deployment";
-import { marketplaceScript, readSharedPool } from "./protocol/shared-pool-client";
+import { decodeMarketListing, marketUnit } from "./marketplace";
+import { readLegacyRequests } from "./protocol/legacy-requests";
+import { reviewedOrderbook, readSharedPool } from "./protocol/shared-pool-client";
 import { scanOutputs } from "./safe-scan";
 import { formatAda } from "./ada";
 
@@ -42,20 +43,22 @@ export async function loadPortfolio(lucid: LucidEvolution, owner: string): Promi
         return { id: reference(utxo), kind: "Vault", unit, quantity: BigInt(1), detail: `${held} of ${fields[6]} fractions in wallet. ${originalOwner ? "You are the recorded original owner. " : ""}The NFT is held by the vault; full-supply burn is required to combine.`, href: "/fractionalize?mode=combine&asset=" + unit, action: "Manage fractions" };
       });
     } },
-    { name: "Marketplace escrow", read: async () => scan("Marketplace escrow", await lucid.utxosAt(marketplaceOrderbookAddress), tools, (utxo, fields) => {
-      if (fields.length !== 7 || fields[1] !== key.hash || typeof fields[4] !== "bigint" || typeof fields[6] !== "bigint" || asConstr(fields[2], "settlement").index !== 0) return null;
-      const unit = assetUnit(asAsset(fields[3], "listed asset"));
-      if ((utxo.assets[unit] ?? BigInt(0)) < fields[4]) return null;
-      return { id: reference(utxo), kind: "Listing", unit, quantity: fields[4], deposit: utxo.assets.lovelace ?? BigInt(0), detail: "Asking " + quoteText(assetUnit(asAsset(fields[5], "payment")), fields[6]) + ". Deposit returns according to listing settlement terms.", href: "/portfolio/orders", action: "Manage listing" };
-    }) },
-    { name: "Instant Sell requests", read: async () => {
-      const script = await marketplaceScript(tools, "pool_sell_request.pool_sell_request.spend", marketplacePoolAddress);
-      return scan("Instant Sell requests", await lucid.utxosAt(tools.validatorToAddress("Preprod", script)), tools, (utxo, fields) => {
-        if (fields.length !== 7 || fields[1] !== key.hash || typeof fields[4] !== "bigint" || typeof fields[6] !== "bigint" || assetUnit(asAsset(fields[2], "pool identity")) !== marketplaceDeployment.pool.token) return null;
-        const unit = assetUnit(asAsset(fields[3], "requested asset"));
-        if ((utxo.assets[unit] ?? BigInt(0)) < fields[4]) return null;
-        return { id: reference(utxo), kind: "Instant Sell", unit, quantity: fields[4], deposit: utxo.assets.lovelace ?? BigInt(0), detail: "Awaiting batcher acceptance. Minimum payout: " + quoteText(assetUnit(asAsset(fields[5], "quote")), fields[6]) + ". You can cancel before acceptance.", href: "/portfolio/orders", action: "Manage request" };
+    { name: "Marketplace escrow", read: async () => {
+      const script = await reviewedOrderbook(tools);
+      const result = scanOutputs(await lucid.utxosAt(tools.validatorToAddress("Preprod", script)), (utxo): Position | null => {
+        if (!utxo.datum) return null;
+        const listing = decodeMarketListing(tools, utxo);
+        if (listing.sellerKey !== key.hash || listing.settlement.kind === "pool") return null;
+        const instant = listing.settlement.kind === "instant";
+        return { id: listing.id, kind: instant ? "Instant Sell" : "Listing", unit: marketUnit(listing.rwa), quantity: listing.quantity, deposit: listing.lockedLovelace, detail: (instant ? "Awaiting operator acceptance. Minimum payout: " : "Asking ") + quoteText(marketUnit(listing.priceAsset), listing.price) + ". You can edit or cancel before settlement.", href: "/portfolio/orders", action: "Manage listing" };
       });
+      if (result.skipped) warnings["Marketplace escrow"] = `${result.skipped} unreadable outputs skipped.`;
+      return result.items;
+    } },
+    { name: "Legacy Instant Sell recovery", read: async () => {
+      const result = await readLegacyRequests(lucid, tools, owner);
+      if (result.skipped) warnings["Legacy Instant Sell recovery"] = `${result.skipped} unreadable outputs skipped.`;
+      return result.requests.map((request): Position => ({ id: request.id, kind: "Instant Sell", unit: request.unit, quantity: request.quantity, deposit: request.utxo.assets.lovelace ?? BigInt(0), detail: "Legacy request: cancellation only. New Instant Sell orders use the marketplace.", href: "/portfolio/orders", action: "Recover request" }));
     } },
     { name: "Bootstrap commitments", read: async () => {
       const { deployment, canCreatePool } = await dexContext;
@@ -83,9 +86,10 @@ export async function loadPortfolio(lucid: LucidEvolution, owner: string): Promi
     } },
     { name: "Shared reserves", read: async () => {
       const pool = await readSharedPool(lucid, tools), held = holdings[pool.lpUnit] ?? BigInt(0);
+      if (pool.closing?.key === key.hash) return [{ id: reference(pool.utxo), kind: "Shared reserves", unit: pool.lpUnit, quantity: BigInt(0), detail: `Final LP exit in progress. ${pool.count} inventory listings remain to return before completion.`, href: "/portfolio/reserves", action: "Continue exit" }];
       if (held <= BigInt(0) || pool.supply <= BigInt(0)) return [];
       const available = pool.cash > pool.minimum ? pool.cash - pool.minimum : BigInt(0);
-      return [{ id: reference(pool.utxo), kind: "Shared reserves", unit: pool.lpUnit, quantity: held, detail: `Estimated withdrawal above protected reserve: ${quoteText(assetUnit(pool.quote), held * available / pool.supply)}. ${pool.inventory > BigInt(0) ? "Withdrawals blocked while inventory is open." : pool.paused ? "Pool paused." : "Subject to fresh state and transaction fees."} Inventory ask value is not cash.`, href: "/portfolio/reserves", action: "Manage reserves" }];
+      return [{ id: reference(pool.utxo), kind: "Shared reserves", unit: pool.lpUnit, quantity: held, detail: `Estimated withdrawal above protected reserve: ${quoteText(assetUnit(pool.quote), held * available / pool.supply)}. Partial withdrawals remain available with open inventory and while paused, but surrender the burned shares’ inventory exposure. Inventory cost basis: ${quoteText(assetUnit(pool.quote), pool.cost)}; resale asks are not cash. Final exit requires a burn-capable pool identity deployment.`, href: "/portfolio/reserves", action: "Manage reserves" }];
     } },
   ];
   const results = await Promise.allSettled(sources.map((source) => source.read()));

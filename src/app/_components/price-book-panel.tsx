@@ -1,91 +1,71 @@
 "use client";
 import { useCallback, useEffect, useState } from "react";
-import Link from "next/link";
-import { fetchPriceBook, priceUpdate, priceAda, type AssetPrice, type PriceBook } from "@/lib/price-book";
-import { marketplaceDeployment } from "@/lib/protocol/marketplace-deployment";
+import { readSharedPool, assertFreshPool } from "@/lib/protocol/shared-pool-client";
 import { readInventory } from "@/lib/protocol/inventory";
-import { readRegistry } from "@/lib/asset-registry";
-import { parseAdaToLovelace } from "@/lib/dex";
-import { formatAda } from "@/lib/ada";
+import { buildMarketAction, marketUnit, type PoolPrice, type MarketListing } from "@/lib/marketplace";
 import { useWallet } from "./wallet-context";
+import { useMarketTransaction } from "./use-market-transaction";
+import MarketTransactionStatus from "./market-transaction-status";
+import OperatorLimitsPanel from "./operator-limits-panel";
 
 export default function PriceBookPanel() {
   const { lucid, address, connect } = useWallet();
-  const [book, setBook] = useState<PriceBook | null>(null);
-  const [entries, setEntries] = useState<AssetPrice[]>([]);
+  const [pool, setPool] = useState<Awaited<ReturnType<typeof readSharedPool>> | null>(null);
   const [inventory, setInventory] = useState<Awaited<ReturnType<typeof readInventory>> | null>(null);
-  const [registered, setRegistered] = useState<string[]>([]);
-  const [busy, setBusy] = useState(false);
-  const [authorized, setAuthorized] = useState(false);
-  const [message, setMessage] = useState("");
-  const [storage, setStorage] = useState("");
-  const [form, setForm] = useState({ unit: "", label: "", bid: "", ask: "", maxPerRequest: "1", maxInventory: "10", active: true });
-  const [dirty, setDirty] = useState(false);
+  const [prices, setPrices] = useState<PoolPrice[]>([]);
+  const [dirty, setDirty] = useState(false), [error, setError] = useState(""), [authorized, setAuthorized] = useState(false), [loading, setLoading] = useState(false);
+  const [form, setForm] = useState({ unit: "", buyN: "", buyD: "1", sellN: "", sellD: "1" });
+  const [asks, setAsks] = useState<Record<string, string>>({});
   const refresh = useCallback(async () => {
-    setBusy(true); setMessage(""); setAuthorized(false); setInventory(null);
-    try {
-      const result = await fetchPriceBook();
-      setBook(result.book); setEntries(result.book.entries); setStorage(result.storage); setDirty(false);
-      if (lucid && address) {
-        const tools = await import("@lucid-evolution/lucid");
-        const credential = tools.getAddressDetails(address).paymentCredential;
-        setAuthorized(credential?.type === "Key" && credential.hash === result.operatorKey);
-        const results = await Promise.allSettled([readInventory(lucid, tools), readRegistry(lucid)]);
-        if (results[0].status === "fulfilled") setInventory(results[0].value);
-        if (results[1].status === "fulfilled") setRegistered(results[1].value.entries);
-        if (results.some((item) => item.status === "rejected")) setMessage("Prices loaded; some on-chain inventory or registry data is unavailable. Refresh before settling requests.");
-      }
-    } catch (error) { setMessage(error instanceof Error ? error.message : "Prices unavailable."); }
-    finally { setBusy(false); }
-  }, [lucid, address]);
-  useEffect(() => { void refresh(); }, [refresh]);
-  const edit = (entry: AssetPrice) => setForm({ ...entry, bid: priceAda(entry.bid), ask: priceAda(entry.ask) });
-  function stage() {
-    try {
-      const entry = { ...form, unit: form.unit.trim().toLowerCase(), bid: parseAdaToLovelace(form.bid).toString(), ask: parseAdaToLovelace(form.ask).toString() };
-      const update = priceUpdate(marketplaceDeployment.pool.token, book?.revision || 0, [...entries.filter((item) => item.unit !== entry.unit), entry]);
-      setEntries(update.entries); setDirty(true); setMessage("Draft updated. Publish to make these settings available to sellers.");
-    } catch (error) { setMessage(error instanceof Error ? error.message : "Invalid price."); }
-  }
-  async function publish() {
-    if (!lucid || !address || !book || !authorized) return;
-    setBusy(true); setMessage("");
+    setPool(null); setInventory(null); setAuthorized(false); setError(""); setDirty(false);
+    if (!lucid || !address) return; setLoading(true);
     try {
       const tools = await import("@lucid-evolution/lucid");
-      const update = priceUpdate(marketplaceDeployment.pool.token, book.revision, entries);
-      if (await lucid.wallet().address() !== address) throw new Error("Wallet changed. Reconnect before publishing.");
-      const signature = await lucid.wallet().signMessage(address, tools.fromText(JSON.stringify(update)));
-      const response = await fetch("/api/price-book", { method: "PUT", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ address, update, signature }) });
-      const result = await response.json();
-      if (!response.ok) throw new Error(result.error || "Publishing failed.");
-      setBook(result.book); setEntries(result.book.entries); setDirty(false); setMessage("Operator prices published. New requests and acquisitions use this price book.");
-    } catch (error) { setMessage(error instanceof Error ? error.message : "Publishing failed."); }
-    finally { setBusy(false); }
+      const current = await readSharedPool(lucid, tools); setPool(current); setPrices(current.prices);
+      setAuthorized(tools.getAddressDetails(address).paymentCredential?.hash === current.batcher);
+      setInventory(await readInventory(lucid, tools, current));
+    } catch (cause) { setError(cause instanceof Error ? cause.message : "On-chain prices unavailable."); }
+    finally { setLoading(false); }
+  }, [lucid, address]);
+  useEffect(() => { void refresh(); }, [refresh]);
+  const transaction = useMarketTransaction(refresh);
+  const blocked = loading || transaction.busy || Boolean(transaction.hash);
+  function stage() {
+    try {
+      const unit = form.unit.trim().toLowerCase();
+      if (!/^[0-9a-f]{56}(?:[0-9a-f]{2}){0,32}$/.test(unit) || unit === (pool && marketUnit(pool.quote))) throw new Error("Choose an exact non-quote asset ID.");
+      const number = (text: string) => { if (!/^[1-9][0-9]*$/.test(text)) throw new Error("Use positive integer ratio values."); return BigInt(text); };
+      const entry = { asset: { policyId: unit.slice(0, 56), assetName: unit.slice(56) }, buy: { numerator: number(form.buyN), denominator: number(form.buyD) }, sell: { numerator: number(form.sellN), denominator: number(form.sellD) } };
+      const next = [...prices.filter((price) => marketUnit(price.asset) !== unit), entry];
+      if (next.length > 50) throw new Error("The validator supports at most 50 exact asset prices.");
+      setPrices(next); setDirty(true); setError("");
+    } catch (cause) { setError(cause instanceof Error ? cause.message : "Invalid price."); }
   }
-  return <section className="work-card form-card price-book-panel">
-    <div className="section-heading"><h2>Instant Sell control panel</h2><button type="button" className="refresh-button" disabled={busy || dirty} onClick={() => void refresh()}>Reload prices</button></div>
-    <p>You set the price the pool pays, its resale price, and how much it can hold. No oracle is used. Each acquisition still needs your wallet signature.</p>
-    <p className="wallet-assets-note">Prices are ADA per base token unit, not per lot. Limits are checked by this application at request and settlement time; they are not new on-chain guarantees. Existing inventory keeps its original on-chain resale ask.</p>
-    {book && <p>Published version {book.revision} · {book.updatedAt ? new Date(book.updatedAt).toLocaleString() : "No prices published"} · {storage}</p>}
-    {!lucid && <button type="button" onClick={() => void connect()}>Connect operator wallet</button>}
-    {lucid && !authorized && <p>Only the configured operator wallet may publish prices.</p>}
-    <div className="price-book-entries">{entries.map((entry) => <article className="position-card" key={entry.unit}><div><h3>{entry.label || "Asset"} · {entry.active ? "Active" : "Inactive"}</h3><code>{entry.unit}</code><p>Buy {formatAda(BigInt(entry.bid))} ADA / unit · Resell {formatAda(BigInt(entry.ask))} ADA / unit</p><p>Request limit {entry.maxPerRequest} · Inventory {inventory ? (inventory.holdings[entry.unit] || BigInt(0)).toString() : "Unknown"} / {entry.maxInventory}</p></div><div className="marketplace-actions"><button type="button" disabled={busy || !authorized} onClick={() => edit(entry)}>Edit</button><button type="button" disabled={busy || !authorized} onClick={() => { setEntries(entries.map((item) => item.unit === entry.unit ? { ...item, active: !item.active } : item)); setDirty(true); }}>{entry.active ? "Deactivate" : "Activate"}</button></div></article>)}</div>
-    {book && !entries.length && <p>No assets priced yet. Add a supported asset below.</p>}
-    <fieldset className="module-fieldset" disabled={busy || !authorized || !book}>
-      <div className="marketplace-form-grid">
-        <label className="field field-wide"><span>Exact asset ID</span><input list="registered-price-assets" value={form.unit} onChange={(e) => setForm({ ...form, unit: e.target.value })} placeholder="Policy ID + asset name in hex" /><datalist id="registered-price-assets">{registered.map((unit) => <option key={unit} value={unit} />)}</datalist></label>
-        <label className="field"><span>Display label</span><input maxLength={100} value={form.label} onChange={(e) => setForm({ ...form, label: e.target.value })} /></label>
-        <label className="field"><span>Buy price (ADA per base unit)</span><input inputMode="decimal" value={form.bid} onChange={(e) => setForm({ ...form, bid: e.target.value })} /></label>
-        <label className="field"><span>Resale price (ADA per base unit)</span><input inputMode="decimal" value={form.ask} onChange={(e) => setForm({ ...form, ask: e.target.value })} /></label>
-        <label className="field"><span>Maximum units per request</span><input inputMode="numeric" value={form.maxPerRequest} onChange={(e) => setForm({ ...form, maxPerRequest: e.target.value })} /></label>
-        <label className="field"><span>Maximum units in pool inventory</span><input inputMode="numeric" value={form.maxInventory} onChange={(e) => setForm({ ...form, maxInventory: e.target.value })} /></label>
-        <label><input type="checkbox" checked={form.active} onChange={(e) => setForm({ ...form, active: e.target.checked })} /> Accept Instant Sell requests</label>
-      </div>
-      <div className="marketplace-toolbar"><button type="button" onClick={stage}>Add / update draft asset</button><button type="button" className="primary-button" disabled={!dirty} onClick={() => void publish()}>{busy ? "Awaiting wallet…" : "Sign & publish prices"}</button><button type="button" disabled={!dirty} onClick={() => { setEntries(book?.entries || []); setDirty(false); setMessage("Unpublished changes discarded."); }}>Discard draft</button></div>
-    </fieldset>
-    {message && <p role="status" className="form-message">{message}</p>}
-    <h3>Shared pool inventory</h3>
-    {inventory ? inventory.listings.length ? inventory.listings.map((item) => <article className="position-card" key={item.id}><div><code>{item.unit}</code><p>{item.quantity.toString()} units · on-chain lot ask {formatAda(item.ask)} ADA</p></div><Link href="/marketplace">View in Marketplace</Link></article>) : <p>No pool-owned listings.</p> : <p>Connect a wallet and refresh to verify inventory quantities.</p>}
-    <p><Link href="/team">Review pending requests</Link> · <Link href="/registry">Manage supported assets</Link></p>
-  </section>;
+  async function submit(listing?: MarketListing) {
+    if (!lucid || !pool) return;
+    const tools = await import("@lucid-evolution/lucid");
+    await transaction.run(async () => {
+      const current = await assertFreshPool(lucid, tools, pool);
+      if (listing && !/^[1-9][0-9]*$/.test(asks[listing.id] || "")) throw new Error("Use a positive total ask in quote base units.");
+      if (listing && !(await lucid.utxosByOutRef([listing.utxo])).length) throw new Error("Listing was already spent. Refresh inventory.");
+      return buildMarketAction(lucid, tools, current.scripts, address, listing ? { kind: "reprice", listing, price: BigInt(asks[listing.id]) } : { kind: "prices", prices }, current);
+    }, () => assertFreshPool(lucid, tools, pool));
+  }
+  return <><section className="work-card form-card price-book-panel">
+    <div className="section-heading"><h2>On-chain pool prices & inventory</h2><button type="button" className="refresh-button" disabled={blocked || dirty} onClick={() => void refresh()}>Refresh pool</button></div>
+    <p>Posted buy and sell ratios determine future acquisitions. Publishing prices is an on-chain transaction signed by the pool batcher. Existing inventory keeps its own ask until repriced below.</p>
+    {!lucid && <button type="button" onClick={() => void connect()}>Connect wallet</button>}
+    {error && <p role="alert">{error}</p>}
+    {pool && <><p>Quote asset: <code>{marketUnit(pool.quote)}</code>. {pool.quote.policyId ? "All amounts use native quote base units." : "1 ADA = 1,000,000 lovelace."} Payout = floor(quantity × numerator / denominator).</p>{pool.closing && <p role="status">Closing: price updates and new acquisitions disabled.</p>}
+      {prices.map((price) => <article className="position-card" key={marketUnit(price.asset)}><div><code>{marketUnit(price.asset)}</code><p>Buy {price.buy.numerator.toString()} / {price.buy.denominator.toString()} · Sell {price.sell.numerator.toString()} / {price.sell.denominator.toString()} quote base units per asset base unit</p></div><div className="marketplace-actions"><button type="button" disabled={blocked || !authorized || Boolean(pool.closing)} onClick={() => setForm({ unit: marketUnit(price.asset), buyN: price.buy.numerator.toString(), buyD: price.buy.denominator.toString(), sellN: price.sell.numerator.toString(), sellD: price.sell.denominator.toString() })}>Edit draft</button><button type="button" disabled={blocked || !authorized || Boolean(pool.closing)} onClick={() => { setPrices(prices.filter((item) => item !== price)); setDirty(true); }}>Remove price from draft</button></div></article>)}
+      {!prices.length && <p>No assets have a posted price. Missing a price prevents new acquisitions.</p>}
+      <fieldset className="module-fieldset" disabled={blocked || !authorized || Boolean(pool.closing)}>
+        <div className="marketplace-form-grid"><label className="field field-wide"><span>Exact asset ID</span><input value={form.unit} onChange={(event) => setForm({ ...form, unit: event.target.value })} /></label>{([["buyN", "Buy numerator · quote base units"], ["buyD", "Buy denominator · asset base units"], ["sellN", "Sell numerator · quote base units"], ["sellD", "Sell denominator · asset base units"]] as const).map(([field, label]) => <label key={field} className="field"><span>{label}</span><input inputMode="numeric" value={form[field]} onChange={(event) => setForm({ ...form, [field]: event.target.value })} /></label>)}</div>
+        <div className="marketplace-toolbar"><button type="button" onClick={stage}>Add / update draft</button><button type="button" className="primary-button" disabled={!dirty} onClick={() => void submit()}>Sign on-chain price update</button><button type="button" disabled={!dirty} onClick={() => { setPrices(pool.prices); setDirty(false); }}>Discard draft</button></div>
+      </fieldset>
+      <h3>Open inventory · {pool.count.toString()} listings</h3><p>Acquisition cost: {pool.cost.toString()} · Aggregate ask: {pool.inventory.toString()} quote base units. Ask value is not cash.</p>
+      {inventory?.listings.map((listing) => <article className="position-card" key={listing.id}><div><code>{listing.unit}</code><p>{listing.quantity.toString()} units · Total ask {listing.price.toString()} quote base units · Cost {listing.settlement.kind === "pool" ? listing.settlement.cost.toString() : "Unknown"}</p><label className="field"><span>New total ask · quote base units</span><input inputMode="numeric" value={asks[listing.id] || ""} onChange={(event) => setAsks({ ...asks, [listing.id]: event.target.value })} /></label></div><button type="button" disabled={blocked || !authorized || pool.paused || Boolean(pool.closing) || !asks[listing.id]} onClick={() => void submit(listing)}>Sign inventory reprice</button></article>)}
+    </>}
+    <MarketTransactionStatus {...transaction} />
+  </section><OperatorLimitsPanel /></>;
 }

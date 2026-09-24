@@ -30,11 +30,18 @@ export function priceUpdate(poolToken: string, revision: number, entries: unknow
 }
 
 export function instantSellQuote(book: PriceBook, unit: string, quantity: bigint, held: bigint) {
+  const entry = checkOperatorLimits(book, unit, quantity, held);
+  return { bid: BigInt(entry.bid) * quantity, ask: BigInt(entry.ask) * quantity, entry };
+}
+
+// The legacy bid/ask fields remain readable for storage compatibility only.
+// Current execution prices MUST come from the authenticated 14-field pool datum.
+export function checkOperatorLimits(book: PriceBook, unit: string, quantity: bigint, held: bigint) {
   const entry = book.entries.find((item) => item.unit === unit);
   if (!entry?.active) throw new Error("Instant Sell is not active for this asset.");
   if (quantity <= BigInt(0) || quantity > BigInt(entry.maxPerRequest)) throw new Error("Quantity exceeds the per-request limit of " + entry.maxPerRequest + " base units.");
   if (held < BigInt(0) || held + quantity > BigInt(entry.maxInventory)) throw new Error("This request would exceed the inventory cap of " + entry.maxInventory + " base units.");
-  return { bid: BigInt(entry.bid) * quantity, ask: BigInt(entry.ask) * quantity, entry };
+  return entry;
 }
 
 export async function fetchPriceBook(): Promise<{ book: PriceBook; operatorKey: string; storage: string }> {

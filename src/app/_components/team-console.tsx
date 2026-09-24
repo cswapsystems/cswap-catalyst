@@ -4,22 +4,14 @@ import WorkflowLinks from "./workflow-links";
 import { useCallback, useEffect, useMemo, useState } from "react";
 import PlatformHeader from "./platform-header";
 import TeamWorkbench from "./team-workbench";
-import { marketplaceDeployment } from "@/lib/protocol/marketplace-deployment";
+import { readSharedPool } from "@/lib/protocol/shared-pool-client";
+import type { SharedPool } from "@/lib/marketplace";
 import { formatAda } from "@/lib/ada";
 import { useWallet } from "./wallet-context";
 
-type PoolHealth = { cash: bigint; minimumReserve: bigint; inventoryValue: bigint; totalLpSupply: bigint; paused: boolean };
-
-function datumBool(tools: typeof import("@lucid-evolution/lucid"), value: unknown): boolean {
-  if (typeof value === "boolean") return value;
-  if (!(value instanceof tools.Constr) || value.fields.length !== 0 || (value.index !== 0 && value.index !== 1)) throw new Error("The configured shared pool paused flag is invalid.");
-  return value.index === 1;
-}
-
-
 export default function TeamConsole() {
   const { address, lucid, connect, status: walletStatus } = useWallet();
-  const [health, setHealth] = useState<PoolHealth | null>(null);
+  const [health, setHealth] = useState<SharedPool | null>(null);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState("");
 
@@ -29,11 +21,7 @@ export default function TeamConsole() {
     setError("");
     try {
       const tools = await import("@lucid-evolution/lucid");
-      const utxo = await lucid.utxoByUnit(marketplaceDeployment.pool.token);
-      if (!utxo.datum) throw new Error("The configured shared pool has no inline datum.");
-      const datum = tools.Data.from(utxo.datum);
-      if (!(datum instanceof tools.Constr) || datum.index !== 0 || datum.fields.length !== 10 || typeof datum.fields[6] !== "bigint" || typeof datum.fields[7] !== "bigint" || typeof datum.fields[9] !== "bigint") throw new Error("The configured shared pool datum is invalid.");
-      setHealth({ cash: utxo.assets.lovelace ?? BigInt(0), totalLpSupply: datum.fields[6], minimumReserve: datum.fields[7], paused: datumBool(tools, datum.fields[8]), inventoryValue: datum.fields[9] });
+      setHealth(await readSharedPool(lucid, tools));
     } catch (cause) {
       setHealth(null);
       setError(cause instanceof Error ? cause.message : "Unable to read shared-pool health.");
@@ -47,9 +35,10 @@ export default function TeamConsole() {
     return () => window.clearTimeout(timer);
   }, [refresh]);
 
-  const available = useMemo(() => health ? health.cash - health.minimumReserve : BigInt(0), [health]);
-  const status = !address ? "Wallet not connected" : loading ? "Checking pool…" : health?.paused ? "Pool paused" : health ? "Pool live" : "Pool unavailable";
+  const available = useMemo(() => health ? health.cash - health.minimum : BigInt(0), [health]);
+  const status = !address ? "Wallet not connected" : loading ? "Checking pool…" : health?.closing ? "Pool closing" : health?.paused ? "Pool paused" : health ? "Pool live" : "Pool unavailable";
 
+  const amount = (value: bigint) => health?.quote.policyId ? `${value} quote base units` : `${formatAda(value)} tADA`;
   return <div className="platform-shell">
     <PlatformHeader />
     <main id="main-content" tabIndex={-1} className="page-main">
@@ -63,19 +52,21 @@ export default function TeamConsole() {
       <div className="team-console">
         <section className="team-overview">
           <div className="section-heading"><div><span className="section-kicker">Live settlement health</span><h2>Shared pool capacity</h2></div><button type="button" className="refresh-button" onClick={() => void refresh()} disabled={!lucid || loading}>{loading ? "Refreshing…" : "Refresh"}</button></div>
-          <p className="mint-intro">Available cash excludes the protected reserve. Liquidity changes are also blocked while pool-owned inventory is still open.</p>
+          <p className="mint-intro">Available cash excludes the protected reserve. Partial withdrawals pay cash only, even with open inventory. Deposits use cash plus inventory acquisition cost.</p>
           <div className="team-metrics">
-            <dl><dt>Pool cash</dt><dd>{health ? formatAda(health.cash) + " tADA" : "-"}</dd></dl>
-            <dl><dt>Available for bids</dt><dd>{health ? formatAda(available > BigInt(0) ? available : BigInt(0)) + " tADA" : "-"}</dd></dl>
-            <dl><dt>Protected reserve</dt><dd>{health ? formatAda(health.minimumReserve) + " tADA" : "-"}</dd></dl>
-            <dl><dt>Open inventory value</dt><dd>{health ? formatAda(health.inventoryValue) + " tADA" : "-"}</dd></dl>
-            <dl><dt>LP supply</dt><dd>{health ? health.totalLpSupply.toString() : "-"}</dd></dl>
+            <dl><dt>Pool cash</dt><dd>{health ? amount(health.cash) : "-"}</dd></dl>
+            <dl><dt>Available for bids</dt><dd>{health ? amount(available > BigInt(0) ? available : BigInt(0)) : "-"}</dd></dl>
+            <dl><dt>Protected reserve</dt><dd>{health ? amount(health.minimum) : "-"}</dd></dl>
+            <dl><dt>Open inventory value</dt><dd>{health ? amount(health.inventory) : "-"}</dd></dl>
+            <dl><dt>Inventory acquisition cost</dt><dd>{health ? amount(health.cost) : "-"}</dd></dl>
+            <dl><dt>Inventory listings</dt><dd>{health ? health.count.toString() : "-"}</dd></dl>
+            <dl><dt>LP supply</dt><dd>{health ? health.supply.toString() : "-"}</dd></dl>
           </div>
           {error && <p role="alert" className="form-message error-message">{error}</p>}
         </section>
         <section className="team-pricing">
           <div className="section-heading"><div><span className="section-kicker">Pricing and acquisition</span><h2>Instant-sell queue</h2></div><span className="marketplace-count">Batcher-only signing</span></div>
-          <p className="mint-intro">Use the published operator price book to approve acquisitions. The application rechecks active status, quantity limits, registry admission and available cash before signing. These operational checks are not new on-chain guarantees.</p>
+          <p className="mint-intro">On-chain prices determine acquisition bids and resale asks; the contract enforces the reserve floor. The application also rechecks off-chain active status and quantity limits before the batcher signs.</p>
           <TeamWorkbench onSettled={refresh} />
         </section>
       </div>

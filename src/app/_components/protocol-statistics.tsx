@@ -2,9 +2,9 @@
 import { useCallback, useEffect, useState } from "react";
 import Link from "next/link";
 import { readRegistry } from "@/lib/asset-registry";
-import { asAsset, asConstr, assetUnit, decodePool, isAuthenticatedPool, loadDex } from "@/lib/protocol/dex-client";
-import { marketplaceOrderbookAddress } from "@/lib/protocol/marketplace-deployment";
-import { readSharedPool } from "@/lib/protocol/shared-pool-client";
+import { asConstr, decodePool, isAuthenticatedPool, loadDex } from "@/lib/protocol/dex-client";
+import { decodeMarketListing, marketUnit } from "@/lib/marketplace";
+import { reviewedOrderbook, readSharedPool } from "@/lib/protocol/shared-pool-client";
 import { fetchPriceBook } from "@/lib/price-book";
 import { scanOutputs } from "@/lib/safe-scan";
 import { formatAda } from "@/lib/ada";
@@ -24,21 +24,19 @@ export default function ProtocolStatistics() {
       const lucid = await tools.Lucid(new tools.Blockfrost("/api/blockfrost", ""), "Preprod", { presetProtocolParameters: tools.PROTOCOL_PARAMETERS_DEFAULT });
       const sources: { name: string; read: () => Promise<Omit<Section, "name"> > }[] = [
         { name: "Marketplace", read: async () => {
-          const result = scanOutputs(await lucid.utxosAt(marketplaceOrderbookAddress), (utxo) => {
+          const script = await reviewedOrderbook(tools);
+          const result = scanOutputs(await lucid.utxosAt(tools.validatorToAddress("Preprod", script)), (utxo) => {
             if (!utxo.datum) return null;
-            const root = asConstr(tools.Data.from(utxo.datum), "listing");
-            if (root.index !== 0 || root.fields.length !== 7 || typeof root.fields[4] !== "bigint" || root.fields[4] <= BigInt(0) || typeof root.fields[6] !== "bigint" || root.fields[6] <= BigInt(0)) return null;
-            const unit = assetUnit(asAsset(root.fields[3], "listed asset"));
-            if ((utxo.assets[unit] || BigInt(0)) < root.fields[4]) return null;
-            return { unit, pool: asConstr(root.fields[2], "settlement").index === 1 };
+            const listing = decodeMarketListing(tools, utxo);
+            return { unit: marketUnit(listing.rwa), pool: listing.settlement.kind === "pool", instant: listing.settlement.kind === "instant" };
           });
-          return { metrics: [{ label: "Listed assets · distinct IDs", value: String(new Set(result.items.map((item) => item.unit)).size) }, { label: "Open listings", value: String(result.items.length) }, { label: "Pool-owned listings", value: String(result.items.filter((item) => item.pool).length) }], note: `${result.skipped} unreadable outputs skipped. Listings are not registry endorsements.` };
+          return { metrics: [{ label: "Listed assets · distinct IDs", value: String(new Set(result.items.map((item) => item.unit)).size) }, { label: "Buyable listings", value: String(result.items.filter((item) => !item.instant).length) }, { label: "Pending Instant Sell", value: String(result.items.filter((item) => item.instant).length) }, { label: "Pool-owned listings", value: String(result.items.filter((item) => item.pool).length) }], note: `${result.skipped} unreadable outputs skipped. Listings are not registry endorsements.` };
         } },
         { name: "Asset registry", read: async () => { const registry = await readRegistry(lucid); return { metrics: [{ label: "Registered assets", value: String(registry.entries.length) }, { label: "Registry version", value: registry.version.toString() }] }; } },
         { name: "Shared reserves", read: async () => {
           const pool = await readSharedPool(lucid, tools);
-          if (pool.quote.policyId) throw new Error("Non-ADA pool statistics are not supported.");
-          return { metrics: [{ label: "Pool cash · ADA", value: formatAda(pool.cash) }, { label: "Protected reserve · ADA", value: formatAda(pool.minimum) }, { label: "Available cash · ADA", value: formatAda(pool.cash > pool.minimum ? pool.cash - pool.minimum : BigInt(0)) }, { label: "Inventory ask value · ADA", value: formatAda(pool.inventory) }, { label: "Reserves LP supply · base units", value: pool.supply.toString() }, { label: "Pool status", value: pool.paused ? "Paused" : "Active" }], note: "Inventory ask value is an operator-set resale value, not cash or an independently appraised valuation." };
+          const amount = (value: bigint) => pool.quote.policyId ? value.toString() + " quote base units" : formatAda(value) + " ADA";
+          return { metrics: [{ label: "Pool cash", value: amount(pool.cash) }, { label: "Protected reserve", value: amount(pool.minimum) }, { label: "Available cash", value: amount(pool.cash > pool.minimum ? pool.cash - pool.minimum : BigInt(0)) }, { label: "Inventory ask value", value: amount(pool.inventory) }, { label: "Inventory acquisition cost", value: amount(pool.cost) }, { label: "Inventory listings", value: pool.count.toString() }, { label: "On-chain priced assets", value: String(pool.prices.length) }, { label: "Reserves LP supply · base units", value: pool.supply.toString() }, { label: "Pool status", value: pool.closing ? "Closing" : pool.paused ? "Paused" : "Active" }], note: "Inventory ask value is an operator-set resale value, not cash or an independently appraised valuation." };
         } },
         { name: "DEX", read: async () => {
           const { deployment } = await loadDex(tools);
@@ -57,7 +55,7 @@ export default function ProtocolStatistics() {
           });
           return { metrics: [{ label: "Open asset vaults", value: String(result.items.length) }], note: `${result.skipped} unreadable outputs skipped.` };
         } },
-        { name: "Operator price book", read: async () => { const { book } = await fetchPriceBook(); return { metrics: [{ label: "Active Instant Sell assets", value: String(book.entries.filter((entry) => entry.active).length) }, { label: "Published price version", value: String(book.revision) }], note: "Active pricing does not guarantee available cash or registry admission. Both are checked on acquisition." }; } },
+        { name: "Off-chain operator limits", read: async () => { const { book } = await fetchPriceBook(); return { metrics: [{ label: "Enabled limit entries", value: String(book.entries.filter((entry) => entry.active).length) }, { label: "Limits revision", value: String(book.revision) }], note: "These active switches and quantity caps are application controls, not contract guarantees. Executable prices come from the pool datum." }; } },
       ];
       const results = await Promise.allSettled(sources.map((source) => source.read()));
       setSections(results.map((result, index) => result.status === "fulfilled" ? { name: sources[index].name, ...result.value } : { name: sources[index].name, error: result.reason instanceof Error ? result.reason.message : "Source unavailable." }));

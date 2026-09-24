@@ -7,6 +7,7 @@
     "build": "next build",
     "start": "next start",
     "lint": "eslint",
+    "test:marketplace": "node --experimental-strip-types --test tests/marketplace.test.mjs",
     "test:registry": "node --experimental-strip-types --test tests/asset-registry.test.mjs",
     "test:wallet": "node --experimental-strip-types --test tests/wallet-session.test.mjs tests/browser-chain-provider.test.mjs",
     "test:wallet-assets": "node --experimental-strip-types --test tests/wallet-assets.test.mjs",

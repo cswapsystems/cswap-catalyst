@@ -1,24 +1,50 @@
-import type { LucidEvolution, Script, UTxO } from "@lucid-evolution/lucid";
+import type { LucidEvolution, Script } from "@lucid-evolution/lucid";
 import { marketplaceDeployment, marketplaceOrderbookAddress, marketplacePoolAddress } from "./marketplace-deployment";
-import { addressData, asAsset, asConstr, assetUnit, type Tools } from "./dex-client";
+import { addressData, type Tools } from "./dex-client";
+import { decodeSharedPool, marketAssetData, marketUnit, outputRef, type MarketScripts } from "../marketplace";
 
-export async function marketplaceScript(tools: Tools, name: string, parameterAddress: string): Promise<Script> {
-  const response = await fetch(`/api/marketplace-blueprint?validator=${encodeURIComponent(name)}`, { cache: "no-store" });
+export async function marketplaceCode(name: string): Promise<string> {
+  const response = await fetch("/api/marketplace-blueprint?validator=" + encodeURIComponent(name), { cache: "no-store" });
   const body = await response.json();
   if (!response.ok || typeof body.compiledCode !== "string") throw new Error(body.error || "Marketplace validator unavailable.");
-  return { type: "PlutusV3", script: tools.applyParamsToScript(body.compiledCode, [addressData(tools, parameterAddress)]) };
+  return body.compiledCode;
 }
-
+export async function marketplaceScript(tools: Tools, name: string, parameterAddress: string): Promise<Script> {
+  return { type: "PlutusV3", script: tools.applyParamsToScript(await marketplaceCode(name), [addressData(tools, parameterAddress)]) };
+}
+export async function reviewedOrderbook(tools: Tools) {
+  const script: Script = { type: "PlutusV3", script: await marketplaceCode("p2p_listing_simple.p2p_listing_simple.spend") };
+  if (tools.validatorToAddress("Preprod", script) !== marketplaceOrderbookAddress) throw new Error("Marketplace deployment is schema-incompatible. The configured orderbook does not match the updated blueprint. Signing is disabled until a reviewed deployment/migration is configured.");
+  return script;
+}
 export async function readSharedPool(lucid: LucidEvolution, tools: Tools) {
+  const orderbook = await reviewedOrderbook(tools);
   const script = await marketplaceScript(tools, "quote_pool.quote_pool.spend", marketplaceOrderbookAddress);
-  if (tools.validatorToAddress("Preprod", script) !== marketplacePoolAddress) throw new Error("Shared-pool address does not match the reviewed validator.");
-  const utxo: UTxO = await lucid.utxoByUnit(marketplaceDeployment.pool.token);
-  if (utxo.address !== marketplacePoolAddress || !utxo.datum || utxo.assets[marketplaceDeployment.pool.token] !== BigInt(1)) throw new Error("Shared-pool identity is invalid.");
-  const raw = asConstr(tools.Data.from(utxo.datum), "shared pool");
-  if (raw.index !== 0 || raw.fields.length !== 10 || typeof raw.fields[0] !== "string" || typeof raw.fields[1] !== "string" || ![6, 7, 9].every((i) => typeof raw.fields[i] === "bigint")) throw new Error("Malformed shared-pool state.");
-  if (assetUnit(asAsset(raw.fields[2], "pool token")) !== marketplaceDeployment.pool.token) throw new Error("Shared-pool token does not match its datum.");
-  const flag = asConstr(raw.fields[8], "pause flag");
-  if (flag.fields.length !== 0 || ![0, 1].includes(flag.index)) throw new Error("Invalid pool pause flag.");
-  const quote = asAsset(raw.fields[5], "quote asset");
-  return { utxo, script, raw, admin: raw.fields[0], batcher: raw.fields[1], paused: flag.index === 1, quote, cash: utxo.assets[assetUnit(quote)] ?? BigInt(0), minimum: raw.fields[7] as bigint, inventory: raw.fields[9] as bigint, supply: raw.fields[6] as bigint, lpUnit: assetUnit(asAsset(raw.fields[3], "LP token")) };
+  if (tools.validatorToAddress("Preprod", script) !== marketplacePoolAddress) throw new Error("Shared-pool deployment does not match the updated blueprint. Migration / fresh deployment is required before signing.");
+  const utxo = await lucid.utxoByUnit(marketplaceDeployment.pool.token);
+  if (!utxo || utxo.address !== marketplacePoolAddress) throw new Error("Shared-pool identity is not at its configured address.");
+  const pool = decodeSharedPool(tools, utxo);
+  if (marketUnit(pool.poolToken) !== marketplaceDeployment.pool.token || pool.lpUnit !== marketplaceDeployment.pool.lpToken || marketUnit(pool.inventoryToken) !== marketplaceDeployment.pool.inventoryToken) throw new Error("Shared-pool identities differ from the deployment manifest.");
+  const [lpCode, inventoryCode] = await Promise.all([marketplaceCode("lp_policy.lp_policy.mint"), marketplaceCode("inventory_policy.inventory_policy.mint")]);
+  const lp: Script = { type: "PlutusV3", script: tools.applyParamsToScript(lpCode, [marketAssetData(tools, pool.poolToken), pool.lpToken.assetName]) };
+  const inventory: Script = { type: "PlutusV3", script: tools.applyParamsToScript(inventoryCode, [marketAssetData(tools, pool.poolToken), pool.inventoryToken.assetName, pool.batcher]) };
+  if (tools.mintingPolicyToId(lp) !== pool.lpToken.policyId || tools.mintingPolicyToId(inventory) !== pool.inventoryToken.policyId) throw new Error("Pool LP / inventory policies do not match the reviewed blueprint.");
+  // No burn-capable identity artifact is supplied by the contracts handover.
+  // Never pretend one_shot can burn. Final exit remains gated until one is reviewed.
+  const scripts: MarketScripts = { orderbook, pool: script, lp, inventory, orderbookAddress: marketplaceOrderbookAddress, poolAddress: marketplacePoolAddress };
+  const refs = (marketplaceDeployment as unknown as { referenceScripts?: { txHash: string; outputIndex: number }[] }).referenceScripts || [];
+  if (refs.length) {
+    const outputs = await lucid.utxosByOutRef(refs);
+    if (outputs.length !== refs.length || outputs.some((output) => !output.scriptRef || ![orderbook, script, lp, inventory].some((expected) => tools.validatorToScriptHash(expected) === tools.validatorToScriptHash(output.scriptRef!)))) throw new Error("Configured Marketplace reference scripts are missing or incompatible.");
+    scripts.references = outputs;
+  }
+  return { ...pool, script, scripts };
+}
+export async function assertMarketWallet(lucid: LucidEvolution, address: string) {
+  if (await lucid.wallet().address() !== address || lucid.config().network !== "Preprod") throw new Error("Wallet account/network changed. Reconnect and review the transaction.");
+}
+export async function assertFreshPool(lucid: LucidEvolution, tools: Tools, expected: { utxo: import("@lucid-evolution/lucid").UTxO }) {
+  const current = await readSharedPool(lucid, tools);
+  if (outputRef(current.utxo) !== outputRef(expected.utxo)) throw new Error("Pool state or posted prices changed. Refresh and review before signing.");
+  return current;
 }

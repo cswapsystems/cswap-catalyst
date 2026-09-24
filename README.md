@@ -4,12 +4,14 @@ CSWAP Catalyst is a Cardano application for minting, fractionalizing, listing, a
 
 ## Product surfaces
 
-The UI groups work into **Portfolio**, **DEX**, and **Operations**, with Marketplace, Mint, and Explore as separate entry points. See [UI modules](docs/UI_MODULES.md) for route ownership, execution previews, operator controls, and remaining limitations.
+Primary navigation is **Marketplace**, **Swap**, **Portfolio**, and **Create**, with public Protocol statistics and the Operator console in More. See [UI modules](docs/UI_MODULES.md) for route ownership, execution previews, operator controls, and remaining limitations.
 
 - **Marketplace** (`/marketplace`) supports direct fixed-price listings and seller-only Instant Sell requests. Direct sellers set their own price. Instant Sell sellers set a minimum payout and wait for the shared-pool batcher to settle the request.
 - **Shared-pool operations** (`/team`) gives the team a live view of settlement cash, protected reserve, open inventory value, LP supply, instant-sell pricing, registry approvals, and liquidity controls.
 - **Fraction DEX** (`/dex`) runs a shared-address constant-product AMM. It supports normal admin-created tADA pools and a three-party bootstrap: an FT provider locks the FT side, a separate LP supplies tADA or USDCx, and the configured Team creator co-signs before the pool is created atomically and LP shares are split.
-- **Asset registry** (`/registry`) supplies the Team UI exact-asset admission check before it builds a shared-pool Instant Sell settlement. Current shared-pool validators do not yet authenticate that registry on-chain.
+- **Asset registry** (`/registry`) provides separate exact-asset approvals. New shared-pool acquisitions use on-chain price entries for admission, plus off-chain operator quantity/activity controls.
+
+The Marketplace UI implements the new 14-field pool and orderbook Instant Sell schema. **Operational use is gated:** the existing manifest needs a reviewed deployment with reference scripts, and final LP exit needs a burn-capable pool identity policy not supplied by the handover. See [Shared-pool operations](docs/SHARED_POOL_OPERATIONS.md) for migration and recovery boundaries.
 
 ## Documentation
 

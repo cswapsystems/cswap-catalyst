@@ -1,230 +1,79 @@
 "use client";
-
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useState } from "react";
 import { useWallet } from "./wallet-context";
-import { formatAdaWithUnit } from "@/lib/ada";
-import { readSharedPool } from "@/lib/protocol/shared-pool-client";
-import { marketplaceOrderbookAddress, marketplacePoolAddress } from "@/lib/protocol/marketplace-deployment";
-
-type AssetClass = { policyId: string; assetName: string };
-type DataConstr = { index: number; fields: unknown[] };
-type PoolState = {
-  utxo: import("@lucid-evolution/lucid").UTxO;
-  datum: DataConstr;
-  poolToken: AssetClass;
-  lpToken: AssetClass;
-  quoteAsset: AssetClass;
-  totalLpSupply: bigint;
-  minCashReserve: bigint;
-  paused: boolean;
-  inventoryValue: bigint;
-};
-
-function asConstr(value: unknown, label: string): DataConstr {
-  if (typeof value !== "object" || value === null || !("index" in value) || !("fields" in value)) throw new Error("Malformed " + label + " datum.");
-  const candidate = value as { index: unknown; fields: unknown };
-  if (typeof candidate.index !== "number" || !Array.isArray(candidate.fields)) throw new Error("Malformed " + label + " datum.");
-  return { index: candidate.index, fields: candidate.fields };
-}
-
-function asAsset(value: unknown, label: string): AssetClass {
-  const asset = asConstr(value, label);
-  if (asset.index !== 0 || asset.fields.length !== 2 || typeof asset.fields[0] !== "string" || typeof asset.fields[1] !== "string") throw new Error("Malformed " + label + " asset.");
-  return { policyId: asset.fields[0], assetName: asset.fields[1] };
-}
-
-function asBool(value: unknown, label: string): boolean {
-  if (typeof value === "boolean") return value;
-  const bool = asConstr(value, label);
-  if (bool.fields.length !== 0 || (bool.index !== 0 && bool.index !== 1)) throw new Error("Malformed " + label + " Boolean.");
-  return bool.index === 1;
-}
-
-function decodePoolDatum(value: unknown): Omit<PoolState, "utxo"> {
-  const datum = asConstr(value, "quote pool");
-  if (datum.index !== 0 || datum.fields.length !== 10 || typeof datum.fields[6] !== "bigint" || typeof datum.fields[7] !== "bigint" || typeof datum.fields[9] !== "bigint") throw new Error("Malformed quote pool datum.");
-  return {
-    datum,
-    poolToken: asAsset(datum.fields[2], "pool token"),
-    lpToken: asAsset(datum.fields[3], "LP token"),
-    quoteAsset: asAsset(datum.fields[5], "quote asset"),
-    totalLpSupply: datum.fields[6],
-    minCashReserve: datum.fields[7],
-    paused: asBool(datum.fields[8], "pool paused"),
-    inventoryValue: datum.fields[9],
-  };
-}
-
-function unit(asset: AssetClass): string {
-  return asset.policyId ? asset.policyId + asset.assetName : "lovelace";
-}
-
-function assetLabel(asset: AssetClass): string {
-  return asset.policyId ? asset.policyId.slice(0, 12) + "…" + asset.assetName : "ADA";
-}
-
-function formatQuoteAmount(asset: AssetClass, amount: bigint): string {
-  return asset.policyId ? amount.toString() + " " + assetLabel(asset) : formatAdaWithUnit(amount);
-}
-
-function addAsset(assets: import("@lucid-evolution/lucid").Assets, asset: AssetClass, amount: bigint): import("@lucid-evolution/lucid").Assets {
-  const key = unit(asset);
-  return { ...assets, [key]: (assets[key] || BigInt(0)) + amount };
-}
-
-function assetData(ConstrClass: typeof import("@lucid-evolution/lucid").Constr, asset: AssetClass): DataConstr {
-  return new ConstrClass(0, [asset.policyId, asset.assetName]) as DataConstr;
-}
-
-function addressData(
-  Data: typeof import("@lucid-evolution/lucid").Data,
-  AddressSchema: typeof import("@lucid-evolution/lucid").AddressSchema,
-  getAddressDetails: typeof import("@lucid-evolution/lucid").getAddressDetails,
-  address: string,
-): unknown {
-  const details = getAddressDetails(address);
-  if (!details?.paymentCredential) throw new Error("The connected wallet has no supported payment credential.");
-  const payment = details.paymentCredential.type === "Key" ? { PubKeyCredential: [details.paymentCredential.hash] } : { ScriptCredential: [details.paymentCredential.hash] };
-  const staking = details.stakeCredential ? { StakingHash: [details.stakeCredential.type === "Key" ? { PubKeyCredential: [details.stakeCredential.hash] } : { ScriptCredential: [details.stakeCredential.hash] }] } : null;
-  return Data.from(Data.to({ addressCredential: payment, addressStakingCredential: staking } as never, AddressSchema as never));
-}
-
-async function loadCode(title: string): Promise<string> {
-  const response = await fetch("/api/marketplace-blueprint?validator=" + encodeURIComponent(title), { cache: "no-store" });
-  const body = await response.json() as { compiledCode?: string; error?: string };
-  if (!response.ok || !body.compiledCode) throw new Error(body.error || "Marketplace validator unavailable.");
-  return body.compiledCode;
-}
+import { readSharedPool, assertFreshPool } from "@/lib/protocol/shared-pool-client";
+import { readInventory } from "@/lib/protocol/inventory";
+import { buildMarketAction, lpDeposit, lpWithdrawal, marketUnit, type MarketAction } from "@/lib/marketplace";
+import { formatAda } from "@/lib/ada";
+import { useMarketTransaction } from "./use-market-transaction";
+import MarketTransactionStatus from "./market-transaction-status";
 
 export default function ReservesWorkbench({ revision = 0 }: { revision?: number }) {
-  const { address, lucid } = useWallet();
-  const [mode, setMode] = useState<"add" | "remove">("add");
-  const [amount, setAmount] = useState("");
-  const [lpAmount, setLpAmount] = useState("");
-  const [pool, setPool] = useState<PoolState | null>(null);
-  const [loading, setLoading] = useState(false);
-  const [loaded, setLoaded] = useState(false);
-  const [message, setMessage] = useState<{ kind: "error" | "success"; text: string } | null>(null);
-  const quotePoolAddress = marketplacePoolAddress;
-  const orderbookAddress = marketplaceOrderbookAddress;
-
+  const { lucid, address, connect } = useWallet();
+  const [pool, setPool] = useState<Awaited<ReturnType<typeof readSharedPool>> | null>(null);
+  const [inventory, setInventory] = useState<Awaited<ReturnType<typeof readInventory>> | null>(null);
+  const [held, setHeld] = useState(BigInt(0));
+  const [mode, setMode] = useState<"deposit" | "withdraw" | "topup">("deposit");
+  const [amount, setAmount] = useState(""), [acceptZero, setAcceptZero] = useState(false), [acceptExit, setAcceptExit] = useState(false);
+  const [loading, setLoading] = useState(false), [error, setError] = useState("");
   const refresh = useCallback(async () => {
-    setMessage(null);
-    if (!lucid || !quotePoolAddress) {
-      setPool(null);
-      setLoaded(true);
-      return;
-    }
+    setPool(null); setInventory(null); setHeld(BigInt(0)); setError("");
+    if (!lucid || !address) return;
     setLoading(true);
     try {
       const tools = await import("@lucid-evolution/lucid");
-      const current = await readSharedPool(lucid, tools);
-      const found: PoolState = { utxo: current.utxo, ...decodePoolDatum(current.raw) };
-      setPool(found);
-      setLoaded(true);
-      if (!found) setMessage({ kind: "error", text: "No quote-pool UTxO with a valid inline datum was found at the configured address." });
-    } catch (cause) {
-      setMessage({ kind: "error", text: cause instanceof Error ? cause.message : "Unable to read the quote-pool reserves." });
-    } finally {
-      setLoading(false);
+      const current = await readSharedPool(lucid, tools); setPool(current);
+      setHeld((await lucid.wallet().getUtxos()).reduce((sum, utxo) => sum + (utxo.assets[current.lpUnit] || BigInt(0)), BigInt(0)));
+      setInventory(await readInventory(lucid, tools, current));
+    } catch (cause) { setError(cause instanceof Error ? cause.message : "Reserves unavailable."); }
+    finally { setLoading(false); }
+  }, [lucid, address]);
+  useEffect(() => { void refresh(); }, [refresh, revision]);
+  const transaction = useMarketTransaction(refresh);
+  const blocked = transaction.busy || Boolean(transaction.hash) || loading;
+  const display = (value: bigint) => pool?.quote.policyId ? value.toString() + " quote base units" : formatAda(value) + " ADA";
+  let preview = "", invalid = "", final = false;
+  try {
+    if (pool && amount) {
+      if (!/^[1-9][0-9]*$/.test(amount)) throw new Error("Use positive whole base units.");
+      if (mode === "deposit") preview = "LP shares minted: " + lpDeposit(pool, BigInt(amount));
+      else if (mode === "withdraw") {
+        const result = lpWithdrawal(pool, BigInt(amount)); final = result.final;
+        if (BigInt(amount) > held) throw new Error("Burn exceeds your wallet LP balance.");
+        if (result.amount === BigInt(0) && !acceptZero) throw new Error("Confirm the zero-cash burn explicitly.");
+        if (final && !pool.scripts.identity) throw new Error("Final exit is blocked: the handover does not include a reviewed burn-capable pool identity policy. Existing one_shot identities cannot burn.");
+        if (final && !acceptExit) throw new Error("Confirm final exit and inventory recovery.");
+        preview = "Burn " + amount + " LP units for " + display(result.amount) + (final ? ". Starts final LP exit." : ". This is cash-only; unsold inventory stays in the pool.");
+      } else preview = "Donate " + display(BigInt(amount)) + " to reserve cash. No LP shares minted.";
     }
-  }, [lucid, quotePoolAddress]);
-
-  useEffect(() => {
-    const timer = window.setTimeout(() => { void refresh(); }, 0);
-    return () => window.clearTimeout(timer);
-  }, [refresh, revision]);
-
-  const quoteUnit = useMemo(() => pool ? unit(pool.quoteAsset) : "", [pool]);
-  const cash = pool ? pool.utxo.assets[quoteUnit] || BigInt(0) : BigInt(0);
-  const withdrawable = pool ? cash - pool.minCashReserve : BigInt(0);
-
-  function selectMode(nextMode: "add" | "remove") {
-    setMode(nextMode);
-    setAmount("");
-    setLpAmount("");
-    setMessage(null);
+  } catch (cause) { invalid = cause instanceof Error ? cause.message : "Invalid amount."; }
+  async function execute(action: MarketAction) {
+    if (!lucid || !pool) return;
+    const tools = await import("@lucid-evolution/lucid");
+    await transaction.run(async () => {
+      const fresh = await assertFreshPool(lucid, tools, pool);
+      return buildMarketAction(lucid, tools, fresh.scripts, address, action, fresh);
+    }, () => assertFreshPool(lucid, tools, pool));
   }
-
-  async function submitLiquidity() {
-    setMessage(null);
-    if (!lucid || !address) { setMessage({ kind: "error", text: "Connect Eternl before managing reserves." }); return; }
-    if (!pool) { setMessage({ kind: "error", text: "No active quote pool is available." }); return; }
-    if (!quotePoolAddress || !orderbookAddress) { setMessage({ kind: "error", text: "Configure both quote-pool and orderbook addresses first." }); return; }
-    if (pool.paused) { setMessage({ kind: "error", text: "This quote pool is paused." }); return; }
-    if (pool.inventoryValue !== BigInt(0)) { setMessage({ kind: "error", text: "Liquidity changes are disabled while pool-owned inventory is listed." }); return; }
-    const input = mode === "add" ? amount : lpAmount;
-    if (!/^[1-9]\d*$/.test(input)) { setMessage({ kind: "error", text: mode === "add" ? "Enter a positive reserve amount." : "Enter a positive LP token amount." }); return; }
-
-    setLoading(true);
-    try {
-      const tools = await import("@lucid-evolution/lucid");
-      const details = tools.getAddressDetails(address);
-      const latest = await readSharedPool(lucid, tools);
-      if (latest.utxo.txHash !== pool.utxo.txHash || latest.utxo.outputIndex !== pool.utxo.outputIndex) { await refresh(); throw new Error("Pool state changed. Review the refreshed reserve before submitting again."); }
-      if (!details?.paymentCredential || details.paymentCredential.type !== "Key") throw new Error("The connected wallet needs a payment-key address.");
-      const provider = addressData(tools.Data, tools.AddressSchema, tools.getAddressDetails, address);
-      const providerKey = details.paymentCredential.hash;
-      const poolCode = await loadCode("quote_pool.quote_pool.spend");
-      const poolScript = {
-        type: "PlutusV3" as const,
-        script: tools.applyParamsToScript(poolCode, [addressData(tools.Data, tools.AddressSchema, tools.getAddressDetails, orderbookAddress) as import("@lucid-evolution/lucid").Data]),
-      };
-      const lpCode = await loadCode("lp_policy.lp_policy.mint");
-      const lpPolicy = {
-        type: "PlutusV3" as const,
-        script: tools.applyParamsToScript(lpCode, [assetData(tools.Constr, pool.poolToken) as import("@lucid-evolution/lucid").Data, pool.lpToken.assetName as import("@lucid-evolution/lucid").Data]),
-      };
-      if (tools.mintingPolicyToId(lpPolicy) !== pool.lpToken.policyId) throw new Error("The pool LP token does not match the configured LP policy.");
-      const lpUnit = unit(pool.lpToken);
-      const quoteAmount = mode === "add" ? BigInt(amount) : BigInt(0);
-      let lpChange: bigint;
-      let reserveAmount: bigint;
-      if (mode === "add") {
-        if (pool.totalLpSupply > BigInt(0) && cash <= BigInt(0)) throw new Error("The pool has LP supply but no quote-asset reserve.");
-        lpChange = pool.totalLpSupply === BigInt(0) ? quoteAmount : quoteAmount * pool.totalLpSupply / cash;
-        reserveAmount = quoteAmount;
-        if (lpChange <= BigInt(0)) throw new Error("This reserve amount is too small to mint an LP share.");
-      } else {
-        const burned = BigInt(lpAmount);
-        if (pool.totalLpSupply <= BigInt(0) || withdrawable <= BigInt(0)) throw new Error("No withdrawable reserve is currently available.");
-        if (burned > pool.totalLpSupply) throw new Error("You cannot withdraw more LP tokens than the pool supply.");
-        reserveAmount = burned * withdrawable / pool.totalLpSupply;
-        lpChange = burned;
-        if (reserveAmount <= BigInt(0)) throw new Error("This LP amount is too small to withdraw any reserve.");
-      }
-      const nextSupply = mode === "add" ? pool.totalLpSupply + lpChange : pool.totalLpSupply - lpChange;
-      const nextDatum = new tools.Constr(0, [pool.datum.fields[0], pool.datum.fields[1], pool.datum.fields[2], pool.datum.fields[3], pool.datum.fields[4], pool.datum.fields[5], nextSupply, pool.datum.fields[7], pool.datum.fields[8], pool.datum.fields[9]]);
-      const nextAssets = addAsset(pool.utxo.assets, pool.quoteAsset, mode === "add" ? reserveAmount : -reserveAmount);
-      const redeemer = mode === "add"
-        ? new tools.Constr(0, [reserveAmount, lpChange, provider, providerKey, nextDatum])
-        : new tools.Constr(1, [reserveAmount, lpChange, provider, providerKey, nextDatum]);
-      const tx = lucid.newTx()
-        .collectFrom([pool.utxo], tools.Data.to(redeemer as import("@lucid-evolution/lucid").Data))
-        .mintAssets({ [lpUnit]: mode === "add" ? lpChange : -lpChange }, tools.Data.to(new tools.Constr(mode === "add" ? 0 : 1, []) as import("@lucid-evolution/lucid").Data))
-        .attach.SpendingValidator(poolScript)
-        .attach.MintingPolicy(lpPolicy)
-        .pay.ToContract(quotePoolAddress, { kind: "inline", value: tools.Data.to(nextDatum as import("@lucid-evolution/lucid").Data) }, nextAssets)
-        .addSigner(address);
-      const balanced = mode === "add"
-        ? tx.pay.ToAddress(address, { [lpUnit]: lpChange })
-        : tx.pay.ToAddress(address, pool.quoteAsset.policyId ? { [quoteUnit]: reserveAmount } : { lovelace: reserveAmount });
-      const hash = await (await (await balanced.complete()).sign.withWallet().complete()).submit();
-      setMessage({ kind: "success", text: (mode === "add" ? "Reserve added: " : "Reserve withdrawn: ") + hash });
-      setAmount("");
-      setLpAmount("");
-      await refresh();
-    } catch (cause) {
-      setMessage({ kind: "error", text: cause instanceof Error ? cause.message : "The reserve transaction failed or was cancelled." });
-    } finally {
-      setLoading(false);
-    }
-  }
-
-  const configured = Boolean(quotePoolAddress && orderbookAddress);
-  return <section className="work-card form-card"><div className="section-heading"><div><span className="section-kicker">Liquidity / instant sell reserves</span><h2>Manage shared settlement reserves</h2></div><span className="step-badge">{configured ? pool ? "Pool ready" : loaded ? "Pool unavailable" : "Loading" : "Addresses needed"}</span></div><p className="mint-intro">Add or withdraw the quote asset used to settle Instant Sell orders. LP shares track each provider’s claim on the withdrawable reserve.</p><div className="segmented-control"><button type="button" className={mode === "add" ? "selected" : ""} onClick={() => selectMode("add")}>Add reserves</button><button type="button" className={mode === "remove" ? "selected" : ""} onClick={() => selectMode("remove")}>Remove reserves</button></div><div className="calculation-card"><span>Active quote pool</span><strong>{pool ? assetLabel(pool.quoteAsset) + " reserve · " + formatQuoteAmount(pool.quoteAsset, cash) : configured ? "Connect Eternl to load the pool" : "Configure the pool and orderbook addresses"}</strong><p>{pool ? "LP supply: " + pool.totalLpSupply.toString() + " · Minimum reserve: " + formatQuoteAmount(pool.quoteAsset, pool.minCashReserve) + " · Pool token: " + assetLabel(pool.poolToken) + " · Open inventory: " + formatQuoteAmount(pool.quoteAsset, pool.inventoryValue) : "The pool must contain an inline QuotePoolDatum."}</p></div><div className="field-grid">{mode === "add" ? <Field label={pool ? "Reserve amount (" + (pool.quoteAsset.policyId ? assetLabel(pool.quoteAsset) + ", base units" : "lovelace") + ")" : "Reserve amount"} value={amount} onChange={setAmount} placeholder={pool?.quoteAsset.policyId ? "Smallest quote-asset units" : "Lovelace"} hint={pool?.quoteAsset.policyId ? "The quote asset is added to the shared pool." : "ADA is displayed in ADA, but this transaction input uses lovelace."} /> : <Field label="LP tokens to burn" value={lpAmount} onChange={setLpAmount} placeholder="LP token quantity" hint={pool ? "Withdrawable reserve: " + formatQuoteAmount(pool.quoteAsset, withdrawable) : "Load the pool first."} />}</div>{message && <p className={message.kind === "error" ? "form-message error-message" : "form-message success-message"} role={message.kind === "error" ? "alert" : "status"}>{message.text}</p>}<div className="form-footer"><p><span className="status-dot" />{lucid ? " Eternl connected - ready to sign." : " Connect Eternl to manage reserves."}</p><button type="button" className="primary-button" onClick={() => void submitLiquidity()} disabled={loading || !pool || pool.inventoryValue !== BigInt(0)}>{loading ? "Awaiting wallet…" : mode === "add" ? "Add reserves" : "Remove reserves"} <span className="button-arrow">Go</span></button></div></section>;
-}
-
-function Field({ label, placeholder, hint, value, onChange }: { label: string; placeholder: string; hint?: string; value: string; onChange: (value: string) => void }) {
-  return <label className="field"><span className="field-label">{label}</span><input inputMode="numeric" value={value} onChange={(event) => onChange(event.target.value)} placeholder={placeholder} />{hint && <span className="field-hint">{hint}</span>}</label>;
+  return <section className="work-card form-card">
+    <div className="section-heading"><h2>Shared reserves & LP exits</h2><button type="button" className="refresh-button" disabled={blocked} onClick={() => void refresh()}>Refresh state</button></div>
+    {!lucid && <button type="button" className="primary-button" onClick={() => void connect()}>Connect wallet</button>}
+    {error && <p role="alert" className="form-message error-message">{error}</p>}
+    {pool && <>
+      <div className="execution-preview"><code>{marketUnit(pool.quote)}</code><p>Cash: {display(pool.cash)} · Protected: {display(pool.minimum)}</p><p>Available cash: {display(pool.cash > pool.minimum ? pool.cash - pool.minimum : BigInt(0))}</p><p>Inventory cost basis: {display(pool.cost)} · Ask value: {display(pool.inventory)} · Open listings: {pool.count.toString()}</p><p>LP supply: {pool.supply.toString()} · Your wallet: {held.toString()} LP units</p><p>Deposit equity is cash + acquisition cost. Ask value is not cash. Partial withdrawals give up burned shares’ inventory exposure and pay only available cash.</p>{pool.paused && <p>Pool paused. Deposits and trading stop; cash-only withdrawals and top-ups remain available.</p>}</div>
+      {pool.closing ? <section className="execution-preview"><h3>Final LP exit in progress</h3><code>{pool.closing.recipient}</code><p>{pool.count.toString()} listings still to return, one transaction per listing. Only the recorded LP signs recovery.</p>
+        {inventory?.listings.map((listing) => <div className="position-card" key={listing.id}><div><code>{listing.unit}</code><p>{listing.quantity.toString()} units</p></div><button type="button" disabled={blocked || address !== pool.closing?.recipient} onClick={() => void execute({ kind: "return", listing })}>Return to exiting LP</button></div>)}
+        <button type="button" className="primary-button" disabled={blocked || Boolean(pool.count || pool.cost || pool.inventory) || address !== pool.closing.recipient || !pool.scripts.identity} onClick={() => void execute({ kind: "complete" })}>Complete exit</button>
+        {!pool.scripts.identity && <p role="alert">Completion requires a reviewed burn-capable identity policy. The current one_shot policy cannot burn; no safe completion script is configured.</p>}
+      </section> : <fieldset className="module-fieldset" disabled={blocked}>
+        <div className="segmented-control">{(["deposit", "withdraw", "topup"] as const).map((item) => <button type="button" className={mode === item ? "selected" : ""} key={item} onClick={() => { setMode(item); setAmount(""); setAcceptZero(false); setAcceptExit(false); }}>{item === "deposit" ? "LP deposit" : item === "withdraw" ? "Cash-only LP withdrawal" : "Top up (no shares)"}</button>)}</div>
+        <label className="field"><span>{mode === "withdraw" ? "LP base units to burn" : "Quote base units to add"}</span><input inputMode="numeric" value={amount} onChange={(event) => { setAmount(event.target.value); setAcceptZero(false); setAcceptExit(false); }} /></label>
+        <p className="wallet-assets-note">{pool.quote.policyId ? "Use the exact native quote asset's base units." : "ADA input is lovelace: 1 ADA = 1,000,000 lovelace."}</p>
+        {mode === "withdraw" && <><label><input type="checkbox" checked={acceptZero} onChange={(event) => setAcceptZero(event.target.checked)} /> I accept burning these shares even if the cash payout is zero.</label><label><input type="checkbox" checked={acceptExit} onChange={(event) => setAcceptExit(event.target.checked)} /> If this burns the final supply, I accept starting the multi-transaction inventory recovery and exit.</label></>}
+        {preview && <p className="execution-preview">{preview}</p>}{invalid && <p role="status">{invalid}</p>}
+        <button type="button" className="primary-button" disabled={!amount || Boolean(invalid) || (mode === "deposit" && pool.paused)} onClick={() => void execute(mode === "withdraw" ? { kind: "withdraw", burned: BigInt(amount), acceptZero } : { kind: mode, amount: BigInt(amount) })}>Sign {mode === "withdraw" && final ? "final LP exit" : mode}</button>
+      </fieldset>}
+    </>}
+    <MarketTransactionStatus {...transaction} />
+  </section>;
 }
