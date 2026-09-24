@@ -1,24 +1,27 @@
 # Remaining issues
 
-Recorded: 2026-09-25. Baseline: `58527a9` on `main`.
+Recorded: 2026-09-25. Updated after the hardened Preprod redeployments recorded in
+[PREPROD_REDEPLOYMENT_2026-09-25.md](PREPROD_REDEPLOYMENT_2026-09-25.md) (`6f5cc94`).
 
 This picks up from [DEVELOPER_HANDOFF_REVIEW.md](DEVELOPER_HANDOFF_REVIEW.md)
 (findings R01–R11) and the follow-up review and fix work in `a2d0d2e` and
 `58527a9`. Items fixed in those commits are summarised at the end for context.
 
-## 1. Deployment work (fixed in source, not live)
+## 1. Deployment status
 
-The committed contracts differ from what is deployed on Preprod. Until these
-steps are done, the hosted app refuses to sign Marketplace and DEX
-transactions (it detects the blueprint/manifest mismatch and fails closed).
+Marketplace and DEX were freshly redeployed on Preprod from the fixed
+validators (Marketplace bootstrap `4c73fe17…fdb`, DEX factory `fb56ba30…e49`;
+exact identities in the two committed manifests). The new Marketplace pool uses
+the burn-capable identity, so final LP exit and closure can complete.
 
-| # | Item | What to do |
+| # | Item | Status / what to do |
 | --- | --- | --- |
-| D1 | **Live Preprod Marketplace is still exploitable.** The deployed `p2p_listing_simple`/`quote_pool` allow taking pool inventory for 1 lovelace and paying several direct listings with one payment. | `npm run marketplace:preprod`, then commit the new `marketplace-deployment.preprod.json`. Interim mitigation until then: the batcher can reprice every pool-owned listing above current pool cash. Pausing the pool does **not** help (`AddFunds` works while paused). |
-| D2 | DEX bootstrap-offer cancel fix (R04) is not live. | `npm run dex:preprod -- redeploy`, then commit `dex-deployment.preprod.json`. |
-| D3 | No automatic migration. Listings, offers, pools and liquidity under the old scripts keep the old rules. | Inventory remaining outputs at the old addresses before retiring them; plan holder-authorised migration (see R01). |
-| D4 | Operator price book returns 503 in production (R02). `amplify.yml` now forwards `PRICE_BOOK_BUCKET`/`PRICE_BOOK_KEY`. | Provision/confirm the private S3 bucket, IAM access and Amplify runtime values; verify `GET /api/price-book` returns 200 and a signed publish works. |
-| D5 | Indexer config change required (R03 fix). | Add the registry identity `token` to the registry entry in the deployed `WatchedAddresses` value, or the indexer fails at config parse. |
+| D1 | Marketplace exploits (1-lovelace inventory theft, one payment for several direct listings). | **Resolved.** The new deployment runs the fixed validators. A read-only check on 2026-09-25 found the superseded deployment with no inventory, no LP supply and an empty orderbook, so its old scripts have nothing exposed. |
+| D2 | DEX bootstrap-offer owner cancel (R04). | **Deployed** in the new DEX factory (no pools or offers yet). Offers under older DEX factories keep the old cancel rule. |
+| D3 | No automatic migration. Outputs under superseded scripts keep their old rules. | Open. The superseded Marketplace pool still holds its 20 tADA protected reserve; its original `one_shot` identity cannot burn, so that pool can never close and the reserve is stranded. Older DEX factories still hold funds (see E1). Do not send new funds to superseded addresses. |
+| D4 | Operator price book returns 503 in production (R02). `amplify.yml` forwards `PRICE_BOOK_BUCKET`/`PRICE_BOOK_KEY`. | Open. Provision/confirm the private S3 bucket, IAM access and Amplify runtime values; verify `GET /api/price-book` returns 200 and a signed publish works. |
+| D5 | Indexer registry authentication (R03 fix). | **Prepared, deployment deferred by the owner.** `infra/offchain/watched-addresses.preprod.json` holds the six watched addresses and the registry `token`; `node scripts/indexer-config-preprod.mjs` prints it for review. Apply it as the stack's `WatchedAddresses` only when rollout is approved, then verify `/v1/status` and `/v1/registry/assets` report `synced`. |
+| D6 | Hosted site publication. | Open. Confirm the Amplify branch, deployed commit and successful job before claiming `https://preprod.d1g3uigoyq3hsb.amplifyapp.com` serves the new manifests. |
 
 ## 2. Decisions needed
 
@@ -35,7 +38,7 @@ transactions (it detects the blueprint/manifest mismatch and fails closed).
 | E2 | **R08: no durable pending-transaction state.** Submitted hashes, bootstrap CBOR/witness handoffs and operator receipts live in React state and are lost on reload. | Persist a scoped journal (network, wallet, operation, hash, inputs, status) and reconcile before allowing retry. |
 | E3 | **R10: deployment gate is partial.** Amplify now runs the Node unit tests before building. Not gated: Aiken, Playwright, off-chain tests, Preprod suites. | Add a CI workflow (e.g. GitHub Actions) that runs `aiken check --deny` for each contract project, `npm run test:browser`, and `npm --prefix infra/offchain test`. |
 | E4 | Minter strict check fails. `contracts/minter/aiken.toml` pins compiler v1.1.19; installed is v1.1.21, so `aiken check --deny` exits 1 on the version warning. | Bump the pin (and rebuild/verify hashes) or install the pinned compiler in CI. |
-| E5 | **R11: deployment docs point at another Amplify app.** `docs/AMPLIFY_DEPLOYMENT.md` names `d2r4qj82rav2zq` (us-west-1); `docs/OFFCHAIN_DEPLOYMENT.md` and the live site use `d1g3uigoyq3hsb`. | Confirm the active app/account/region and correct the docs. |
+| E5 | **R11: cloud targets are unconfirmed.** The owner confirmed a different AWS account is in use; the historical account/stack instructions are not current targets, and the historical stack was not found under the local `default`/`cswap` profiles in `us-west-1`. | Identify the active AWS account/profile, region, Amplify app and indexer stack/API URL, then align `docs/AMPLIFY_DEPLOYMENT.md` and `docs/OFFCHAIN_DEPLOYMENT.md`. Do not create a replacement stack by guesswork. |
 | E6 | Quota abuse is only reduced. The Blockfrost proxy now has an endpoint allowlist and body caps but no rate limit; IPFS upload has size/field caps but no authentication. | Add a WAF/rate-limit rule; consider requiring a wallet signature for uploads. |
 | E7 | Legacy request cancellation still needs exact value. Old `pool_sell_request` outputs (source archived, pinned script in `legacy-request-recovery.json`) can only be cancelled if the UTxO value equals its datum. Mismatched outputs are unrecoverable under that script. | Cannot be changed for existing outputs. Optionally scan the legacy request address to confirm none are affected. |
 
@@ -68,6 +71,7 @@ npm run build && npm run test:browser
 # delete the journal file to start a fresh run.
 npm run e2e:marketplace:preprod   # last run: 38 steps, 6/6 attacks rejected
 npm run e2e:dex:preprod           # last run: 24 steps, 13/13 attacks rejected
+node --test tests/indexer-deployment.test.mjs   # watched-address config matches the manifests
 ```
 
 The Preprod suites fund the four demo wallets from `CARDANO_WALLET_SEED` (300
@@ -86,3 +90,4 @@ tADA each on the first run); the remaining test funds stay in those wallets.
   readers (R09); ADA pool reserve ≥ 2 ADA; Amplify unit-test gate (R10, partial).
 - Indexer registry authentication and fail-safe sync status (R03).
 - Legacy `pool_sell_request` source archived.
+- Hardened Marketplace and DEX redeployed on Preprod (`6f5cc94`).
