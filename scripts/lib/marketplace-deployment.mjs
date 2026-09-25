@@ -13,11 +13,11 @@ const script = (code, title, params = []) => {
 export const blueprintDigest = code => createHash('sha256').update(JSON.stringify(Object.entries(code).sort(([a], [b]) => a.localeCompare(b)))).digest('hex');
 
 export function deploymentScripts(code, deployment) {
-  const orderbook = script(code, 'p2p_listing_simple.p2p_listing_simple.spend');
+  const orderbook = script(code, 'marketplace_listing_escrow.marketplace_listing_escrow.spend');
   const orderbookAddress = t.validatorToAddress('Preprod', orderbook);
-  const pool = script(code, 'quote_pool.quote_pool.spend', [marketAddressData(t, orderbookAddress)]);
-  const lp = script(code, 'lp_policy.lp_policy.mint', [data(deployment.pool.token), deployment.pool.lpToken.slice(56)]);
-  const inventory = script(code, 'inventory_policy.inventory_policy.mint', [data(deployment.pool.token), deployment.pool.inventoryToken.slice(56), deployment.batcher]);
+  const pool = script(code, 'shared_reserve_pool.shared_reserve_pool.spend', [marketAddressData(t, orderbookAddress)]);
+  const lp = script(code, 'pool_share_policy.pool_share_policy.mint', [data(deployment.pool.token), deployment.pool.lpToken.slice(56)]);
+  const inventory = script(code, 'pool_inventory_receipt_policy.pool_inventory_receipt_policy.mint', [data(deployment.pool.token), deployment.pool.inventoryToken.slice(56), deployment.batcher]);
   const registry = script(code, 'asset_registry.asset_registry.spend', [data(deployment.registry.token), deployment.registry.issuer]);
   return { orderbook, orderbookAddress, pool, poolAddress: t.validatorToAddress('Preprod', pool), lp, inventory, registry, registryAddress: t.validatorToAddress('Preprod', registry) };
 }

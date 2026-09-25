@@ -107,7 +107,7 @@ The current minimum-ADA pre-sign guard reduces one way to create this mismatch; 
 
 ### R05 — P1 decision: settlement safeguards depend on the trusted batcher
 
-**References:** `contracts/marketplace/validators/quote_pool.ak:277`, `contracts/marketplace/validators/quote_pool.ak:386`, `contracts/marketplace/validators/quote_pool.ak:425`, `src/app/_components/team-workbench.tsx:95`, `src/app/_components/team-workbench.tsx:113`, `docs/UI_MODULES.md:53`.
+**References:** `contracts/marketplace/validators/shared_reserve_pool.ak:277`, `contracts/marketplace/validators/shared_reserve_pool.ak:386`, `contracts/marketplace/validators/shared_reserve_pool.ak:425`, `src/app/_components/team-workbench.tsx:95`, `src/app/_components/team-workbench.tsx:113`, `docs/UI_MODULES.md:53`.
 
 `BatcherAcquire` and `BatcherInstantSell` require the configured batcher signature and exact value transitions, but do not enforce the resulting `min_cash_reserve` floor or an authenticated registry reference. `pool_can_pay` verifies affordability, not the protected floor. The Team UI performs those checks, but a different transaction builder using the authorized key can bypass them.
 
@@ -119,7 +119,7 @@ This is a **trusted-operator/security-model gap**, not a demonstrated attack by 
 
 ### R06 — P2: shared-pool closure cannot satisfy its minting policy
 
-**References:** `contracts/marketplace/validators/quote_pool.ak:514`, `contracts/marketplace/validators/one_shot.ak:10`, `scripts/marketplace-preprod.mjs:70`.
+**References:** `contracts/marketplace/validators/shared_reserve_pool.ak:514`, `contracts/marketplace/validators/one_shot.ak:10`, `scripts/marketplace-preprod.mjs:70`.
 
 `AdminClose` requires burning the pool identity token (`-1`). The deployment script creates that token with `one_shot`, whose only successful mint path requires consuming the original seed and minting exactly `+1`. There is no burn path. The closure branch and deployed identity policy therefore cannot be satisfied together. This finding is source-level; no public closure was attempted. The UI already lists shared-pool closure as unimplemented.
 
@@ -163,7 +163,7 @@ Shared wallet initialization uses the validated browser provider. Registry and v
 
 **References:** `amplify.yml`, `package.json`, `contracts/minter/aiken.toml:3`, `tests/`, `infra/offchain/test/`.
 
-The Amplify buildspec runs dependency installation and the Next build, but no JS/off-chain/Aiken tests. No checked-in GitHub workflow or Playwright/Cypress harness was found. Prior ad-hoc browser checks are not a maintained regression suite. The marketplace Aiken suite has only two `quote_pool` helper tests, not full coverage of its settlement and closure transitions; all three contract suites report zero property tests.
+The Amplify buildspec runs dependency installation and the Next build, but no JS/off-chain/Aiken tests. No checked-in GitHub workflow or Playwright/Cypress harness was found. Prior ad-hoc browser checks are not a maintained regression suite. The marketplace Aiken suite has only two `shared_reserve_pool` helper tests, not full coverage of its settlement and closure transitions; all three contract suites report zero property tests.
 
 Fresh `aiken check --deny` in minter runs **19 passing tests but exits 1**, because `aiken.toml` requires **v1.1.19** and the installed compiler is **v1.1.21**. Terminal-mode output exposes that warning. Do not report the strict command as green or fix it by simply suppressing warnings. Compiler changes can change script identities.
 

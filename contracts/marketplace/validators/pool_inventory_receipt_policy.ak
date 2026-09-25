@@ -15,7 +15,7 @@ pub type InventoryRedeemer {
 /// Mints one receipt for each batcher-acquired pool listing and permits burns
 /// when that listing is sold or returned during LP wind-down. The pool
 /// validator authenticates the matching listing and accounting transition.
-validator inventory_policy(
+validator pool_inventory_receipt_policy(
   pool_token: AssetClass,
   inventory_name: AssetName,
   batcher: VerificationKeyHash,
@@ -109,7 +109,7 @@ test inventory_receipt_mint_requires_batcher_signature() {
     1,
   )
   let valid =
-    inventory_policy.mint(
+    pool_inventory_receipt_policy.mint(
       test_pool_token,
       test_receipt_name,
       test_batcher,
@@ -118,7 +118,7 @@ test inventory_receipt_mint_requires_batcher_signature() {
       test_tx(mint, [test_batcher]),
     )
   let missing_signature =
-    inventory_policy.mint(
+    pool_inventory_receipt_policy.mint(
       test_pool_token,
       test_receipt_name,
       test_batcher,
@@ -141,7 +141,7 @@ test inventory_receipt_burn_allows_batch_exit_burns() {
   )
 
   and {
-    inventory_policy.mint(
+    pool_inventory_receipt_policy.mint(
       test_pool_token,
       test_receipt_name,
       test_batcher,
@@ -149,7 +149,7 @@ test inventory_receipt_burn_allows_batch_exit_burns() {
       test_receipt_policy,
       test_tx(mint, []),
     ),
-    inventory_policy.mint(
+    pool_inventory_receipt_policy.mint(
       test_pool_token,
       test_receipt_name,
       test_batcher,
@@ -162,7 +162,7 @@ test inventory_receipt_burn_allows_batch_exit_burns() {
 
 // A zero quantity leaves no entry under the policy, so the policy aborts.
 test inventory_receipt_policy_rejects_empty_mint() fail {
-  inventory_policy.mint(
+  pool_inventory_receipt_policy.mint(
     test_pool_token,
     test_receipt_name,
     test_batcher,

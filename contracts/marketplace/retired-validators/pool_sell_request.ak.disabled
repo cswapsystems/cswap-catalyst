@@ -1,5 +1,5 @@
 // Archived: legacy Instant Sell request escrow, superseded by
-// p2p_listing_simple `InstantSell` listings. Owner cancellation of existing
+// marketplace_listing_escrow `InstantSell` listings. Owner cancellation of existing
 // request outputs uses the pinned compiled script in
 // ../legacy-request-recovery.json, not this source. Do not deploy.
 use aiken/collection/list
@@ -23,7 +23,7 @@ pub type PoolSellRequestDatum {
 
 pub type PoolSellRequestRedeemer {
   // Retained only so existing request UTxOs can be cancelled and recovered.
-  // New Instant Sell orders use `p2p_listing_simple` instead.
+  // New Instant Sell orders use `marketplace_listing_escrow` instead.
   Settle
   Cancel
 }

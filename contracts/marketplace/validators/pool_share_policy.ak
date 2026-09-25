@@ -10,8 +10,8 @@ pub type LpRedeemer {
 }
 
 /// Allows LP minting or burning only alongside the matching pool state input.
-/// Exact share accounting and provider payouts are enforced by `quote_pool`.
-validator lp_policy(vault_token: AssetClass, lp_name: AssetName) {
+/// Exact share accounting and provider payouts are enforced by `shared_reserve_pool`.
+validator pool_share_policy(vault_token: AssetClass, lp_name: AssetName) {
   mint(redeemer: LpRedeemer, policy_id: PolicyId, tx: Transaction) {
     let vault_participates =
       list.any(

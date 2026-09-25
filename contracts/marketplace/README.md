@@ -2,7 +2,7 @@
 
 ## Current contract status
 
-The currently supported Marketplace is the registry-free shared quote-pool path plus the separate asset-admission registry. Its active validator sources are `asset_registry`, `asset_registry_request`, `one_shot`, `quote_pool`, `lp_policy`, `inventory_policy`, and `p2p_listing_simple`. The legacy `pool_sell_request` source is archived; pre-existing request UTxOs are cancelled through the pinned script in `legacy-request-recovery.json`. See the repository-wide [validator inventory](../../docs/VALIDATOR_INVENTORY.md) before deriving any script.
+The currently supported Marketplace is the registry-free shared reserve-pool path plus the separate asset-admission registry. Its active validator sources are `asset_registry`, `asset_registry_request`, `one_shot`, `shared_reserve_pool`, `pool_share_policy`, `pool_inventory_receipt_policy`, and `marketplace_listing_escrow`. The legacy `pool_sell_request` source is archived; pre-existing request UTxOs are cancelled through the pinned script in `legacy-request-recovery.json`. See the repository-wide [validator inventory](../../docs/VALIDATOR_INVENTORY.md) before deriving any script.
 
 The legacy oracle/registry and sharded validator families have been moved to `retired-validators/*.ak.disabled`. They are source history only: Aiken does not build them and the application does not load them for new transactions.
 
@@ -93,7 +93,7 @@ Supported actions:
 
 For trade actions, the pool requires authentic registry and oracle reference inputs, active permissions, unexpired oracle prices, treasury payment when protocol fees are enabled, correct continuing pool value, and updated exposure accounting. Sell actions enforce policy, asset, and global exposure caps plus minimum cash reserve.
 
-### `validators/lp_policy.ak`
+### `validators/pool_share_policy.ak`
 
 LP token minting policy.
 
@@ -109,7 +109,7 @@ Fixed-price orderbook validator for one asset class and any positive quantity.
 - Listing UTxOs must contain exactly the listed asset quantity plus locked ADA; unrelated native assets are rejected.
 - The validator is parameterized by the registry script address and requires an active exact `AssetConfig` for fills. The registry reference must contain the matching registry identity NFT and datum identity.
 
-### `validators/p2p_listing_simple.ak`
+### `validators/marketplace_listing_escrow.ak`
 
 Registry-free fixed-price orderbook variant. It keeps the same exact escrow, buy, cancel, and update behavior, but has no registry datum, registry NFT, registry reference input, or asset allowlist. The requested payment asset is accepted directly from the listing datum.
 
@@ -225,8 +225,8 @@ The active smoke checks must target only the active validator set in the validat
 
 ### Registry-free shared quote pool
 
-The supported path uses `p2p_listing_simple` for direct listings and the
-parameterized `quote_pool` validator for one reserve per quote asset. Pool
+The supported path uses `marketplace_listing_escrow` for direct listings and the
+parameterized `shared_reserve_pool` validator for one reserve per quote asset. Pool
 prices are stored in the reserve datum by exact RWA asset identity as buy and
 sell ratios. The batcher can update these posted prices on-chain; the contracts
 do not impose a minimum spread. Price updates apply to future acquisitions,

@@ -15,10 +15,10 @@ fresh deployment before its newest source is live on Preprod.
 | Asset registry | `contracts/marketplace/validators/asset_registry.ak` | Team-managed approved asset registry | Requires the intentional registry deployment. |
 | Asset registry | `contracts/marketplace/validators/asset_registry_request.ak` | Permissionless request UTxO consumed by Team approval/rejection | Requires the matching registry-request deployment. |
 | Shared pool | `contracts/marketplace/validators/one_shot.ak` | One-shot identity NFT policy for registry and pool state | Used by marketplace deployment scripts. |
-| Shared pool | `contracts/marketplace/validators/quote_pool.ak` | Shared quote reserve, LP accounting, and pool inventory state | Used by reserve and Team flows. |
-| Shared pool | `contracts/marketplace/validators/lp_policy.ak` | Shared-pool LP mint/burn policy | Used with `quote_pool`. |
-| Shared pool | `contracts/marketplace/validators/inventory_policy.ak` | Receipt policy for pool-owned inventory | Used for batcher acquisition, public sale, and LP wind-down. |
-| Direct marketplace | `contracts/marketplace/validators/p2p_listing_simple.ak` | Registry-free fixed-price listing escrow | Used by the Marketplace listing/buy/cancel flow. |
+| Shared pool | `contracts/marketplace/validators/shared_reserve_pool.ak` | Shared quote-asset reserve, LP accounting, and pool inventory state | Used by reserve and Team flows. |
+| Shared pool | `contracts/marketplace/validators/pool_share_policy.ak` | Shared-pool ownership-share mint/burn policy | Used with `shared_reserve_pool`. |
+| Shared pool | `contracts/marketplace/validators/pool_inventory_receipt_policy.ak` | Receipt policy for pool-owned inventory | Used for batcher acquisition, public sale, and LP wind-down. |
+| Marketplace | `contracts/marketplace/validators/marketplace_listing_escrow.ak` | Registry-free listing escrow for direct, Instant Sell, and pool-owned inventory modes | Used by Marketplace listing and settlement flows. |
 | FT DEX | `contracts/dex/validators/factory_bootstrap.ak` | One-shot factory-state NFT policy | Used once per DEX deployment. |
 | FT DEX | `contracts/dex/validators/factory_state.ak` | Factory sequence, pause state, Team admin, and pool-creation authority | Three-party bootstrap source requires a fresh DEX deployment. |
 | FT DEX | `contracts/dex/validators/bootstrap_offer.ak` | FT-provider offer escrow and three-party acceptance checks | Three-party bootstrap source requires a fresh DEX deployment. |
@@ -37,7 +37,7 @@ new deployments.
 | --- | --- |
 | Marketplace legacy/oracle path | `registry`, `oracle`, `marketplace`, `p2p_listing` |
 | Marketplace sharded prototype path | `registry_root`, `policy_shard`, `asset_shard`, `policy_shard_policy`, `asset_shard_policy`, `marketplace_sharded` |
-| Marketplace legacy Instant Sell request | `pool_sell_request` (superseded by `p2p_listing_simple` `InstantSell` listings) |
+| Marketplace legacy Instant Sell request | `pool_sell_request` (superseded by `marketplace_listing_escrow` `InstantSell` listings) |
 | Minter prototype | `stt_one_shot` |
 
 Owners can still cancel pre-existing legacy request and listing outputs from

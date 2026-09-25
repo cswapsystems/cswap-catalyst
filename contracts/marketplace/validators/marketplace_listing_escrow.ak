@@ -331,8 +331,8 @@ fn inventory_for_pool(
 }
 
 /// Registry-free orderbook for direct/Instant Sell listings and receipt-backed
-/// pool inventory. Pool actions are validated jointly with `quote_pool`.
-validator p2p_listing_simple {
+/// pool inventory. Pool actions are validated jointly with `shared_reserve_pool`.
+validator marketplace_listing_escrow {
   spend(
     datum: Option<SimpleListingDatum>,
     redeemer: SimpleListingRedeemer,
@@ -758,7 +758,7 @@ test pool_listing_buy_accepts_inventory_sale_shape() {
       mint: reg_receipt_burn(),
     }
 
-  p2p_listing_simple.spend(Some(reg_pool_listing()), Buy { buyer: reg_buyer }, reg_ref(1), tx)
+  marketplace_listing_escrow.spend(Some(reg_pool_listing()), Buy { buyer: reg_buyer }, reg_ref(1), tx)
 }
 
 // The pool is re-created by a 1-lovelace AddFunds; its existing balance used to
@@ -774,7 +774,7 @@ test pool_listing_buy_rejects_addfunds_spend() fail {
       ],
     }
 
-  p2p_listing_simple.spend(Some(reg_pool_listing()), Buy { buyer: reg_buyer }, reg_ref(1), tx)
+  marketplace_listing_escrow.spend(Some(reg_pool_listing()), Buy { buyer: reg_buyer }, reg_ref(1), tx)
 }
 
 // Two pool listings, one paid sale: the second listing's receipt survives in
@@ -795,7 +795,7 @@ test pool_listing_buy_rejects_second_listing_in_sale() fail {
       mint: reg_receipt_burn(),
     }
 
-  p2p_listing_simple.spend(Some(reg_pool_listing()), Buy { buyer: reg_buyer }, reg_ref(2), tx)
+  marketplace_listing_escrow.spend(Some(reg_pool_listing()), Buy { buyer: reg_buyer }, reg_ref(2), tx)
 }
 
 fn reg_direct() -> SimpleListingDatum {
@@ -845,7 +845,7 @@ test direct_buy_accepts_tagged_payment() {
       ],
     }
 
-  p2p_listing_simple.spend(Some(reg_direct()), Buy { buyer: reg_buyer }, reg_ref(1), tx)
+  marketplace_listing_escrow.spend(Some(reg_direct()), Buy { buyer: reg_buyer }, reg_ref(1), tx)
 }
 
 test direct_buy_rejects_untagged_payment() fail {
@@ -859,7 +859,7 @@ test direct_buy_rejects_untagged_payment() fail {
       ],
     }
 
-  p2p_listing_simple.spend(Some(reg_direct()), Buy { buyer: reg_buyer }, reg_ref(1), tx)
+  marketplace_listing_escrow.spend(Some(reg_direct()), Buy { buyer: reg_buyer }, reg_ref(1), tx)
 }
 
 // One 12-ADA payment previously bought two 10-ADA listings from the same seller.
@@ -874,7 +874,7 @@ test direct_buy_rejects_shared_payment() fail {
       ],
     }
 
-  p2p_listing_simple.spend(Some(reg_direct()), Buy { buyer: reg_buyer }, reg_ref(2), tx)
+  marketplace_listing_escrow.spend(Some(reg_direct()), Buy { buyer: reg_buyer }, reg_ref(2), tx)
 }
 
 fn reg_cancel_tx(escrow: assets.Value, refund: assets.Value, signer: VerificationKeyHash) -> Transaction {
@@ -901,7 +901,7 @@ test cancel_returns_escrow_with_unlisted_assets() {
   let escrow =
     listing_value(test_rwa, 1, 3_000_000)
       |> assets.add(test_extra_asset.policy_id, test_extra_asset.asset_name, 5)
-  p2p_listing_simple.spend(
+  marketplace_listing_escrow.spend(
     Some(reg_direct()),
     Cancel,
     reg_ref(1),
@@ -913,7 +913,7 @@ test cancel_rejects_partial_refund() fail {
   let escrow =
     listing_value(test_rwa, 1, 3_000_000)
       |> assets.add(test_extra_asset.policy_id, test_extra_asset.asset_name, 5)
-  p2p_listing_simple.spend(
+  marketplace_listing_escrow.spend(
     Some(reg_direct()),
     Cancel,
     reg_ref(1),
@@ -923,5 +923,5 @@ test cancel_rejects_partial_refund() fail {
 
 test cancel_rejects_non_seller() fail {
   let escrow = listing_value(test_rwa, 1, 2_000_000)
-  p2p_listing_simple.spend(Some(reg_direct()), Cancel, reg_ref(1), reg_cancel_tx(escrow, escrow, reg_batcher))
+  marketplace_listing_escrow.spend(Some(reg_direct()), Cancel, reg_ref(1), reg_cancel_tx(escrow, escrow, reg_batcher))
 }

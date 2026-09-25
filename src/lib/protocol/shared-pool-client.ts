@@ -13,19 +13,19 @@ export async function marketplaceScript(tools: Tools, name: string, parameterAdd
   return { type: "PlutusV3", script: tools.applyParamsToScript(await marketplaceCode(name), [addressData(tools, parameterAddress)]) };
 }
 export async function reviewedOrderbook(tools: Tools) {
-  const script: Script = { type: "PlutusV3", script: await marketplaceCode("p2p_listing_simple.p2p_listing_simple.spend") };
+  const script: Script = { type: "PlutusV3", script: await marketplaceCode("marketplace_listing_escrow.marketplace_listing_escrow.spend") };
   if (tools.validatorToAddress("Preprod", script) !== marketplaceOrderbookAddress) throw new Error("Marketplace deployment is schema-incompatible. The configured orderbook does not match the updated blueprint. Signing is disabled until a reviewed deployment/migration is configured.");
   return script;
 }
 export async function readSharedPool(lucid: LucidEvolution, tools: Tools) {
   const orderbook = await reviewedOrderbook(tools);
-  const script = await marketplaceScript(tools, "quote_pool.quote_pool.spend", marketplaceOrderbookAddress);
+  const script = await marketplaceScript(tools, "shared_reserve_pool.shared_reserve_pool.spend", marketplaceOrderbookAddress);
   if (tools.validatorToAddress("Preprod", script) !== marketplacePoolAddress) throw new Error("Shared-pool deployment does not match the updated blueprint. Migration / fresh deployment is required before signing.");
   const utxo = await lucid.utxoByUnit(marketplaceDeployment.pool.token);
   if (!utxo || utxo.address !== marketplacePoolAddress) throw new Error("Shared-pool identity is not at its configured address.");
   const pool = decodeSharedPool(tools, utxo);
   if (marketUnit(pool.poolToken) !== marketplaceDeployment.pool.token || pool.lpUnit !== marketplaceDeployment.pool.lpToken || marketUnit(pool.inventoryToken) !== marketplaceDeployment.pool.inventoryToken) throw new Error("Shared-pool identities differ from the deployment manifest.");
-  const [lpCode, inventoryCode] = await Promise.all([marketplaceCode("lp_policy.lp_policy.mint"), marketplaceCode("inventory_policy.inventory_policy.mint")]);
+  const [lpCode, inventoryCode] = await Promise.all([marketplaceCode("pool_share_policy.pool_share_policy.mint"), marketplaceCode("pool_inventory_receipt_policy.pool_inventory_receipt_policy.mint")]);
   const lp: Script = { type: "PlutusV3", script: tools.applyParamsToScript(lpCode, [marketAssetData(tools, pool.poolToken), pool.lpToken.assetName]) };
   const inventory: Script = { type: "PlutusV3", script: tools.applyParamsToScript(inventoryCode, [marketAssetData(tools, pool.poolToken), pool.inventoryToken.assetName, pool.batcher]) };
   if (tools.mintingPolicyToId(lp) !== pool.lpToken.policyId || tools.mintingPolicyToId(inventory) !== pool.inventoryToken.policyId) throw new Error("Pool LP / inventory policies do not match the reviewed blueprint.");

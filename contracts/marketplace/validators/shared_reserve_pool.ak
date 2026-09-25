@@ -285,7 +285,7 @@ fn has_no_pool_continuation(
 /// Shared quote reserve, LP ledger, and pool-owned listing accounting.
 /// The orderbook address is fixed so pool transitions can authenticate the
 /// corresponding listing inputs and outputs.
-validator quote_pool(orderbook_address: Address) {
+validator shared_reserve_pool(orderbook_address: Address) {
   spend(
     datum: Option<QuotePoolDatum>,
     redeemer: QuotePoolRedeemer,
@@ -915,10 +915,10 @@ fn reg_sale(listing_count: Int) -> (QuotePoolDatum, QuotePoolDatum, Transaction)
 
 test inventory_sale_accepts_single_listing() {
   let (pool, next, tx) = reg_sale(1)
-  quote_pool.spend(reg_orderbook_address, Some(pool), InventorySale { buyer: reg_buyer, next }, reg_ref(0), tx)
+  shared_reserve_pool.spend(reg_orderbook_address, Some(pool), InventorySale { buyer: reg_buyer, next }, reg_ref(0), tx)
 }
 
 test inventory_sale_rejects_several_pool_listings() fail {
   let (pool, next, tx) = reg_sale(2)
-  quote_pool.spend(reg_orderbook_address, Some(pool), InventorySale { buyer: reg_buyer, next }, reg_ref(0), tx)
+  shared_reserve_pool.spend(reg_orderbook_address, Some(pool), InventorySale { buyer: reg_buyer, next }, reg_ref(0), tx)
 }

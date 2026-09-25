@@ -23,12 +23,12 @@ async function fixture(quote = 'lovelace') {
   // Test-only burn-capable identity. The supplied production one_shot has no burn path.
   const identity = t.scriptFromNative({ type: 'any', scripts: [{ type: 'sig', keyHash: key(operator.address) }, { type: 'sig', keyHash: key(seller.address) }] });
   const poolToken = a(t.mintingPolicyToId(identity) + t.fromText('POOL'));
-  const orderbook = script('p2p_listing_simple.p2p_listing_simple.spend');
+  const orderbook = script('marketplace_listing_escrow.marketplace_listing_escrow.spend');
   const orderbookAddress = t.validatorToAddress('Preprod', orderbook);
-  const pool = script('quote_pool.quote_pool.spend', [marketAddressData(t, orderbookAddress)]);
+  const pool = script('shared_reserve_pool.shared_reserve_pool.spend', [marketAddressData(t, orderbookAddress)]);
   const poolAddress = t.validatorToAddress('Preprod', pool);
-  const lp = script('lp_policy.lp_policy.mint', [marketAssetData(t, poolToken), t.fromText('LP')]);
-  const inventory = script('inventory_policy.inventory_policy.mint', [marketAssetData(t, poolToken), t.fromText('INVENTORY'), key(operator.address)]);
+  const lp = script('pool_share_policy.pool_share_policy.mint', [marketAssetData(t, poolToken), t.fromText('LP')]);
+  const inventory = script('pool_inventory_receipt_policy.pool_inventory_receipt_policy.mint', [marketAssetData(t, poolToken), t.fromText('INVENTORY'), key(operator.address)]);
   const lpToken = a(t.mintingPolicyToId(lp) + t.fromText('LP')), inventoryToken = a(t.mintingPolicyToId(inventory) + t.fromText('INVENTORY'));
   const prices = [{ asset: a(ft), buy: { numerator: 1_000_000n, denominator: 3n }, sell: { numerator: 2_000_000n, denominator: 3n } }];
   const datum = c([key(operator.address), key(operator.address), marketAssetData(t, poolToken), marketAssetData(t, lpToken), marketAssetData(t, inventoryToken), marketAssetData(t, a(quote)), prices.map(p => c([marketAssetData(t, p.asset), c([p.buy.numerator, p.buy.denominator]), c([p.sell.numerator, p.sell.denominator])])), 0n, 10_000_000n, c([]), 0n, 0n, 0n, c([], 1)]);

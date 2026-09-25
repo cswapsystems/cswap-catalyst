@@ -212,8 +212,8 @@ of those open listings.
 The registry/oracle/sharded marketplace families below are archived source
 history. They are retained in the guide only to explain old artifacts; they
 are not compiled, exposed through the application, or eligible for new
-deployments. The active Marketplace uses the asset registry, `quote_pool`, and
-`p2p_listing_simple` listed in the
+deployments. The active Marketplace uses the asset registry, `shared_reserve_pool`, and
+`marketplace_listing_escrow` listed in the
 [validator inventory](VALIDATOR_INVENTORY.md).
 
 This path is implemented by:
@@ -221,7 +221,7 @@ This path is implemented by:
 - [`registry.ak`](../contracts/marketplace/retired-validators/registry.ak.disabled)
 - [`oracle.ak`](../contracts/marketplace/retired-validators/oracle.ak.disabled)
 - [`marketplace.ak`](../contracts/marketplace/retired-validators/marketplace.ak.disabled)
-- [`lp_policy.ak`](../contracts/marketplace/validators/lp_policy.ak)
+- [`pool_share_policy.ak`](../contracts/marketplace/validators/pool_share_policy.ak)
 - [`p2p_listing.ak`](../contracts/marketplace/retired-validators/p2p_listing.ak.disabled)
 
 ### 5.1 Legacy registry
@@ -365,7 +365,7 @@ datum identity.
 
 ### 7.2 Registry-free orderbook
 
-[`p2p_listing_simple.ak`](../contracts/marketplace/validators/p2p_listing_simple.ak)
+[`marketplace_listing_escrow.ak`](../contracts/marketplace/validators/marketplace_listing_escrow.ak)
 has the same basic fixed-price orderbook behavior but no registry dependency.
 Its `SimpleListingDatum` adds a settlement mode:
 
@@ -393,14 +393,14 @@ the pool settlement marker without actually updating pool state.
 ## 8. Registry-free shared quote pool
 
 The shared pool validator is
-[`quote_pool.ak`](../contracts/marketplace/validators/quote_pool.ak),
+[`shared_reserve_pool.ak`](../contracts/marketplace/validators/shared_reserve_pool.ak),
 parameterized by the orderbook address. A deployment normally has one pool per
 quote asset, such as one ADA pool and one USDC pool, rather than one pool per
 RWA policy or fractionalized asset.
 
 ### 8.1 Receipt token
 
-[`inventory_policy.ak`](../contracts/marketplace/validators/inventory_policy.ak)
+[`pool_inventory_receipt_policy.ak`](../contracts/marketplace/validators/pool_inventory_receipt_policy.ak)
 controls the one-unit receipt token used by pool-owned listings.
 
 - `MintInventory` requires exactly `+1`, a pool input containing the pool NFT,
@@ -454,7 +454,7 @@ The pool-owned listing is bound to the pool by all of these fields:
 
 Instant Sell is an orderbook listing with `InstantSell { pool_token }`
 settlement in
-[`p2p_listing_simple.ak`](../contracts/marketplace/validators/p2p_listing_simple.ak).
+[`marketplace_listing_escrow.ak`](../contracts/marketplace/validators/marketplace_listing_escrow.ak).
 It is not publicly purchasable: its `price` is the seller's minimum total
 payout.
 
@@ -467,7 +467,7 @@ payout.
    receipt, and creates a pool-owned orderbook listing at the posted ask.
 ```
 
-`quote_pool` `BatcherAcquire` requires the batcher signature, exactly one
+`shared_reserve_pool` `BatcherAcquire` requires the batcher signature, exactly one
 Instant Sell listing for the pool, a posted price for the exact asset, and cash
 above `min_cash_reserve` after the payout. The earlier separate request
 validator (`pool_sell_request`) is archived; see the

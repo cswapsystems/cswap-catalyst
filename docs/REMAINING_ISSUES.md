@@ -27,7 +27,7 @@ the burn-capable identity, so final LP exit and closure can complete.
 
 | # | Item | Notes |
 | --- | --- | --- |
-| X1 | **LP value transfer on early exit.** Shares are minted against `cash + inventory_cost`, but `RemoveLiquidity` pays only `lp_burned × (cash − reserve) / supply`. Early leavers forfeit their share of inventory and reserve to remaining LPs. | `quote_pool.ak` LP math. Documented in the contract README, but a real economic effect. Changing it is a validator + deployment change. |
+| X1 | **LP value transfer on early exit.** Shares are minted against `cash + inventory_cost`, but `RemoveLiquidity` pays only `lp_burned × (cash − reserve) / supply`. Early leavers forfeit their share of inventory and reserve to remaining LPs. | `shared_reserve_pool.ak` LP math. Documented in the contract README, but a real economic effect. Changing it is a validator + deployment change. |
 | X2 | **Batcher trust (R05, partly fixed).** The reserve floor is now enforced on-chain. Still trusted: `UpdatePrices` has no bands/spread/buy≤sell rule; the admin can set any `min_cash_reserve`; Team and batcher are the same key in the manifest. | Either enforce more on-chain or document the trusted-operator model, monitoring and incident response. |
 
 ## 3. Open engineering work
@@ -47,7 +47,7 @@ the burn-capable identity, so final LP exit and closure can complete.
 | # | Item |
 | --- | --- |
 | M1 | Orderbook `Reprice` does not check which redeemer the pool is spent with, so the batcher can let `inventory_value` (reporting only) drift. |
-| M2 | `inventory_policy` accepts any negative burn; harmless today because every pool path requires exactly −1. |
+| M2 | `pool_inventory_receipt_policy` accepts any negative burn; harmless today because every pool path requires exactly −1. |
 | M3 | Async refreshes in `reserves-workbench`, `team-workbench` and `legacy-request-recovery` have no cancellation guard, so a slow read can show a previous wallet's data (signing is protected by the wallet guard). |
 | M4 | The dev-mode price-book `.lock` file can stick after a crash (every publish then returns 409); raw storage/JSON errors are returned to the client with status 400. |
 | M5 | The operator console gate is client-side only. Acceptable because no secrets sit behind it, but docs must not describe it as a security boundary. |

@@ -62,7 +62,7 @@ RWA  = (rwa_policy_id,  rwa_asset_name_hex)
 registry_token = (auth_policy_id, registry_name_hex)
 oracle_token   = (auth_policy_id, oracle_name_hex)
 vault_token    = (auth_policy_id, vault_name_hex)
-lp_token       = (lp_policy_id, lp_name_hex)
+lp_token       = (pool_share_policy_id, lp_name_hex)
 ```
 
 Every amount is in integer smallest units. If USDM has six decimal places,

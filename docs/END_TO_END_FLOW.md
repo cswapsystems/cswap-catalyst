@@ -105,13 +105,13 @@ Registry approval is an operator admission record. The current Team UI reads the
    |
    | 1. Deploy marketplace scripts and mint identity assets.
    v
-<pool identity policy> --> pool NFT
-<LP policy>            --> LP-token policy
-<inventory policy>     --> inventory-receipt policy
+<pool identity policy>          --> pool NFT
+<pool share policy>             --> LP-token policy
+<pool inventory receipt policy> --> inventory-receipt policy
    |
    | 2. Lock the initial quote reserve and pool NFT.
    v
-{quote_pool}
+{shared_reserve_pool}
   (authenticated pool UTxO)
   value: quote-asset reserve + pool NFT
   datum: admin, batcher, LP token, inventory token, quote asset,
@@ -124,7 +124,7 @@ Registry approval is an operator admission record. The current Team UI reads the
 Add quote reserve                   read current pool state
    |                                    |
    v                                    |
-<LP policy> -- mint proportional LP tokens --> [LP wallet]
+<pool share policy> -- mint proportional LP tokens --> [LP wallet]
 ~~~
 
 ADA is stored on Cardano in lovelace but displayed in the application as ADA. For example, 120,000,000 lovelace is 120 ADA. With a 20,000,000-lovelace protected reserve, 20 ADA is protected and 100 ADA is initially available for bids.
@@ -139,7 +139,7 @@ LP removal burns LP tokens and only withdraws quote liquidity above the protecte
    | 1. Portfolio > Sell / List > Instant Sell to pool.
    |    Review the operator bid and request it as the minimum payout.
    v
-{simple_orderbook · InstantSell listing}
+{marketplace listing escrow · InstantSell listing}
   value: seller RWA + ADA buffer
   datum: pool identity, exact RWA, quantity, quote asset, minimum payout
    |
@@ -155,7 +155,7 @@ LP removal burns LP tokens and only withdraws quote liquidity above the protecte
    +---------------------------+------------------------------+-------------------------------+
    |                           |                              |                               |
    v                           v                              v                               v
-[Seller receives bid       {quote_pool continues}      <inventory policy>          {simple_orderbook}
+[Seller receives bid       {shared_reserve_pool continues} <pool inventory receipt> {marketplace listing escrow}
  + returned ADA buffer]    reduced by settlement       mints inventory receipt     pool-owned RWA listing
                             inventory value += ask                                 at the selected ask
 ~~~
@@ -174,13 +174,13 @@ The quote-pool validator enforces the post-settlement floor: `BatcherAcquire` fa
    | 1. Select a pool-owned listing in Marketplace.
    | 2. Pay its declared ask in the quote asset.
    v
-{simple_orderbook} + inventory receipt
+{marketplace listing escrow} + inventory receipt
    |
    | 3. Purchase consumes the listing and burns the receipt.
    +--------------------------+----------------------------+----------------------+
    |                          |                            |                      |
    v                          v                            v                      v
-[Buyer receives RWA]    {quote_pool continues}    <inventory policy>       inventory value falls
+[Buyer receives RWA]    {shared_reserve_pool continues} <pool inventory receipt> inventory value falls
                          receives quote payment    burns receipt
 ~~~
 
