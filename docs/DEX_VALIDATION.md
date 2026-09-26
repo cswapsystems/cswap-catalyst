@@ -3,22 +3,17 @@
 Validated with the compiled DEX blueprint and the confirmed Preprod deployment
 in `dex-deployment.preprod.json`.
 
-## Automated results
+## Recorded redeployment results — 2026-09-25
 
 | Check | Result |
 | --- | --- |
-| `aiken check --deny` in `contracts/dex` | 6 passed |
-| `aiken build` in `contracts/dex` | Blueprint rebuilt |
-| `npm run test:registry` | 5 passed |
-| `npm run test:wallet` | 8 passed |
-| `npm run test:wallet-assets` | 4 passed |
-| `npm run test:metadata` | 6 passed |
-| `npm run test:offchain` | 7 passed |
-| `npm run test:dex` | 11 passed |
-| `npm run test:ui` | 16 passed |
-| `npx tsc --noEmit` | Passed |
-| `npm run lint` | No errors; 6 existing warnings |
-| `CSWAP_NEXT_DIST_DIR=.next-review npm run build` | Passed |
+| `aiken check --deny` in `contracts/dex` | 24 passed |
+| Application Node unit suite | 89 passed |
+| Off-chain tests | 23 passed |
+| Playwright browser suite | 14 passed |
+| `npm run build:preprod` | Passed |
+
+See the [deployment record](PREPROD_REDEPLOYMENT_2026-09-25.md) for scope. These are recorded verification results, not a live test dashboard.
 
 The DEX emulator tests execute the compiled validators, including ADA and
 native-token bootstrap acceptance with separate LP and Team witnesses,
@@ -31,17 +26,13 @@ the pre-signing guard rejects it.
 
 ## Browser and chain checks
 
-An isolated headless Chrome session against the production build checked
-`/team/dex`, `/dex/launch`, and `/marketplace` at 1440px and 390px widths:
-HTTP 200, no page runtime errors, no horizontal overflow, and correct
-disconnected-wallet review/signing guards. The bootstrap default is 4 ADA;
-the deployment mismatch warning is cleared and the workspace reports Ready.
+The browser suite checks responsive navigation and disconnected, ordinary-wallet and authorized-wallet operator guards. Read-only checks against the new deployment verified the factory state and UI-derived bootstrap compatibility without submitting a transaction. A successful local check does not establish that Amplify has published the same commit.
 
 Preprod factory transaction:
-`02286df2d4da548a90ed9c78a94e7055b0fe59c1e474e1a164dbe0310b6a14f6`.
+`fb56ba304c6cd646517f0b87da25d5f67158ec18adbcd0aaaceb58d21ae03e49`.
 Confirmation was followed by independent reads verifying the singleton NFT
 at the configured factory address, admin, pool policy, sequence zero, and
-unpaused datum. No old offers, pools, or funds were migrated.
+unpaused datum. The fresh factory had no pools/offers at verification. The previous factory (`02286df2…b6a14f6`) and older offers, pools and funds were not migrated or changed.
 
 ## Remaining acceptance work
 
@@ -55,3 +46,7 @@ and disconnected-browser checks do not prove extension interoperability.
 Pending transactions and approval handoffs are page-session state; preserve
 their hashes/CBOR before navigating away. Factory deployment is still a CLI
 operation; the operator UI coordinates bootstrap offers and pool lifecycle.
+
+## Follow-up acceptance — 2026-09-26
+
+The isolated Preprod DEX suite passed 24 transaction steps and rejected 13/13 invalid transactions in both local and node evaluation, including swaps, liquidity, ADA/token quote bootstraps, offer recovery and closure authorization. Its test pools were closed. Two separate, persistent tADA/tUSDC and tADA/tBTC pools were then created under the configured factory; each completed swaps in both directions. Exact asset units, creation/swap hashes, initial reserves and post-swap state are in [the test-pool record](PREPROD_TEST_POOLS_2026-09-26.md). Local DEX tests passed 15/15, Aiken passed 24/24, the Preprod build passed, and browser regressions passed 14/14. The hosted DEX API matched the committed deployment and validator bytecode. Real Eternl three-wallet/account-switching acceptance remains outstanding.

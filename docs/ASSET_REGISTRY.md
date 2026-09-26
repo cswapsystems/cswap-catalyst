@@ -26,7 +26,7 @@ For each update, the validator requires:
 - The same native assets and no decrease in locked ADA (topups are allowed).
 - No minting or burning in the update transaction.
 - A version increment of exactly one.
-- Exactly one registration or revocation, preserving all other entries.
+- Exactly the selected registration, batched registration (`RegisterMany`) or revocation transition, preserving all other entries.
 - Valid native asset IDs, no duplicates, and at most 50 entries.
 
 There is no close action, issuer rotation, automatic expiry, or policy-wide
@@ -61,9 +61,7 @@ The request is an intake record, not proof of mint provenance, legal
 ownership, compliance, or suitability. The Team UI verifies supported
 original-NFT mint provenance before approval as an operational control.
 
-This protocol changes the basic registry script hash. Existing basic
-registries must be redeployed with reviewed entries migrated before request
-approvals are enabled; a deployed legacy registry cannot be upgraded in place.
+Adding requests changed the earlier basic registry script hash; a deployed legacy registry cannot be upgraded in place. The current Preprod manifest already contains a request-enabled registry, reused unchanged in the [2026-09-25 deployment](PREPROD_REDEPLOYMENT_2026-09-25.md). Do not create another registry as a routine setup step.
 
 ## Mint origin versus approval
 
@@ -85,14 +83,11 @@ upgrades need explicit version support. Fraction tokens are separate asset IDs;
 approving an original NFT does not approve its fractions. Fraction provenance
 verification is not implemented in this basic version.
 
-The marketplace checkbox filters exact registered asset IDs at the time of the
-last successful refresh. It fails closed when registry reads fail. This is a
-browsing and Team-admission filter; the existing registry-free orderbook and
-current shared-pool settlement validators still permit unregistered assets at
-the validator level. Other applications can consume the registry UTxO as a
-reference input and enforce membership on-chain in future changes.
+Public approval status is available at `/asset-registry`. The Marketplace no longer has a registered-assets-only checkbox. Registry approval is separate from shared-pool admission: the current acquisition builder and validators use on-chain posted prices, with off-chain quantity/activity controls, not registry membership. An original NFT's approval does not approve its fraction token. Other applications may choose to enforce authenticated membership through a reference input.
 
-## Preprod deployment
+## Future registry initialization — only if an approved replacement is needed
+
+Normal operation uses the registry in `marketplace-deployment.preprod.json`. The following initialization flow is not a migration and does not discover old requests. Obtain approval before spending test ADA on a replacement, preserve the intended issuer and review any entries to copy. Use [Shared-pool operations](SHARED_POOL_OPERATIONS.md) for a coordinated CLI replacement.
 
 1. Install dependencies and a compatible Aiken compiler (the marketplace pins
    v1.1.21). Run `aiken build` from `contracts/marketplace`.
@@ -104,17 +99,12 @@ reference input and enforce membership on-chain in future changes.
 4. Sign the initialization transaction and wait for confirmation. Save its hash
    and the displayed configuration. Do not create another registry while that
    transaction is pending.
-5. Copy the public `NEXT_PUBLIC_ASSET_REGISTRY_TOKEN` and
-   `NEXT_PUBLIC_ASSET_REGISTRY_ISSUER` values into `.env.local`, then restart the
-   development server (or rebuild a deployed app). Never put a signing key in
-   either setting. The registry address is derived rather than independently
-   configured.
+5. Record the confirmed public token, issuer and derived address in the reviewed deployment configuration. Local development can use `NEXT_PUBLIC_ASSET_REGISTRY_TOKEN` and `NEXT_PUBLIC_ASSET_REGISTRY_ISSUER` in `.env.local`, but `build:preprod` takes its canonical identities from the committed manifest. Local overrides alone do not update hosting. Never put a signing key in these settings.
 6. Reopen `/registry` and verify the authenticated empty registry. Connect the
    issuer, paste an NFT asset ID minted with our current contract, and register
    it. Confirmation updates the list; revoke removes approval without moving
    or burning the NFT itself.
-7. Inspect the asset in `/assets` for its registration status and use
-   **CSWAP-registered assets only** in `/marketplace`.
+7. Verify the authenticated asset list at `/asset-registry`. Confirm the configured deployment and hosted build separately; there is no Marketplace registration filter.
 
 A confirmation timeout keeps the submitted transaction hash visible and blocks
 additional writes on that page until **Check confirmation** succeeds. Preserve

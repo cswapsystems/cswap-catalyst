@@ -10,22 +10,26 @@ The active validator artifacts match the security fixes in `a2d0d2e`. Marketplac
 - The existing registry was reused unchanged: token `872c22cf727de60c032888cf4d2db617d5b9ded73763659a9f2fff3143535741505f5245474953545259`.
 - Marketplace starts with a 20 tADA protected reserve, zero LP supply and no posted prices. Four reference scripts are held at the separate Team-controlled native-script address; their deposits total 90.026450 tADA.
 - The new Marketplace identity records its minting seed and matches the updated burn-capable `one_shot` policy. The prior deployment's final-exit identity limitation does not apply to this deployment. Emulator tests include withdrawal and final identity burning; no live LP position was created or closed during redeployment.
-- DEX starts with a fresh factory and no pools/offers. Three-party bootstrap setup remains an operator/user workflow.
+- DEX started with a fresh factory and no pools/offers. On 2026-09-26, two persistent [test liquidity pools](PREPROD_TEST_POOLS_2026-09-26.md) were added to that factory. Three-party bootstrap setup remains an operator/user workflow.
 
-The completed earlier Marketplace journal was preserved under ignored `.data/deployment-journals/`; the current journal remains ignored. Seeds, keys and signed transaction journals are not deployment artifacts for Git or hosting.
+The completed earlier Marketplace journal was preserved under ignored `.data/deployment-journals/`; the current journal remains ignored. Wallet seed phrases, private keys and signed transaction journals are not deployment artifacts for Git or hosting. The manifest's public minting seed is only a transaction output reference, not a wallet seed phrase.
 
-## Indexer configuration and outstanding cloud step
+## Indexer configuration — deployment deferred
 
-`infra/offchain/watched-addresses.preprod.json` contains all six active watched addresses and the required registry `token`. To regenerate the JSON for review, run:
+The owner explicitly deferred indexer deployment on 2026-09-25. No AWS/indexer changes were applied; the configuration below is prepared for a future, separately approved rollout.
+
+`infra/offchain/watched-addresses.preprod.json` contains all six active watched addresses and the required registry `token`. To print manifest-derived JSON for review (without applying or writing configuration), run:
 
 ```sh
 node scripts/indexer-config-preprod.mjs
 node --test tests/indexer-deployment.test.mjs
 ```
 
-Use this JSON as the existing stack's `WatchedAddresses` parameter. Preserve its Blockfrost secret reference, network, origin and other parameters. Deploy the current indexer code using the packaging workflow in `infra/offchain/README.md`, then verify `/v1/status` and `/v1/registry/assets`: the registry must report `synced` with the expected token/address and approved assets. Review old-address projection rows separately; changing watched addresses is not a migration or cleanup of existing cached rows.
+When deployment is explicitly resumed, use this JSON as the confirmed stack's `WatchedAddresses` parameter. Preserve its Blockfrost secret reference, network, origin and other parameters. Follow [the off-chain runbook](OFFCHAIN_DEPLOYMENT.md), then verify `/v1/status` and `/v1/registry/assets`: the registry must report `synced` with the expected token/address and approved assets. Review old-address projection rows separately; changing watched addresses is not a migration or cleanup of existing cached rows.
 
-**Cloud application is not yet verified.** Neither local AWS profile (`default`, `cswap`) can find the documented `cswap-offchain-preprod` stack in `us-west-1`. No indexer API URL is configured locally or was found in the hosted page's initial bundles. The owner must identify the active account/profile, region and stack/API URL before an AWS update can safely proceed. Do not create a replacement stack or guess a different target.
+**The owner confirmed a different AWS account is in use.** The historical account/stack instructions are not current deployment targets. Neither local AWS profile (`default`, `cswap`) found the historical stack in `us-west-1`; no indexer API URL was configured locally or found in the hosted page's initial bundles. This does not prove no indexer exists. Confirm the active account/profile, region and stack/API URL when resuming; do not guess or create a replacement stack.
+
+On-chain confirmation is separate from website publication. The public Preprod URL is `https://preprod.d1g3uigoyq3hsb.amplifyapp.com`; confirm the connected branch, deployed commit and successful Amplify job before claiming it serves these manifests. Private S3 storage for operator limits is a separate application dependency, not the deferred projection indexer.
 
 ## Acceptance boundaries
 

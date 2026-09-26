@@ -6,6 +6,8 @@ The currently supported Marketplace is the registry-free shared reserve-pool pat
 
 The legacy oracle/registry and sharded validator families have been moved to `retired-validators/*.ak.disabled`. They are source history only: Aiken does not build them and the application does not load them for new transactions.
 
+For current operations, start with [Shared-pool operations](../../docs/SHARED_POOL_OPERATIONS.md) and the [confirmed Preprod redeployment record](../../docs/PREPROD_REDEPLOYMENT_2026-09-25.md). The current 14-field reserve supports LP actions with inventory and final exit using its burn-capable identity. The archived designs below are not setup instructions for this deployment.
+
 ## Archived registry sharding (V2)
 
 The former V1 `registry` and `marketplace` validators and V2 sharded path are archived. The following notes describe the retired design only; do not deploy it:
@@ -18,7 +20,7 @@ The former V1 `registry` and `marketplace` validators and V2 sharded path are ar
 Shard updates and shard creation require only a reference input to the root, so unrelated policy updates do not contend. Retiring a shard requires the root admin and burns its state NFT; after retirement the V2 marketplace cannot find that policy/asset shard.
 
 
-The pool is not a constant-product AMM. It uses authenticated oracle prices and a registry-controlled asset permission model. Sellers can sell approved RWA tokens into a shared settlement reserve, buyers can buy RWA inventory from the pool, liquidity providers can deposit or withdraw the settlement asset through LP shares, and an authorized operator can settle inventory out of the pool only by depositing NAV value.
+The archived oracle pool was not a constant-product AMM. It used authenticated oracle prices and registry-controlled asset permissions. These are historical design notes; the current reserve uses posted on-chain prices instead.
 
 ## Archived oracle/registry contract set
 
@@ -33,7 +35,7 @@ Use it to create unique authentication tokens for:
 - registry UTxO
 - admin or deployment control NFTs
 
-The policy requires a configured seed `OutputReference` to be spent and mints exactly one token with the configured name.
+The mint branch requires a configured seed `OutputReference` to be spent and mints exactly one token with the configured name. The current policy also supports burning; the fresh pool's manifest records its public identity seed so the UI can reconstruct and authenticate this policy. Previously minted non-burning identities do not gain that capability.
 
 ### Archived `registry.ak`
 
@@ -147,80 +149,32 @@ The implemented registry supports the recommended model from the requirements:
 
 Bucket metadata can be stored in `PolicyConfig.bucket_id`, for example `SV_JOURNEY_TOGETHER_EN_SLEEVED_PACK`.
 
-## Commands
+## Current verification and operations
 
-For the full lifecycle and operational safety procedure, see
-[OPERATOR_RUNBOOK.md](OPERATOR_RUNBOOK.md). The included deployment scripts are
-Preprod/test tooling; review the runbook's production limitations before using
-them with real assets.
-
-Type-check contracts:
+From the repository root:
 
 ```sh
-aiken check --skip-tests
+npm run test:marketplace
+npm run test:registry
+(cd contracts/marketplace && aiken check --deny)
 ```
 
-Run tests:
+With local Preprod provider configuration, these commands do not sign or submit:
 
 ```sh
-aiken check
+npm run marketplace:preprod -- status
+npm run marketplace:preprod -- plan-redeploy
 ```
 
-Build the Plutus blueprint:
+Rebuild `plutus.json` with `aiken build` from this contract directory only when
+intentionally rebuilding artifacts; review script hashes and deployment
+compatibility afterward. A rebuilt blueprint does not update deployed scripts.
 
-```sh
-aiken build
-```
-
-Run offchain syntax checks:
-
-```sh
-npm run check:offchain
-```
-
-Generate sample datums and redeemers as CBOR:
-
-```sh
-npm run offchain:fixtures
-```
-
-Print validator addresses, script hashes, and example policy IDs from `plutus.json`:
-
-```sh
-npm run offchain:addresses
-```
-
-Generate a local preprod test wallet in `.env`:
-
-```sh
-npm run offchain:wallet
-```
-
-Put your preprod Blockfrost project ID in `.env`:
-
-```sh
-BLOCKFROST_PROJECT_ID=preprod...
-```
-
-Mint fake Preprod settlement/RWA tokens to the local wallet:
-
-```sh
-npm run offchain:mint-test-tokens
-```
-
-Run the off-chain smoke test:
-
-```sh
-npm run offchain:smoke
-```
-
-Run full validator scenario coverage in the Lucid emulator:
-
-```sh
-npm run test:full-scenarios
-```
-
-The active smoke checks must target only the active validator set in the validator inventory. The registry/oracle encoders in the archived sections are historical reference material, not a supported deployment path.
+For approved deployment, journal recovery and reference-script publication,
+follow [Shared-pool operations](../../docs/SHARED_POOL_OPERATIONS.md).
+The older [OPERATOR_RUNBOOK.md](OPERATOR_RUNBOOK.md) and its oracle/registry
+commands are historical, not the current deployment workflow. Live acceptance
+suites spend test ADA and require separate approval; emulator tests do not.
 
 
 ### Registry-free shared quote pool
@@ -264,7 +218,7 @@ Instant Sell uses `InstantSell` orderbook listings.
 
 ## Current application workflows
 
-The `/marketplace` seller control exposes both contract paths:
+Portfolio (`/my-assets`) > Sell / List exposes both seller paths; `/portfolio/orders` manages owned listings and `/marketplace` is the buying surface:
 
 - **List at my price** creates a public `Direct` listing.
 - **Instant sell to pool** creates an `InstantSell` P2P listing with a seller

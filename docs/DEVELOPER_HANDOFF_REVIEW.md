@@ -1,5 +1,7 @@
 # Developer handoff: code review and gap analysis
 
+> Historical review of the 2026-09-23 baseline, not the current backlog. Security fixes, wallet guards, authenticated indexer reads, the unit-test build gate and fresh Marketplace/DEX deployments followed this review. The current pool enforces the acquisition reserve floor and uses a burn-capable identity. See the [2026-09-25 deployment record](PREPROD_REDEPLOYMENT_2026-09-25.md) and [current operations guide](SHARED_POOL_OPERATIONS.md). Indexer cloud deployment is explicitly deferred; the owner has also deferred legacy-liquidity work for this testnet. Original findings and dated observations below are preserved as historical evidence, not revalidated current claims.
+
 Reviewed: 2026-09-23 UTC. Baseline: `026a13dd91bf2ec2198a3c3eb2b4c4f10befec02`.
 Working branch: `main`; `main` and `preprod` pointed to this same commit at review time.
 

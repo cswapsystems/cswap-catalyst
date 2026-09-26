@@ -1,42 +1,33 @@
 # Amplify Hosting deployment
 
-## Amplify environments
+## Current target and verification boundary
 
-- AWS account: `515048575435`
-- Region: `us-west-1`
-- AWS CLI profile: `catalyst`
-- Amplify app: `cswap-catalyst` (`d2r4qj82rav2zq`)
-- Platform: `WEB_COMPUTE` (Next.js SSR)
-- Default domain: `d2r4qj82rav2zq.amplifyapp.com`
-- Preprod source branch: `preprod` (`BETA`, automatic builds enabled)
-- Mainnet source branch: `mainnet` (`PRODUCTION`, automatic builds disabled until Mainnet contracts are deployed)
+The owner-confirmed Preprod URL is `https://preprod.d1g3uigoyq3hsb.amplifyapp.com`. The owner also confirmed a different AWS account is now in use. The active account, CLI profile, region, branch mapping, automatic-build settings and runtime IAM role have not been verified in that account.
 
-The app is pinned to Next.js 15 because that is the newest major version listed as supported by Amplify Hosting compute. `next.config.ts` enables asynchronous WebAssembly for Lucid, and `amplify.yml` builds the `.next` SSR artifact.
+Older instructions naming account `515048575435`, profile `catalyst` or app `d2r4qj82rav2zq` are historical, not deployment targets. Confirm the actual Amplify app and connected branch before administering hosting. Use an assumed deployment role or IAM Identity Center, not root credentials.
 
-## Required Amplify variables
+The repository pins Next.js 15.5.25. `next.config.ts` enables asynchronous WebAssembly for Lucid, and `amplify.yml` builds the `.next` SSR artifact. Confirm the target app is configured for Next.js SSR; do not infer its live settings from this repository.
 
-Configure these as branch overrides:
+## Runtime configuration
 
-- `preprod`: `NEXT_PUBLIC_CARDANO_NETWORK=preprod` and the Preprod `BLOCKFROST_PROJECT_ID` / `BLOCKFROST_IPFS_PROJECT_ID` values.
-- `mainnet`: `NEXT_PUBLIC_CARDANO_NETWORK=mainnet`; its Blockfrost values remain deliberately unconfigured until Mainnet credentials are supplied.
+For Preprod, configure `NEXT_PUBLIC_CARDANO_NETWORK=preprod` and the appropriate server-side `BLOCKFROST_PROJECT_ID` / `BLOCKFROST_IPFS_PROJECT_ID` values.
 
-Operator price-book storage also needs `PRICE_BOOK_BUCKET` (and optionally `PRICE_BOOK_KEY`, default `preprod/instant-sell.json`); `AWS_REGION` is supplied by the Amplify runtime.
+Operator-limit storage requires a private S3 bucket: `PRICE_BOOK_BUCKET`, optional `PRICE_BOOK_KEY` (default `preprod/instant-sell.json`), runtime `AWS_REGION`, and server IAM access for `s3:GetObject` / `s3:PutObject`. Enable bucket versioning and verify signed publishing. Missing production storage fails closed; this dependency is separate from the projection indexer.
 
-The buildspec copies only `BLOCKFROST_PROJECT_ID`, `BLOCKFROST_IPFS_PROJECT_ID`, `NEXT_PUBLIC_CARDANO_NETWORK`, `NEXT_PUBLIC_OFFCHAIN_API_URL`, `PRICE_BOOK_BUCKET` and `PRICE_BOOK_KEY` into `.env.production`, as required for Amplify SSR runtime access. Never upload `CARDANO_WALLET_SEED`; the hosted application uses browser wallet signing and the seed remains local to operator scripts.
+The buildspec copies only `BLOCKFROST_PROJECT_ID`, `BLOCKFROST_IPFS_PROJECT_ID`, `NEXT_PUBLIC_CARDANO_NETWORK`, `NEXT_PUBLIC_OFFCHAIN_API_URL`, `PRICE_BOOK_BUCKET` and `PRICE_BOOK_KEY` into `.env.production` for SSR. Never upload `CARDANO_WALLET_SEED`, signing keys or deployment journals. Browser wallets sign application transactions; deployment credentials stay local.
 
-## Deployment flow
+Indexer deployment is explicitly deferred. Do not configure or replace `NEXT_PUBLIC_OFFCHAIN_API_URL` using historical API URLs; follow [the deferred indexer runbook](OFFCHAIN_DEPLOYMENT.md) when that work resumes.
 
-1. Install/authorize the regional AWS Amplify GitHub App for only `cswapsystems/cswap-catalyst`.
-2. Connect `https://github.com/cswapsystems/cswap-catalyst` to app `d2r4qj82rav2zq`, mapping the existing `preprod` and `mainnet` Amplify environments to their matching Git branches.
-3. Build and validate `preprod` first.
+## Publication and test gate
 
-**Test gate.** Before `npm run build:preprod`, the buildspec runs the Node unit suite (`node --experimental-strip-types --test tests/*.test.mjs`). Any failing test fails the Amplify build, so nothing is published. Playwright browser tests, `npm run test:offchain` and Aiken contract checks are not installed in the Amplify image; run them locally or in separate CI before merging. Run the same command locally before pushing to a branch that deploys automatically.
-4. Deploy contracts and registries on Cardano Mainnet, add Mainnet-specific deployment manifests and Blockfrost credentials, validate wallet/network switching, and only then enable automatic builds for `mainnet`.
+1. Confirm the intended app, Git branch and commit. A push triggers a build only if that branch is connected with automatic builds enabled.
+2. Run `node --experimental-strip-types --test tests/*.test.mjs` and `npm run build:preprod` locally. Amplify runs this Node unit suite before the build; a failing test stops publication.
+3. Run Aiken checks, off-chain tests and Playwright separately as appropriate. Those suites are not part of the current Amplify gate; browser engines and Aiken must be provisioned separately.
+4. Review the committed Marketplace/DEX manifests. `build:preprod` binds Marketplace configuration to the committed deployment; server APIs load the deployment artifacts. Stale hosting values must not be used to bypass script/schema compatibility checks.
+5. After the authorized push, verify the Amplify job's commit and success, then check the hosted deployment status, reads and wallet guards. A successful local build or on-chain transaction is not proof the website was published.
 
-Runtime logs use the least-privilege `cswap-amplify-ssr-logs` role, constrained to this AWS account and Amplify app.
+The [2026-09-25 deployment record](PREPROD_REDEPLOYMENT_2026-09-25.md) identifies the confirmed new contracts. Old outputs were not migrated. Contract deployment and website publication are distinct operations.
 
-The current application contains several deliberately Preprod-only contract addresses and wallet guards. The `mainnet` environment must remain gated until those references are parameterized and fresh Mainnet contract identities are deployed; changing only the network environment variable is not sufficient.
+## Mainnet remains gated
 
-## Account security
-
-Do not use root credentials for routine deployments. Replace the current root-backed CLI session with an IAM Identity Center or assumed deployment role before ongoing administration, enable root MFA, and remove root access keys if they exist.
+The application includes Preprod-only identities and wallet guards. Mainnet requires reviewed mainnet contracts, manifests, credentials, network handling and acceptance testing. Changing only `NEXT_PUBLIC_CARDANO_NETWORK` is insufficient; do not enable automatic mainnet publication on that basis.

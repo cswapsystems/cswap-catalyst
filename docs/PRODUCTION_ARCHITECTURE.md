@@ -7,7 +7,7 @@ CSWAP has three separate on-chain systems. Their assets, price authority, LP tok
 | System | User surface | Price authority | State model |
 | --- | --- | --- | --- |
 | Fractionalization | `/mint`, `/fractionalize` | None | A vault holds one original asset while a fixed FT supply circulates. |
-| Marketplace shared pool | `/marketplace`, `/team`, `/reserves` | Team batcher sets bid and resale ask | A quote pool holds settlement cash, LP supply, protected reserve, and inventory value. |
+| Marketplace shared pool | `/marketplace`, `/my-assets`, `/team`, `/portfolio/reserves` | Team batcher posts on-chain buy/sell ratios | A reserve pool holds cash, LP supply, protected reserve, inventory cost/ask/count and closing state. |
 | Fraction DEX | `/dex` | AMM reserve ratio | A factory authenticates many pool UTxOs at one shared AMM address. |
 
 ## Marketplace and shared-pool settlement
@@ -20,12 +20,12 @@ The Marketplace has two intentionally distinct seller experiences:
 The shared-pool path is a quoted settlement service, not an AMM:
 
 ```text
-seller -> pool-sell request -> batcher settlement -> pool-owned inventory -> buyer
+seller -> InstantSell listing -> batcher settlement -> pool-owned inventory -> buyer
                                       |                    |
                                       +-- cash debit        +-- cash return on sale
 ```
 
-The Team console reads the exact-asset registry before it builds an Instant Sell settlement, while direct listings remain registry-free. The current `shared_reserve_pool` and `marketplace_listing_escrow` validators do not consume a registry reference, so registry admission is a fail-closed client/operator control rather than an on-chain settlement guarantee. The batcher pays at least the seller minimum, chooses the actual bid and inventory ask, and mints one inventory receipt. The receipt and `inventory_value` bind the pool-owned listing to the pool. A later buyer burns that receipt and returns the listing payment to the pool.
+The `shared_reserve_pool` and `marketplace_listing_escrow` validators use the pool's posted exact-asset buy/sell ratios, not registry membership. The Team console also checks off-chain quantity caps and active status; these limits are operator controls, not validator guarantees. Acquisition pays the posted bid (at least the seller minimum) and returns the seller's listing ADA; the batcher funds the new inventory ADA buffer. The transaction mints one receipt and updates inventory cost, ask and count. A later buyer burns the receipt and returns the listing payment and inventory ADA to the pool. Direct listings remain registry-free.
 
 ### Permissionless asset-admission requests
 
@@ -44,24 +44,24 @@ admits an asset.
                            +--> next registry state contains all requested IDs
                            +--> request deposit returns to requester
 
-This is an auditable intake/approval boundary, not a replacement for due
-diligence. Current shared-pool validators still do not reference the basic
-registry, so approval remains an on-chain-authenticated Team admission record
-and fail-closed operator check until those settlement validators are upgraded.
+This is an auditable intake/approval record, not a replacement for due diligence.
+Neither the current acquisition builder nor its validators use registry membership
+as an admission gate. Posted on-chain prices admit an asset to the shared pool;
+registry approval is a separate record and does not automatically post a price.
 
-The quote-pool datum tracks the quote asset, total LP supply, protected minimum cash reserve, paused state, and aggregate ask value of open inventory. LP add, remove, and close are blocked while `inventory_value != 0`; this avoids changing LP claims while assets already purchased by the pool remain for sale.
+The 14-field reserve datum tracks identities, authorities, quote asset, posted prices, LP supply, protected reserve, pause state, inventory cost/ask/count and optional closing LP. Deposits use cash plus acquisition cost and can proceed with inventory, but not while paused/closing. Partial withdrawals pay only the burned share of cash above the reserve and can proceed with inventory or while paused. Early leavers give up inventory exposure. Final exit burns all remaining shares, records the exiting LP, returns inventory one listing at a time, then burns the pool identity and returns remaining reserve assets. The current deployment supports this burn; old mint-only identities do not.
 
 ### Team roles and UI
 
 | Role | On-chain authority | Primary UI |
 | --- | --- | --- |
-| Registry administrator | Approves or revokes exact asset units used by the Team admission check | `/registry` |
+| Registry administrator | Approves or revokes exact asset units in the independent approval record | `/registry` |
 | Asset requester | Creates a cancellable one-or-more-asset admission request | `/registry` |
-| Batcher | Settles Instant Sell requests and sets the pool resale ask | `/team` pricing queue |
-| Liquidity provider | Adds quote reserve or burns LP tokens for allowed withdrawals | `/team` or `/reserves` |
-| Marketplace user | Creates/cancels direct listings or Instant Sell requests; buys inventory | `/marketplace` |
+| Batcher | Posts ratios, acquires Instant Sell listings and reprices inventory | `/team`, `/team/inventory` |
+| Liquidity provider | Adds quote reserve, burns LP shares or completes final exit | `/portfolio/reserves` |
+| Marketplace user | Creates/manages listings in Portfolio; buys public listings in Marketplace | `/my-assets`, `/portfolio/orders`, `/marketplace` |
 
-The Team console is an operator workspace, not an unrestricted admin override. The connected payment key must satisfy the batcher/admin conditions enforced by the transaction builders and validators. It displays pool cash, cash available above the protected reserve, open inventory value, and LP supply so pricing decisions have context.
+The Team console is enabled only for configured operator/Team wallets, including direct `/team/...` visits. This client-side presentation guard is not an authorization boundary: builders, APIs and validators enforce the relevant signer. The console shows cash, available cash, inventory cost/ask/count and LP supply. Public registry requests are not operator-gated.
 
 ## Fraction DEX
 
@@ -90,9 +90,9 @@ For a tADA pair, the owner buffer forms part of the final ADA reserve and the LP
 
 Marketplace and DEX deployments have independent public manifests. A manifest contains public addresses, policy IDs, and transaction identifiers; it must never contain wallet seeds, Blockfrost secrets, or batcher private keys.
 
-The three-party bootstrap changes the `factory_state` and bootstrap-offer validator scripts and the offer-action encoding. A deployed factory cannot be modified in place. A new Preprod deployment must be created with the reviewed blueprint and a manifest containing `bootstrapOfferAddress`. Until that migration, the UI keeps factory creation and three-party bootstrap unavailable, but active pools whose AMM address and policy IDs match the reviewed blueprint remain swappable and support normal LP transitions.
+Marketplace and DEX were freshly deployed on 2026-09-25; see the [deployment record](PREPROD_REDEPLOYMENT_2026-09-25.md). The manifests match the hardened validators and the DEX includes three-party bootstrap. A deployed script cannot be modified in place. Future incompatible blueprint changes must disable signing until an intentional replacement is confirmed; old positions do not migrate automatically. Verify the hosted commit separately from on-chain deployment.
 
-The asset-admission request flow adds RegisterMany to the basic registry and a parameterized asset_registry_request validator. It changes the basic registry script hash, so existing basic-registry deployments require an intentional redeployment and reviewed-entry migration before this interface is enabled.
+The current request-enabled registry was reused unchanged in the latest deployment. Older basic registries cannot gain `RegisterMany` in place; any replacement requires explicit approval and reviewed entries. Indexer cloud deployment is deferred, and the active AWS account/region/stack must be confirmed before resuming. Operator-limit S3 storage is a separate application requirement.
 
 ## Operational controls
 

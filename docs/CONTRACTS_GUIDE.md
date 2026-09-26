@@ -7,14 +7,16 @@ The repository contains three related but separate systems:
 
 1. **Fractionalization** locks an original NFT and creates fungible fraction
    tokens.
-2. **Marketplace** supports a registry/oracle-controlled RWA pool and a
-   simpler registry-free orderbook plus shared quote pool.
+2. **Marketplace** supports a registry-free listing escrow and shared reserve pool,
+   with a separate asset-approval registry. The oracle/sharded designs are archived.
 3. **DEX** is a separate constant-product AMM with one shared script address
    for many individual pools.
 
 The marketplace's shared quote pool is **not** a constant-product AMM. It is
-an oracle/RFQ-style settlement pool: an off-chain batcher decides inventory
-prices and the on-chain contracts verify the settlement and accounting.
+a fixed-price settlement pool: the batcher posts on-chain exact-asset buy/sell
+ratios, and validators enforce those prices, the reserve floor and accounting.
+
+The [2026-09-25 deployment record](PREPROD_REDEPLOYMENT_2026-09-25.md) identifies the confirmed hardened Preprod scripts. Current source names are `marketplace_listing_escrow`, `shared_reserve_pool`, `pool_share_policy` and `pool_inventory_receipt_policy`; datum names and API kind `quote-pool` remain unchanged. Renaming source files alone is not a migration of old outputs.
 
 ## 1. The Cardano validator model
 
@@ -63,13 +65,13 @@ Fractionalization
           +--> Combine: burn all fractions -> recover original NFT
 
 Marketplace
-  registry/oracle path:
+  archived registry/oracle path (not deployed by current tooling):
     registry + oracle + marketplace vault + LP policy
 
   registry-free path:
     simple orderbook <--> shared quote pool
                          |
-                         +--> batcher buys direct listings
+                         +--> batcher acquires InstantSell listings
                          +--> pool-owned inventory listings
 
 DEX
@@ -196,16 +198,22 @@ QuotePoolDatum {
   lp_token: AssetClass
   inventory_token: AssetClass
   quote_asset: AssetClass
+  prices: List<PoolAssetPrice>
   total_lp_supply: Int
   min_cash_reserve: Int
   paused: Bool
+  inventory_cost: Int
   inventory_value: Int
+  inventory_count: Int
+  closing: Option<PoolExit>
 }
 ```
 
 `inventory_token` is a receipt token. One receipt represents one open
 pool-owned inventory listing. `inventory_value` is the sum of the ask prices
-of those open listings.
+of those open listings, not cash. `inventory_cost` is their acquisition cost and
+contributes to LP share pricing. `closing` records the final exiting LP. This is
+the current 14-field datum; a legacy 10-field datum is not interchangeable.
 
 ## 5. Retired registry/oracle path
 
@@ -373,7 +381,8 @@ Its `SimpleListingDatum` adds a settlement mode:
 SimpleListingDatum {
   seller: Address
   seller_key: VerificationKeyHash
-  settlement: Direct | QuotePool { pool_token, inventory_token }
+  settlement: Direct | InstantSell { pool_token }
+                     | QuotePool { pool_token, inventory_token, acquisition_cost }
   rwa: AssetClass
   quantity: Int
   price_asset: AssetClass
@@ -381,8 +390,10 @@ SimpleListingDatum {
 }
 ```
 
-`Direct` means payment goes to the seller. `QuotePool` means the listing is
-owned by a shared pool and the listing's proceeds return to that pool.
+Settlement constructors are `Direct` (0), `InstantSell` (1) and `QuotePool` (2).
+`Direct` pays the seller. `InstantSell` records a seller minimum and can only be
+acquired by the configured pool batcher, not publicly bought. `QuotePool` records
+pool-owned inventory whose proceeds return to the pool. Cost is distinct from ask.
 
 Direct listings may be bought, cancelled, or updated. Pool-owned listings may
 be bought, but cannot be cancelled or updated through the generic listing
@@ -405,7 +416,8 @@ controls the one-unit receipt token used by pool-owned listings.
 
 - `MintInventory` requires exactly `+1`, a pool input containing the pool NFT,
   and the batcher signature.
-- `BurnInventory` requires exactly `-1`.
+- `BurnInventory` allows a negative amount and requires a pool-identity input;
+  the consuming pool/listing paths enforce exactly one receipt burned per listing.
 
 The receipt is not the RWA. It is an accounting witness that one inventory
 listing is open. The listing also contains the RWA, while the pool datum tracks
@@ -415,31 +427,37 @@ the aggregate value of all open inventory.
 
 | Redeemer | What happens |
 | --- | --- |
-| `AddLiquidity` | Adds quote asset, mints the calculated LP amount, and requires no open inventory. |
-| `RemoveLiquidity` | Burns LP tokens, withdraws only above `min_cash_reserve`, and requires no open inventory. |
-| `BatcherAcquire` | Batcher buys a `Direct` listing using pool funds and creates a pool-owned listing. |
-| `BatcherInstantSell` | Batcher settles a seller-only pool request at or above its minimum payout and creates a pool-owned listing. |
+| `AddLiquidity` | Mints LP shares against cash plus inventory cost; allowed with inventory, not paused/closing. |
+| `AddFunds` | Adds quote cash without shares; allowed while paused, not closing. |
+| `RemoveLiquidity` | Burns partial LP supply for its share of cash above the floor; allowed with inventory or while paused. |
+| `StartLpExit` | Burns all remaining LP shares, pays available cash and records the final LP. |
+| `ReturnClosingInventory` | Returns one inventory listing and its ADA to the recorded LP, burns its receipt and decrements accounting. The listing spend requires that LP's signature. |
+| `CompleteLpExit` | Recorded LP closes after inventory accounting reaches zero; burns identity and receives remaining reserve assets. |
+| `BatcherAcquire` | Acquires exactly one InstantSell listing at posted buy/sell prices while preserving the reserve floor. |
 | `InventorySale` | Any buyer buys a pool-owned listing; the pool receives the quote payment and the receipt is burned. |
+| `Reprice` | Batcher updates one inventory ask and aggregate ask, preserving cost and identity. |
+| `UpdatePrices` | Batcher updates posted exact-asset ratios; allowed while paused, not closing. |
 | `AdminUpdate` | Admin changes permitted configuration while preserving accounting fields. |
-| `AdminClose` | Admin closes only when `inventory_value == 0` and burns the pool token. |
+| `AdminClose` | Admin closes an idle pool with zero LP supply and zero inventory cost/ask/count, no recorded LP exit, and a pool-token burn. |
 
 ### 8.3 Batcher acquisition flow
 
 ```text
-1. User creates Direct listing:
+1. User creates InstantSell listing:
      RWA + ADA buffer -> orderbook
 
 2. Allow-listed batcher submits one transaction:
      spend pool
-     spend Direct listing
+     spend exactly one InstantSell listing
      mint inventory receipt (+1)
-     pay seller from pool
+     pay posted bid from pool and return seller's original listing ADA
+     fund new inventory ADA from the batcher wallet
      create pool-owned listing
      create continuing pool datum
 
 3. Pool state changes:
-     quote cash decreases by purchase price + listing ADA buffer
-     inventory_value increases by the new ask price
+     quote cash decreases by the posted bid only, retaining the reserve floor
+     inventory_cost += bid; inventory_value += posted ask; inventory_count += 1
 ```
 
 The pool-owned listing is bound to the pool by all of these fields:
@@ -481,41 +499,35 @@ validator (`pool_sell_request`) is archived; see the
 3. Buyer receives the listed RWA.
 4. Pool receives the listing price and the ADA buffer.
 5. Inventory receipt is burned (-1).
-6. inventory_value decreases by the listing price.
+6. inventory_cost falls by acquisition cost, inventory_value by ask, count by one.
 ```
 
 The continuing pool must still contain at least `min_cash_reserve`. Because the
 pool UTxO and listing are both consumed, the value movement and accounting
 update happen atomically.
 
-### 8.5 Why liquidity changes stop while inventory is open
+### 8.6 LP accounting with open inventory
 
-An open inventory listing is an obligation: the pool has already spent cash to
-acquire an asset and has promised to sell it at the orderbook ask. If LPs were
-allowed to add/remove liquidity or close the pool while that listing remained
-open, the pool's liabilities and LP claims could become difficult to reconcile.
+Deposits use cash plus acquisition cost, not asking value. Partial withdrawals
+pay `lp_burned * (cash - min_cash_reserve) / total_lp_supply` using integer
+division. They give up inventory exposure and can return zero; the UI requires
+explicit acknowledgment of a zero payout. Open inventory does not block deposits
+or partial withdrawals. Deposits remain blocked while paused or closing.
 
-The contract therefore requires:
+Final exit is a sequence: burn all shares and record the LP, return each remaining
+listing and burn its receipt, then close and burn the pool identity. Completion
+returns the remaining reserve, including the protected floor. The current
+manifest records the public identity seed and matches the burn-capable policy;
+old mint-only identities cannot use that policy retroactively.
 
-```text
-AddLiquidity:    current.inventory_value == 0 && next.inventory_value == 0
-RemoveLiquidity: current.inventory_value == 0 && next.inventory_value == 0
-AdminClose:      current.inventory_value == 0
-```
+### 8.7 Operator console and client boundary
 
-This is a deliberately conservative settlement rule. It makes pool-owned
-inventory operationally simple: sell all open inventory before changing LP
-state or closing the pool.
-
-### 8.6 Operator console and client boundary
-
-`/team` combines the pricing queue and reserve controls with a read of the
-configured shared-pool datum. It is a transaction builder and state reader,
-not a privileged service: quote-pool and request validators still require the
-configured batcher/admin conditions and complete continuing outputs. The Team
-builder separately checks exact registry approval, but current shared-pool
-validators do not reference the registry. The console should be used with fresh UTxOs and an
-operator audit record; it does not make a price decision valid by itself.
+`/team` uses fresh pool state, posted prices and off-chain quantity/activity
+limits. It does not require registry membership for acquisition. `/team/inventory`
+separates signed on-chain pricing from signed, revision-checked off-chain limits;
+`/portfolio/reserves` hosts LP actions. Operator-only route access is a UI guard,
+not signing authority. Validators and APIs enforce the actual signer. Preserve
+approval receipts and confirmed hashes; page state is not a durable audit log.
 
 ## 9. Constant-product DEX
 
@@ -629,34 +641,35 @@ version:
 ```sh
 cd contracts/marketplace
 aiken check --deny .
-aiken build --out plutus.json
 
 cd ../minter
 aiken check .
-aiken build .
 
 cd ../dex
-aiken check .
-aiken build .
+aiken check --deny .
 ```
 
-The frontend checks are:
+Use the compiler pinned by each project's `aiken.toml`; the minter's older pin
+can cause strict warning-as-error checks to fail with a different compiler.
+From the repository root, application and off-chain checks are:
 
 ```sh
 npm run lint
-npm run build
+node --experimental-strip-types --test tests/*.test.mjs
+npm run test:offchain
+npm run build:preprod
+npm run test:browser
 ```
 
-The current repository also contains marketplace tests for exact pool-owned
-escrow, receipt authorization/burning, and blocking liquidity changes while
-inventory is open. The DEX unit suite currently exercises AMM arithmetic and
-exact token-pool lovelace handling. Before enabling the bootstrap on Preprod,
-add transaction-level cases for FT-provider cancellation, unauthorized
-acceptance, missing LP or Team signature, reused role key, wrong
-pair/reserve/buffer, wrong pool ID, wrong LP split, missing offer input, and
-legacy-deployment rejection. These checks do not replace a network
-submission test with real UTxOs, min-UTxO values, wallet signing, datum
-encoding, and the target network ledger behavior.
+Marketplace emulator tests exercise exact escrow, receipt authorization/burning,
+posted prices, inventory accounting, LP actions with inventory and final identity
+burning. DEX tests cover AMM arithmetic, exact token-pool ADA, three-party
+signatures, LP allocation, malformed-offer cancellation and hostile approval
+transactions. See [DEX validation](DEX_VALIDATION.md) and [UI testing](UI_TESTING.md)
+for dated results and remaining real-wallet acceptance. Automated checks do not
+replace real Eternl account switching during approval or a browser three-wallet
+walkthrough. Rebuilding a blueprint is a deliberate artifact change, not a
+routine documentation/test step; review deployment compatibility afterward.
 
 ## 12. Important operational boundaries
 
@@ -666,21 +679,19 @@ encoding, and the target network ledger behavior.
 - The simple orderbook intentionally has no registry allowlist. Any policy or
   asset can be listed unless the application or deployment process imposes an
   allow-list.
-- Registry/oracle flags such as KYC and redemption are represented in datum
-  state, but the current marketplace validator does not enforce a complete KYC
-  workflow.
-- Policy-wide registry admission and exact-asset configuration are different
-  concepts. Review which validator path is deployed before assuming a policy
-  ID alone is sufficient.
+- KYC/redemption flags belong to archived registry/oracle designs. The current
+  asset registry records exact-asset issuer approval, not a complete compliance workflow.
+- Current registry approval and posted pool prices identify exact assets.
+  Historical policy-wide admission is not interchangeable with either.
 - Min-UTxO ADA buffers are part of the exact value checks. A transaction can be
   logically correct and still fail if it does not provide enough ADA for the
   output datum and native assets.
-- The batcher's external allow-list and oracle decision process are currently
-  off-chain controls. The on-chain contracts enforce the configured batcher
-  key, pool accounting, and transaction shape, but not the batcher's private
-  business policy.
+- The batcher can post prices without on-chain bands or spread limits. Validators
+  enforce posted prices, the configured signer, accounting and the reserve floor,
+  not valuation quality or off-chain quantity/activity controls.
 
-For the operational details of the registry/oracle pool, see
+For historical operational details of the retired registry/oracle pool, see
 [`contracts/marketplace/OPERATOR_RUNBOOK.md`](../contracts/marketplace/OPERATOR_RUNBOOK.md).
-For the marketplace's existing design notes, see
+For current operational sequencing, see [Shared-pool operations](SHARED_POOL_OPERATIONS.md).
+For the marketplace's current behavior and archived design notes, see
 [`contracts/marketplace/README.md`](../contracts/marketplace/README.md).

@@ -1,5 +1,5 @@
 // Shared plumbing for the Preprod acceptance suites: demo-wallet selection,
-// a resumable journal under test-results/, indexing-safe submission, and
+// a resumable journal outside Playwright's cleared test-results/ output, indexing-safe submission, and
 // attack checks that require rejection by both local and node evaluation.
 import { mkdir, readFile, writeFile } from 'node:fs/promises';
 import * as t from '@lucid-evolution/lucid';
@@ -22,9 +22,10 @@ export async function preprodHarness(name, { watched = () => [] } = {}) {
   }
   const as = role => { lucid.selectWallet.fromSeed(phrases[role]); return wallets[role]; };
 
-  const file = new URL(`test-results/${name}.json`, ROOT);
+  const journalDir = new URL('.data/preprod-test-journals/', ROOT);
+  const file = new URL(`${name}.json`, journalDir);
   const journal = await readFile(file, 'utf8').then(JSON.parse, () => ({ steps: {}, attacks: {} }));
-  const save = async () => { await mkdir(new URL('test-results/', ROOT), { recursive: true }); await writeFile(file, JSON.stringify(journal, (_, v) => typeof v === 'bigint' ? v.toString() : v, 2) + '\n'); };
+  const save = async () => { await mkdir(journalDir, { recursive: true }); await writeFile(file, JSON.stringify(journal, (_, v) => typeof v === 'bigint' ? v.toString() : v, 2) + '\n'); };
 
   // Confirmation precedes Blockfrost indexing: wait until neither the signer's
   // wallet nor any watched view still reports an input this transaction spent.

@@ -7,7 +7,7 @@
 //
 //   node --experimental-strip-types scripts/marketplace-e2e-preprod.mjs
 //
-// Progress is journaled to test-results/ so an interrupted run resumes.
+// Progress is journaled to ignored .data/preprod-test-journals/ so an interrupted run resumes.
 import { readFile } from 'node:fs/promises';
 import { buildMarketAction, decodeMarketListing, decodeSharedPool, listingDatum, lpWithdrawal, marketAddressData, marketUnit, nextPool } from '../src/lib/marketplace.ts';
 import { assertDeployment, bootstrapBuilder, deploymentScripts, referenceNames, referenceOutput } from './lib/marketplace-deployment.mjs';

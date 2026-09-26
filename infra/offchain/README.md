@@ -1,5 +1,7 @@
 # CSWAP off-chain projection API
 
+**Deployment deferred by the owner (2026-09-25).** The active AWS account differs from the historical runbook and its stack/region are unconfirmed. This document is a future deployment reference, not authorization to apply cloud changes. See [current status and rollout prerequisites](../../docs/OFFCHAIN_DEPLOYMENT.md).
+
 This stack deploys one isolated environment (`preprod` or `mainnet`) containing:
 
 - an encrypted, on-demand DynamoDB projection table with point-in-time recovery;
@@ -22,6 +24,8 @@ List routes accept `limit` (1-100) and an opaque `cursor`.
 
 ## Secret contract
 
+The complete prepared Preprod configuration is [watched-addresses.preprod.json](watched-addresses.preprod.json). From the repository root, `node scripts/indexer-config-preprod.mjs` prints manifest-derived JSON without writing or applying it; `node --test tests/indexer-deployment.test.mjs` validates the committed file. The single-entry example below is not the complete six-address configuration.
+
 `WatchedAddresses` is a JSON array of `{"kind","address"}` objects. The single `registry` entry must also carry `token`, the registry identity NFT unit (policy ID + asset name hex), copied with `address` from the deployment manifest's `registry` section, e.g. for Preprod:
 
 ```json
@@ -38,15 +42,15 @@ The indexer trusts only the one output at that address holding exactly one ident
 
 Never pass a wallet seed, signing key, or Blockfrost project ID as a public frontend variable. The Lambda execution role can read only the named secret. Mainnet should be deployed with `EnableIndexer=false` until mainnet addresses and a mainnet Blockfrost project are explicitly configured.
 
-## Build and deploy
+## Future build and deployment reference — deferred
 
-Install the shared layer dependencies, then package and deploy from this directory:
+Only after explicit approval and confirmation of the existing target, install the shared layer dependencies, then package from this directory. Replace placeholders with reviewed values; preserve existing stack parameters. Keep scheduling disabled until separately approved:
 
 ```powershell
 npm.cmd run package:layer
 npm.cmd test
-aws cloudformation package --template-file template.yaml --s3-bucket <artifact-bucket> --output-template-file packaged.yaml --profile catalyst --region us-west-1
-aws cloudformation deploy --template-file packaged.yaml --stack-name cswap-offchain-preprod --capabilities CAPABILITY_IAM --parameter-overrides EnvironmentName=preprod CardanoNetwork=preprod AllowedOrigin=https://preprod.d1g3uigoyq3hsb.amplifyapp.com WatchedAddresses='<json>' BlockfrostSecretArn=<secret-arn> EnableIndexer=true --profile catalyst --region us-west-1
+aws cloudformation package --template-file template.yaml --s3-bucket <artifact-bucket> --output-template-file packaged.yaml --profile <deployment-profile> --region <deployment-region>
+aws cloudformation deploy --template-file packaged.yaml --stack-name <confirmed-preprod-stack> --capabilities CAPABILITY_IAM --parameter-overrides EnvironmentName=preprod CardanoNetwork=preprod AllowedOrigin=https://preprod.d1g3uigoyq3hsb.amplifyapp.com WatchedAddresses='<complete-reviewed-json>' BlockfrostSecretArn=<secret-arn> EnableIndexer=false --profile <deployment-profile> --region <deployment-region>
 ```
 
 The deployment table is retained if the CloudFormation stack is deleted. Mainnet additionally enables DynamoDB deletion protection.

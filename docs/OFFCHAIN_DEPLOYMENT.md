@@ -1,33 +1,38 @@
 # Off-chain AWS deployment
 
-The CSWAP projection API is deployed in AWS account `515048575435`, region `us-west-1`, using the `catalyst` CLI profile.
+## Current status — deferred
 
-| Environment | CloudFormation stack | API URL | Indexer |
-| --- | --- | --- | --- |
-| Preprod | `cswap-offchain-preprod` | `https://e3llm6ycq7.execute-api.us-west-1.amazonaws.com` | Disabled until its Blockfrost secret is configured |
-| Mainnet | `cswap-offchain-mainnet` | `https://uzluj5uvw2.execute-api.us-west-1.amazonaws.com` | Gated; disabled until mainnet contracts and credentials are ready |
+The owner deferred indexer deployment on 2026-09-25. No indexer cloud changes were applied during the [Marketplace/DEX redeployment](PREPROD_REDEPLOYMENT_2026-09-25.md). Do not deploy, enable a schedule, create a replacement stack or change the hosted API URL until this work is explicitly resumed.
 
-Both health endpoints were verified after deployment. The API URLs are configured on the matching branches of Amplify app `d1g3uigoyq3hsb` as `NEXT_PUBLIC_OFFCHAIN_API_URL`.
+The owner confirmed a different AWS account is now used. Historical references to account `515048575435`, profile `catalyst`, region `us-west-1` and stack `cswap-offchain-preprod` are not verified active targets. The current account/profile, region, stack and API URL remain to be confirmed. The public website is `https://preprod.d1g3uigoyq3hsb.amplifyapp.com`; its URL alone does not establish the indexer's account or region.
 
-## Resources per environment
+## Configuration ready for review
 
-- API Gateway HTTP API with CORS, access logging, and route throttling
-- read-only API Lambda
-- scheduled Cardano projection Lambda (schedule conditionally enabled)
-- shared Lambda Layer for pinned AWS SDK dependencies
-- encrypted DynamoDB table using on-demand capacity and point-in-time recovery
-- DynamoDB lease lock preventing overlapping indexer runs
-- Lambda error alarms and X-Ray tracing
-- Secrets Manager reference with least-privilege Lambda access
+[`watched-addresses.preprod.json`](../infra/offchain/watched-addresses.preprod.json) contains the registry, orderbook, quote pool, vault, DEX factory and DEX pool addresses derived from the committed deployments. The registry entry includes its identity NFT `token`; omitting it prevents the current indexer from starting.
 
-Mainnet's DynamoDB table also has deletion protection enabled. Both tables and API access-log groups use retain policies. The private, versioned deployment bucket is `cswap-catalyst-artifacts-515048575435-us-west-1`.
+From the repository root, these commands print candidate JSON and validate the committed configuration without deploying anything:
 
-## Enabling an indexer
-
-The corresponding Secrets Manager value must first be set to JSON containing the correct network-specific project ID:
-
-```json
-{"projectId":"..."}
+```sh
+node scripts/indexer-config-preprod.mjs
+node --test tests/indexer-deployment.test.mjs
+npm --prefix infra/offchain test
 ```
 
-Then redeploy the same stack with `EnableIndexer=true`. Do not enable mainnet using preprod addresses or credentials. The Cardano wallet seed is not used by this stack and must never be placed in Lambda configuration.
+The registry reader authenticates the singleton NFT and datum. Authentication failures retain the last authenticated asset set and report `failed`; they must not be shown as a successful empty registry.
+
+## Future rollout checklist
+
+After explicit approval to resume:
+
+1. Confirm the AWS identity, region, existing stack, artifact bucket, API URL and allowed website origin. Inspect existing parameters before proposing changes.
+2. Preserve the network-specific Blockfrost secret reference and other reviewed parameters. The secret is JSON containing `projectId`; no wallet seed is used by this stack.
+3. Review the complete watched-address file against both manifests. Decide how superseded-address cache rows will be handled: changing addresses does not migrate or clear those rows automatically.
+4. Package/test the current code using [the infrastructure guide](../infra/offchain/README.md). Keep the indexer disabled until its credentials, addresses and rollout are approved.
+5. After the approved update, check `/health`, `/v1/status` and `/v1/registry/assets`. Require an authenticated, synced registry with the expected identity and assets; inspect logs and scheduled reconciliation.
+6. Configure `NEXT_PUBLIC_OFFCHAIN_API_URL` on the confirmed hosting branch only after validating that API. Verify the hosted app independently.
+
+## Infrastructure and separate dependencies
+
+The template defines an HTTP API, read-only API Lambda, scheduled projection Lambda, dependency layer, encrypted DynamoDB projection table, lease lock, logs, alarms and least-privilege secret access. This describes repository infrastructure, not a verified inventory of the new AWS account. Retain policies protect the table and API log group; mainnet additionally enables table deletion protection.
+
+The projection database is a cache, not an authority for ownership or transaction signing. Mainnet remains gated pending mainnet contracts and credentials. Private S3 operator-limit storage (`PRICE_BOOK_BUCKET` / `PRICE_BOOK_KEY`) is a separate production requirement; deferring the indexer does not configure or replace that storage.

@@ -5,6 +5,8 @@ repository. **Active** means the current web app, deployment scripts, or
 supported transaction builders load the validator. A validator can still need a
 fresh deployment before its newest source is live on Preprod.
 
+The [2026-09-25 deployment record](PREPROD_REDEPLOYMENT_2026-09-25.md) records the hardened Marketplace/DEX deployments and reused request-enabled registry. Confirm blueprint/manifests after any subsequent artifact change; source renaming alone does not migrate outputs. The website's deployed commit must be verified separately.
+
 ## Active validator set
 
 | Domain | Validator source | Purpose | Deployment note |
@@ -12,16 +14,16 @@ fresh deployment before its newest source is live on Preprod.
 | Original assets and fractions | `contracts/minter/validators/multi_nft_policy.ak` | One-shot original RWA/NFT minting | Used by the minting flow. |
 | Original assets and fractions | `contracts/minter/validators/ft_policy.ak` | Fraction-token mint/burn policy | Used with the fraction vault. |
 | Original assets and fractions | `contracts/minter/validators/vault.ak` | Holds the original asset while fractions circulate; releases it only on complete combination | Used by My Assets fractionalize/combine flows. |
-| Asset registry | `contracts/marketplace/validators/asset_registry.ak` | Team-managed approved asset registry | Requires the intentional registry deployment. |
-| Asset registry | `contracts/marketplace/validators/asset_registry_request.ak` | Permissionless request UTxO consumed by Team approval/rejection | Requires the matching registry-request deployment. |
+| Asset registry | `contracts/marketplace/validators/asset_registry.ak` | Team-managed approved asset registry | Current request-enabled registry was reused unchanged. |
+| Asset registry | `contracts/marketplace/validators/asset_registry_request.ak` | Permissionless request UTxO consumed by Team approval/rejection | Derived from the configured request-enabled registry identities. |
 | Shared pool | `contracts/marketplace/validators/one_shot.ak` | One-shot identity NFT policy for registry and pool state | Used by marketplace deployment scripts. |
 | Shared pool | `contracts/marketplace/validators/shared_reserve_pool.ak` | Shared quote-asset reserve, LP accounting, and pool inventory state | Used by reserve and Team flows. |
 | Shared pool | `contracts/marketplace/validators/pool_share_policy.ak` | Shared-pool ownership-share mint/burn policy | Used with `shared_reserve_pool`. |
 | Shared pool | `contracts/marketplace/validators/pool_inventory_receipt_policy.ak` | Receipt policy for pool-owned inventory | Used for batcher acquisition, public sale, and LP wind-down. |
 | Marketplace | `contracts/marketplace/validators/marketplace_listing_escrow.ak` | Registry-free listing escrow for direct, Instant Sell, and pool-owned inventory modes | Used by Marketplace listing and settlement flows. |
 | FT DEX | `contracts/dex/validators/factory_bootstrap.ak` | One-shot factory-state NFT policy | Used once per DEX deployment. |
-| FT DEX | `contracts/dex/validators/factory_state.ak` | Factory sequence, pause state, Team admin, and pool-creation authority | Three-party bootstrap source requires a fresh DEX deployment. |
-| FT DEX | `contracts/dex/validators/bootstrap_offer.ak` | FT-provider offer escrow and three-party acceptance checks | Three-party bootstrap source requires a fresh DEX deployment. |
+| FT DEX | `contracts/dex/validators/factory_state.ak` | Factory sequence, pause state, Team admin, and pool-creation authority | Confirmed fresh Preprod deployment supports three-party bootstrap. |
+| FT DEX | `contracts/dex/validators/bootstrap_offer.ak` | FT-provider offer escrow and three-party acceptance checks | Current deployment includes hardened owner cancellation; older offers keep their old rules. |
 | FT DEX | `contracts/dex/validators/amm_pool.ak` | Shared constant-product AMM pool address | Active pools retain their existing deployment validation rules. |
 | FT DEX | `contracts/dex/validators/lp_policy.ak` | Per-pool LP token policy | Used by DEX pools. |
 | FT DEX | `contracts/dex/validators/pool_factory.ak` | Deterministic DEX pool-NFT policy | Used by DEX pool creation/closure. |

@@ -2,6 +2,8 @@
 
 This is the end-to-end Preprod flow for original RWA minting, fractional ownership, asset-registry admission, shared-pool liquidity, Instant Sell, direct listings, pool-owned inventory, and the separate three-party FT DEX bootstrap.
 
+Current deployment identities and verification boundaries are recorded in the [2026-09-25 redeployment report](PREPROD_REDEPLOYMENT_2026-09-25.md). Diagrams describe protocol flows, not live balances or proof of hosted publication. Indexer deployment is deferred.
+
 ## Legend
 
 ~~~text
@@ -96,7 +98,7 @@ The vault preserves the link between the original NFT and its fractions. Combini
                          └--> [Refund ADA deposit]
 ~~~
 
-Registry approval is an operator admission record. The current Team UI reads the authenticated registry before it builds an Instant Sell settlement. The deployed shared-pool validators do not yet consume a registry reference, so this must not be bypassed.
+Registry approval is an independent issuer approval record, not the acquisition gate. The current Team acquisition builder and validators use the pool's on-chain exact-asset prices, not registry membership. Approval does not automatically post prices; off-chain quantity/activity limits add separate operator controls.
 
 ## 4. Create the reserve pool and add reserves
 
@@ -114,8 +116,9 @@ Registry approval is an operator admission record. The current Team UI reads the
 {shared_reserve_pool}
   (authenticated pool UTxO)
   value: quote-asset reserve + pool NFT
-  datum: admin, batcher, LP token, inventory token, quote asset,
-         total LP supply, min cash reserve, paused, inventory value
+  datum: admin, batcher, pool token, LP token, inventory token, quote asset,
+         prices, total LP supply, min cash reserve, paused,
+         inventory cost, inventory value, inventory count, closing LP
    |
    +------------------------------------+
    |                                    |
@@ -127,14 +130,14 @@ Add quote reserve                   read current pool state
 <pool share policy> -- mint proportional LP tokens --> [LP wallet]
 ~~~
 
-ADA is stored on Cardano in lovelace but displayed in the application as ADA. For example, 120,000,000 lovelace is 120 ADA. With a 20,000,000-lovelace protected reserve, 20 ADA is protected and 100 ADA is initially available for bids.
+ADA is stored in lovelace. As an illustrative example, 120,000,000 lovelace is 120 ADA; with a 20 ADA floor, 100 ADA is available for bids. The fresh deployment actually started with 20 tADA, all protected, zero LP supply and no prices. It needs separate funding and pricing before acquisitions.
 
-LP removal burns LP tokens and only withdraws quote liquidity above the protected reserve. The application intentionally disables liquidity changes while the pool has open inventory.
+Deposits mint LP shares against cash plus inventory acquisition cost and allow open inventory, but not paused/closing pools. Partial withdrawal pays only the burned share of cash above the protected reserve, including with open inventory or while paused; it gives up inventory exposure and can round to zero. The final LP records an exit, recovers each inventory listing, then burns the pool identity and receives remaining reserve assets. The current identity supports burning; old identities are not upgraded.
 
 ## 5. Price and settle an Instant Sell request
 
 ~~~text
-[Approved-asset seller]
+[Seller of an asset with a posted pool price]
    |
    | 1. Portfolio > Sell / List > Instant Sell to pool.
    |    Review the operator bid and request it as the minimum payout.
@@ -147,7 +150,7 @@ LP removal burns LP tokens and only withdraws quote liquidity above the protecte
    v
 [Authorized batcher / Team wallet]
    |
-   | ==> Check registry admission, exact unit, current UTxOs,
+   | ==> Check posted price, exact unit, current UTxOs,
    |     seller minimum, valuation, bid, resale ask, inventory risk,
    |     and post-settlement protected reserve.
    |
@@ -157,10 +160,10 @@ LP removal burns LP tokens and only withdraws quote liquidity above the protecte
    v                           v                              v                               v
 [Seller receives bid       {shared_reserve_pool continues} <pool inventory receipt> {marketplace listing escrow}
  + returned ADA buffer]    reduced by settlement       mints inventory receipt     pool-owned RWA listing
-                            inventory value += ask                                 at the selected ask
+                            cost += bid, value += ask, count += 1                  at the posted ask
 ~~~
 
-The seller accepts an on-chain floor, not a completed sale. The operator publishes per-base-unit ADA bids/asks, per-request limits, inventory caps and active status at `/team/inventory`. `/team` checks that book again on acquisition, alongside registry admission and cash. Record the price-book revision, approval, request out-reference, bid, ask, and resulting transaction hash. These settings are operator controls, not additional contract guarantees.
+The seller accepts a minimum payout, not a completed sale. At `/team/inventory`, the operator posts on-chain buy/sell ratios in quote-asset base units and separately publishes off-chain quantity caps and active status. `/team` rechecks prices, limits, inventory and cash before acquisition. The seller receives the posted bid plus its original ADA buffer; pool cash falls by the bid only, while the batcher funds the new inventory ADA. Archive the limits revision, approval, input references, prices and confirmed hash. Prices and reserve accounting are validator-enforced; quantity/activity limits are off-chain controls.
 
 ### Reserve-protection boundary
 
@@ -191,7 +194,7 @@ The inventory receipt binds a pool-owned listing to its settlement path. A direc
 ~~~text
 [Seller wallet]
    |
-   | 1. Marketplace > List at my price.
+   | 1. Portfolio > Sell / List > List at my price.
    v
 {simple_orderbook}
   datum: seller, exact RWA, quantity, requested asset/ADA price, seller key
@@ -242,9 +245,9 @@ The DEX price follows its constant-product reserves. Shared-pool Instant Sell is
 | Issuer | Issuer wallet and minting policy | Mint original RWA NFTs | Reuse a consumed one-shot seed |
 | Asset holder | User wallet | Request support, list, Instant Sell, fractionalize owned original | Self-approve unless separately authorized |
 | Registry administrator | Registry admin wallet and asset_registry_request | Approve/reject requests and update registry | Use ticker instead of exact asset unit |
-| LP | LP wallet and LP policy | Add reserves, hold/burn LP shares | Remove liquidity while inventory is open |
+| LP | LP wallet and LP policy | Add reserves, burn shares for cash, complete final exit | Treat inventory ask value as withdrawable cash |
 | DEX Team creator | Configured `factory_state` admin wallet | Review and co-sign an FT bootstrap acceptance | Substitute the FT provider or liquidity provider role |
-| Batcher | Authorized batcher wallet | Set bid/ask and settle approved Instant Sell | Bypass registry/risk/reserve controls |
+| Batcher | Authorized batcher wallet | Post buy/sell ratios and acquire Instant Sell listings | Bypass posted prices, quantity limits or the reserve floor |
 | Buyer | Buyer wallet | Buy direct or pool-owned inventory | Sign a transaction built from stale UTxOs |
 
 ## Read before signing
