@@ -166,3 +166,19 @@ test("operator access is enabled only while the authorized wallet remains connec
   await page.locator(".operator-access-card").getByRole("button", { name: "Disconnect wallet" }).click();
   await expect(page.getByRole("heading", { name: "Connect an operator or Team wallet" })).toBeVisible();
 });
+
+test("a submitted Marketplace transaction is restored after reload", async ({ page }) => {
+  const address = await mockWallet(page, deployment.batcher);
+  const hash = "ab".repeat(32);
+  await page.goto("/team");
+  await page.evaluate(({ address, hash }) => {
+    localStorage.setItem("cswap.pending-market.preprod.v1." + address, JSON.stringify({ version: 1, network: "preprod", wallet: address, operation: "instant sell acquisition", hash, submittedAt: Date.now() }));
+  }, { address, hash });
+  await page.reload();
+  await page.locator("header").getByRole("button", { name: "Connect Eternl" }).click();
+  await expect(page.getByText("instant sell acquisition awaiting confirmation.")).toBeVisible();
+  await expect(page.getByRole("link", { name: "Inspect submitted transaction" })).toHaveAttribute("href", "https://preprod.cardanoscan.io/transaction/" + hash);
+  await page.getByRole("button", { name: "Check confirmation" }).click();
+  await expect(page.getByText("Transaction is not confirmed yet.", { exact: false })).toBeVisible();
+  await expect(page.getByText("instant sell acquisition awaiting confirmation.")).toBeVisible();
+});

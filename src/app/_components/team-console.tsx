@@ -44,7 +44,7 @@ export default function TeamConsole() {
     <main id="main-content" tabIndex={-1} className="page-main">
       <section className="hero team-hero"><div><span className="eyebrow">Operations</span><h1>Operator console</h1><p>Review sale requests and settlement capacity. Signing actions require the corresponding authorized wallet.</p></div><span className={health && !health.paused ? "network-badge" : "step-badge"}>{status}</span></section>
       <WorkflowLinks label="Operator workflows" items={[
-        { href: "/team/inventory", title: "Prices & inventory", description: "Publish bids, resale prices and acquisition limits." },
+        { href: "/team/inventory", title: "Prices & inventory", description: "Publish on-chain bids and resale prices." },
         { href: "/registry", title: "Asset approvals", description: "Review admission requests and approved assets." },
         { href: "/team/dex", title: "DEX controls", description: "Review pool launches and administer the factory." },
       ]} />
@@ -66,7 +66,7 @@ export default function TeamConsole() {
         </section>
         <section className="team-pricing">
           <div className="section-heading"><div><span className="section-kicker">Pricing and acquisition</span><h2>Instant-sell queue</h2></div><span className="marketplace-count">Batcher-only signing</span></div>
-          <p className="mint-intro">On-chain prices determine acquisition bids and resale asks; the contract enforces the reserve floor. The application also rechecks off-chain active status and quantity limits before the batcher signs.</p>
+          <p className="mint-intro">On-chain prices determine acquisition bids and resale asks; the contract enforces the reserve floor. Review the request size and inventory exposure before signing, as there are no quantity caps.</p>
           <TeamWorkbench onSettled={refresh} />
         </section>
       </div>

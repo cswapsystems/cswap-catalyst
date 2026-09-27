@@ -247,7 +247,7 @@ The DEX price follows its constant-product reserves. Shared-pool Instant Sell is
 | Registry administrator | Registry admin wallet and asset_registry_request | Approve/reject requests and update registry | Use ticker instead of exact asset unit |
 | LP | LP wallet and LP policy | Add reserves, burn shares for cash, complete final exit | Treat inventory ask value as withdrawable cash |
 | DEX Team creator | Configured `factory_state` admin wallet | Review and co-sign an FT bootstrap acceptance | Substitute the FT provider or liquidity provider role |
-| Batcher | Authorized batcher wallet | Post buy/sell ratios and acquire Instant Sell listings | Bypass posted prices, quantity limits or the reserve floor |
+| Batcher | Authorized batcher wallet | Post buy/sell ratios and acquire Instant Sell listings | Bypass posted prices or the reserve floor; review quantity and inventory exposure manually |
 | Buyer | Buyer wallet | Buy direct or pool-owned inventory | Sign a transaction built from stale UTxOs |
 
 ## Read before signing

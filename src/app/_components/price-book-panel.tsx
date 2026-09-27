@@ -29,7 +29,7 @@ export default function PriceBookPanel() {
     finally { setLoading(false); }
   }, [lucid, address]);
   useEffect(() => { void refresh(); }, [refresh]);
-  const transaction = useMarketTransaction(refresh);
+  const transaction = useMarketTransaction(refresh, "pool pricing or inventory update");
   const blocked = loading || transaction.busy || Boolean(transaction.hash);
   const quoteAmount = (value: bigint) => pool?.quote.policyId ? `${value} quote base units` : `${formatAda(value)} ADA`;
   function stage() {

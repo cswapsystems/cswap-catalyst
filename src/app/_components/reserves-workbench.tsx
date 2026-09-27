@@ -29,7 +29,7 @@ export default function ReservesWorkbench({ revision = 0 }: { revision?: number 
     finally { setLoading(false); }
   }, [lucid, address]);
   useEffect(() => { void refresh(); }, [refresh, revision]);
-  const transaction = useMarketTransaction(refresh);
+  const transaction = useMarketTransaction(refresh, "shared reserve or LP update");
   const blocked = transaction.busy || Boolean(transaction.hash) || loading;
   const display = (value: bigint) => pool?.quote.policyId ? value.toString() + " quote base units" : formatAda(value) + " ADA";
   let preview = "", invalid = "", final = false;

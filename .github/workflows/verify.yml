@@ -1,0 +1,64 @@
+name: Verify Preprod source
+
+on:
+  push:
+    branches: [main, preprod]
+  pull_request:
+    branches: [main, preprod]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  app:
+    name: App, build and browser
+    runs-on: ubuntu-latest
+    env:
+      NEXT_PUBLIC_CARDANO_NETWORK: preprod
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+          cache: npm
+      - run: npm ci
+      - run: npm run lint
+      - run: node --experimental-strip-types --test tests/*.test.mjs
+      - run: npm run build:preprod
+      - run: npx playwright install --with-deps chromium
+      - run: npm run test:browser
+
+  offchain:
+    name: Off-chain unit tests
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+          cache: npm
+          cache-dependency-path: infra/offchain/package-lock.json
+      - run: npm ci --prefix infra/offchain
+      - run: npm --prefix infra/offchain test
+
+  contracts:
+    name: Aiken ${{ matrix.project }} (${{ matrix.compiler }})
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - project: marketplace
+            compiler: v1.1.21
+          - project: dex
+            compiler: v1.1.21
+          - project: minter
+            compiler: v1.1.19
+    steps:
+      - uses: actions/checkout@v4
+      - uses: aiken-lang/setup-aiken@v1
+        with:
+          version: ${{ matrix.compiler }}
+      - run: aiken check --deny
+        working-directory: contracts/${{ matrix.project }}

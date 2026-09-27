@@ -22,7 +22,7 @@ Indexer deployment is explicitly deferred. Do not configure or replace `NEXT_PUB
 
 1. Confirm the intended app, Git branch and commit. A push triggers a build only if that branch is connected with automatic builds enabled.
 2. Run `node --experimental-strip-types --test tests/*.test.mjs` and `npm run build:preprod` locally. Amplify runs this Node unit suite before the build; a failing test stops publication.
-3. Run Aiken checks, off-chain tests and Playwright separately as appropriate. Those suites are not part of the current Amplify gate; browser engines and Aiken must be provisioned separately.
+3. Review the separate `.github/workflows/verify.yml` status for Aiken, off-chain and Playwright checks. Those suites are not part of the current Amplify gate; required status checks or hosting integration must be configured before claiming they block publication.
 4. Review the committed Marketplace/DEX manifests. `build:preprod` binds Marketplace configuration to the committed deployment; server APIs load the deployment artifacts. Stale hosting values must not be used to bypass script/schema compatibility checks.
 5. After the authorized push, verify the Amplify job's commit and success, then check the hosted deployment status, reads and wallet guards. A successful local build or on-chain transaction is not proof the website was published.
 

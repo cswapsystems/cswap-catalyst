@@ -20,7 +20,7 @@ The current `one_shot` identity policy supports burning. The fresh deployment re
 
 For a later blueprint upgrade, an already-published journal is not a new deployment plan. Verify its transaction confirmations and exact correspondence to the old manifest, then archive it under ignored `.data/deployment-journals/` before starting the approved replacement. Preserve incomplete or ambiguous journals in place; do not archive them to bypass recovery checks.
 
-The current request-enabled registry was reused unchanged. Any future replacement would not discover or migrate requests against previous registries. Old requests and old pool funds require their original validators and a separate recovery plan. Publishing new prices, adding LP liquidity and configuring durable off-chain acquisition limits are subsequent operator actions, not part of deployment.
+The current request-enabled registry was reused unchanged. Any future replacement would not discover or migrate requests against previous registries. Old requests and old pool funds require their original validators and a separate recovery plan. Publishing new prices and adding LP liquidity are subsequent operator actions, not part of deployment.
 
 The Operator Console menu and every `/team/...` route require the connected marketplace batcher, configured Team recovery key or DEX factory administrator. Account changes/disconnection revoke UI access. This is a navigation guard; transaction validators and API signature checks remain the authorization boundary. Public registry requests remain available to ordinary wallets.
 
@@ -71,7 +71,7 @@ Inventory return requires the exiting LP, not the batcher. Public inventory sale
 
 `/portfolio/orders` independently scans historical request escrows using the archived exact validator from revision `aadedf5`. It offers owner cancellation only, even when new deployment checks fail. This does not migrate old pool inventory or discover every historical deployment.
 
-After confirmation verify pool identity, all three inventory counters, supply, seller/LP payments, receipt mint/burn and exact asset units. Rebuild if any referenced state changes. Session pending hashes have manual confirmation controls but are not a durable cross-page transaction journal.
+After confirmation verify pool identity, all three inventory counters, supply, seller/LP payments, receipt mint/burn and exact asset units. Rebuild if any referenced state changes. The Marketplace transaction hook saves submitted hashes in browser storage by Preprod wallet and restores a pending lock after reload; checking confirmation clears it. This is not a complete durable audit trail or an input-aware retry mechanism. Bootstrap handoffs and receipts remain page-local.
 
 Run `npm run test:marketplace` for compiled-validator emulator checks. Real wallet-signed Preprod acceptance and independent review remain necessary before operational use.
 

@@ -33,7 +33,7 @@ export default function TeamWorkbench({ onSettled }: { onSettled?: () => Promise
     finally { setLoading(false); }
   }, [lucid, address]);
   useEffect(() => { void refresh(); }, [refresh]);
-  const transaction = useMarketTransaction(async () => { await refresh(); await onSettled?.(); });
+  const transaction = useMarketTransaction(async () => { await refresh(); await onSettled?.(); }, "instant sell acquisition");
   const display = (amount: bigint) => pool?.quote.policyId ? amount.toString() + " quote base units" : formatAda(amount) + " ADA";
   async function acquire(listing: MarketListing) {
     if (!lucid || !pool) return;

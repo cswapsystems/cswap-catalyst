@@ -41,11 +41,13 @@ npm run dev
 
 Open http://localhost:3000. Configure a supported Cardano network and Blockfrost access in `.env.local`; never put a wallet seed or batcher key in a `NEXT_PUBLIC_` variable.
 
-Portfolio (`/my-assets`) is the entry point for selling/listing wallet assets; `/portfolio/orders` manages owned listings. Marketplace is for buying. `/protocol` exposes public statistics; `/team/inventory` manages operator Instant Sell prices, activity and quantity limits. The Operator Console and all `/team/...` routes require an eligible connected operator/Team wallet; `/registry` remains available for public approval requests. See [UI modules](docs/UI_MODULES.md).
+Portfolio (`/my-assets`) is the entry point for selling/listing wallet assets; `/portfolio/orders` manages owned listings. Marketplace is for buying. `/protocol` exposes public statistics; `/team/inventory` manages on-chain Instant Sell prices and inventory. The Operator Console and all `/team/...` routes require an eligible connected operator/Team wallet; `/registry` remains available for public approval requests. See [UI modules](docs/UI_MODULES.md).
 
 The batcher posts executable buy/sell ratios on-chain at `/team/inventory`. Removing an entry stops new acquisitions for that exact asset. Sellers and the Team queue read the authenticated pool directly; no separate price-book service or S3 operator-limit storage is required. The on-chain reserve floor still applies, but there is no per-request or inventory quantity cap. Pending requests do not reserve capacity.
 
 ## Verification
+
+The read-only GitHub Actions workflow at `.github/workflows/verify.yml` runs application lint/unit/build/browser checks, off-chain tests and strict Aiken checks on pushes and pull requests to `main` and `preprod`. It uses no wallet seed or cloud credentials. Branch protection or Amplify integration must still be configured before these checks can block a hosted deployment.
 
 ```sh
 npm run lint

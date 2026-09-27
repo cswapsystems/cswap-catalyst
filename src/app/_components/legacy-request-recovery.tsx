@@ -13,7 +13,7 @@ export default function LegacyRequestRecovery() {
     catch (cause) { setError(cause instanceof Error ? cause.message : "Legacy recovery unavailable."); }
   }, [lucid, address]);
   useEffect(() => { void refresh(); }, [refresh]);
-  const transaction = useMarketTransaction(refresh);
+  const transaction = useMarketTransaction(refresh, "legacy request cancellation");
   async function cancel(request: LegacyRequest) {
     if (!lucid) return;
     await transaction.run(async () => {
