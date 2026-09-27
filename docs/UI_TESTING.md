@@ -32,6 +32,8 @@ PLAYWRIGHT_CHROMIUM_EXECUTABLE=/usr/bin/google-chrome npm run test:browser
 
 Browser API requests are intercepted; mock responses and a fake wallet are used. No real wallet keys, live service credentials, or chain submissions are needed by the tests. Traces/screenshots for failures are written under ignored `test-results/`. This is navigation/interaction coverage, not proof of real Eternl signing, successful swaps, price-store availability, or validator safety. Production build environment requirements remain those of the application.
 
+For real-browser Preprod acceptance with separate wallet roles, on-chain confirmation, and recovery checks, use the [manual browser test plan](MANUAL_BROWSER_TEST_PLAN.md). Its write cases spend test assets and are not part of the automated suite.
+
 Amplify gates builds on the Node application unit suite. Playwright, Aiken and off-chain suites are not currently Amplify gates. Real three-wallet acceptance and real Eternl account switching during approval remain separate manual work.
 
 ## Recorded redeployment validation — 2026-09-25
