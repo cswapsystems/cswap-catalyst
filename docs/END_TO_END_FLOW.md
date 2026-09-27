@@ -163,7 +163,7 @@ Deposits mint LP shares against cash plus inventory acquisition cost and allow o
                             cost += bid, value += ask, count += 1                  at the posted ask
 ~~~
 
-The seller accepts a minimum payout, not a completed sale. At `/team/inventory`, the operator posts on-chain buy/sell ratios in quote-asset base units and separately publishes off-chain quantity caps and active status. `/team` rechecks prices, limits, inventory and cash before acquisition. The seller receives the posted bid plus its original ADA buffer; pool cash falls by the bid only, while the batcher funds the new inventory ADA. Archive the limits revision, approval, input references, prices and confirmed hash. Prices and reserve accounting are validator-enforced; quantity/activity limits are off-chain controls.
+The seller accepts a minimum payout, not a completed sale. At `/team/inventory`, the operator posts on-chain buy/sell ratios in quote-asset base units. `/team` rechecks pool prices, the seller minimum and available cash before acquisition. The seller receives the posted bid plus its original ADA buffer; pool cash falls by the bid only, while the batcher funds the new inventory ADA. Archive the approval, input references, prices and confirmed hash. Prices and reserve accounting are validator-enforced. No quantity caps or activity switches remain; removing an on-chain entry stops new acquisitions for that asset.
 
 ### Reserve-protection boundary
 

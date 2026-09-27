@@ -5,7 +5,6 @@ import { readRegistry } from "@/lib/asset-registry";
 import { asConstr, decodePool, isAuthenticatedPool, loadDex } from "@/lib/protocol/dex-client";
 import { decodeMarketListing, marketUnit } from "@/lib/marketplace";
 import { reviewedOrderbook, readSharedPool } from "@/lib/protocol/shared-pool-client";
-import { fetchPriceBook } from "@/lib/price-book";
 import { scanOutputs } from "@/lib/safe-scan";
 import { formatAda } from "@/lib/ada";
 import { createBrowserChainProvider } from "@/lib/browser-chain-provider";
@@ -56,7 +55,6 @@ export default function ProtocolStatistics() {
           });
           return { metrics: [{ label: "Open asset vaults", value: String(result.items.length) }], note: `${result.skipped} unreadable outputs skipped.` };
         } },
-        { name: "Off-chain operator limits", read: async () => { const { book } = await fetchPriceBook(); return { metrics: [{ label: "Enabled limit entries", value: String(book.entries.filter((entry) => entry.active).length) }, { label: "Limits revision", value: String(book.revision) }], note: "These active switches and quantity caps are application controls, not contract guarantees. Executable prices come from the pool datum." }; } },
       ];
       const results = await Promise.allSettled(sources.map((source) => source.read()));
       setSections(results.map((result, index) => result.status === "fulfilled" ? { name: sources[index].name, ...result.value } : { name: sources[index].name, error: result.reason instanceof Error ? result.reason.message : "Source unavailable." }));

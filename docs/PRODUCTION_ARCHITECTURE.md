@@ -25,7 +25,7 @@ seller -> InstantSell listing -> batcher settlement -> pool-owned inventory -> b
                                       +-- cash debit        +-- cash return on sale
 ```
 
-The `shared_reserve_pool` and `marketplace_listing_escrow` validators use the pool's posted exact-asset buy/sell ratios, not registry membership. The Team console also checks off-chain quantity caps and active status; these limits are operator controls, not validator guarantees. Acquisition pays the posted bid (at least the seller minimum) and returns the seller's listing ADA; the batcher funds the new inventory ADA buffer. The transaction mints one receipt and updates inventory cost, ask and count. A later buyer burns the receipt and returns the listing payment and inventory ADA to the pool. Direct listings remain registry-free.
+The `shared_reserve_pool` and `marketplace_listing_escrow` validators use the pool's posted exact-asset buy/sell ratios, not registry membership. There is no separate off-chain price book or quantity-cap service. Acquisition pays the posted bid (at least the seller minimum) and returns the seller's listing ADA; the batcher funds the new inventory ADA buffer. The transaction mints one receipt and updates inventory cost, ask and count. A later buyer burns the receipt and returns the listing payment and inventory ADA to the pool. Direct listings remain registry-free.
 
 ### Permissionless asset-admission requests
 

@@ -92,7 +92,12 @@ for (const quote of ['lovelace', tokenQuote]) test('compiled Marketplace lifecyc
   pool = await f.readPool(); assert.equal(pool.cost, 1_000_000n); assert.equal(pool.inventory, 4_000_000n);
   await f.act(f.seller, { kind: 'buy', listing: (await f.listings())[0] });
   pool = await f.readPool(); assert.equal(pool.count, 0n); assert.equal(pool.cost, 0n);
+  await f.act(f.operator, { kind: 'prices', prices: [] });
+  const unpriced = await f.readPool();
+  assert.equal(unpriced.prices.length, 0);
+  assert.throws(() => postedQuote(unpriced, ft, 1n), /No active on-chain price/);
   await f.act(f.operator, { kind: 'prices', prices: f.prices });
+  assert.equal(postedQuote(await f.readPool(), ft, 3n).bid, 1_000_000n);
   await f.act(f.operator, { kind: 'configure', minimum: pool.cash, paused: true });
   const zero = lpWithdrawal(await f.readPool(), 1n); assert.equal(zero.amount, 0n);
   f.select(f.operator);

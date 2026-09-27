@@ -42,19 +42,18 @@ The preceding deployment exposed a Blockfrost indexing delay: confirmation prece
 
 On-chain price entries contain an exact asset plus positive integer buy and sell ratios. For quantity Q, bid and ask are respectively `floor(Q * numerator / denominator)` in quote-asset base units. Zero-rounded results are rejected. At most 50 unique assets may be priced. Removing an entry disables new acquisitions for that asset on-chain; existing inventory remains independently priced.
 
-The separate off-chain controls retain maximum units per request, maximum units held in pool inventory and active status, as requested. They are signed operator messages, not validator guarantees. Existing storage price fields remain for compatibility but are never executable prices in the new flow. Pending listings reserve no capacity.
+There is no separate off-chain price book, active switch or quantity cap. Removing an on-chain entry disables new acquisitions for that asset; it does not cancel existing requests or reprice existing inventory. Pending listings reserve no capacity.
 
 ## Operator workflow
 
 1. Connect the batcher at `/team/inventory`. Review pool identity, quote unit and current state.
 2. Stage buy/sell ratios and sign the on-chain price update. Updates are allowed while paused, but not during closing.
-3. Publish the separate off-chain limits and active switches. Neither the registry nor an oracle determines executable prices.
-4. At `/team`, review pending listings, exact units, minimum payout, current bid/ask, cash and limits. Enter an approval reference.
-5. Sign acquisition. The transaction consumes the seller listing and pool, pays the bid plus the old listing deposit to the seller, mints a receipt and creates inventory with stored acquisition cost. The operator funds the new inventory ADA deposit; pool quote cash falls by the bid only.
-6. Confirm and archive the downloadable approval receipt. It records the pool/listing references, limits revision, prices and transaction hash; downloading alone does not prove confirmation.
-7. Reprice existing inventory at `/team/inventory`. This atomically changes its ask and aggregate pool ask value, preserving acquisition cost.
+3. At `/team`, review pending listings, exact units, minimum payout, current bid/ask and cash. Enter an approval reference. Neither the registry nor an oracle determines executable prices.
+4. Sign acquisition. The transaction consumes the seller listing and pool, pays the bid plus the old listing deposit to the seller, mints a receipt and creates inventory with stored acquisition cost. The operator funds the new inventory ADA deposit; pool quote cash falls by the bid only.
+5. Confirm and archive the downloadable approval receipt. It records the pool/listing references, prices and transaction hash; downloading alone does not prove confirmation.
+6. Reprice existing inventory at `/team/inventory`. This atomically changes its ask and aggregate pool ask value, preserving acquisition cost.
 
-Prices and the acquisition reserve floor are enforced on-chain. Quantity caps and active switches are additional off-chain controls. The queue remains visible if limit storage fails, but acquisition is disabled until limits and inventory can be verified.
+Prices and the acquisition reserve floor are enforced on-chain. There is no on-chain or off-chain quantity cap: the batcher must review requested quantity, inventory exposure and available cash before signing. The queue remains visible if a request cannot currently be acquired.
 
 ## LP accounting
 
@@ -74,8 +73,6 @@ Inventory return requires the exiting LP, not the batcher. Public inventory sale
 
 After confirmation verify pool identity, all three inventory counters, supply, seller/LP payments, receipt mint/burn and exact asset units. Rebuild if any referenced state changes. Session pending hashes have manual confirmation controls but are not a durable cross-page transaction journal.
 
-Off-chain limits require private durable production storage: server-only `PRICE_BOOK_BUCKET`, `PRICE_BOOK_KEY` (default `preprod/instant-sell.json`) and `AWS_REGION`, narrowly scoped S3 GetObject/PutObject permissions and versioning. Revision-checked writes prevent lost updates. Development fallback uses ignored `.data/instant-sell-preprod.json`; production without S3 fails closed. No cloud resources are provisioned here.
-
 Run `npm run test:marketplace` for compiled-validator emulator checks. Real wallet-signed Preprod acceptance and independent review remain necessary before operational use.
 
-Projection indexer deployment is deferred by the owner. The prepared watched-address JSON is not an active AWS update. This deferral does not remove the separate production S3 requirement for operator limits; see [off-chain deployment status](OFFCHAIN_DEPLOYMENT.md).
+Projection indexer deployment is deferred by the owner. The prepared watched-address JSON is not an active AWS update; see [off-chain deployment status](OFFCHAIN_DEPLOYMENT.md).

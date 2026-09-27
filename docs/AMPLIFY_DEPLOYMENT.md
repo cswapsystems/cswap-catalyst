@@ -12,9 +12,9 @@ The repository pins Next.js 15.5.25. `next.config.ts` enables asynchronous WebAs
 
 For Preprod, configure `NEXT_PUBLIC_CARDANO_NETWORK=preprod` and the appropriate server-side `BLOCKFROST_PROJECT_ID` / `BLOCKFROST_IPFS_PROJECT_ID` values.
 
-Operator-limit storage requires a private S3 bucket: `PRICE_BOOK_BUCKET`, optional `PRICE_BOOK_KEY` (default `preprod/instant-sell.json`), runtime `AWS_REGION`, and server IAM access for `s3:GetObject` / `s3:PutObject`. Enable bucket versioning and verify signed publishing. Missing production storage fails closed; this dependency is separate from the projection indexer.
+Marketplace Instant Sell prices are stored in the on-chain shared pool. The separate S3 operator price book has been removed; no `PRICE_BOOK_BUCKET` or `PRICE_BOOK_KEY` is needed.
 
-The buildspec copies only `BLOCKFROST_PROJECT_ID`, `BLOCKFROST_IPFS_PROJECT_ID`, `NEXT_PUBLIC_CARDANO_NETWORK`, `NEXT_PUBLIC_OFFCHAIN_API_URL`, `PRICE_BOOK_BUCKET` and `PRICE_BOOK_KEY` into `.env.production` for SSR. Never upload `CARDANO_WALLET_SEED`, signing keys or deployment journals. Browser wallets sign application transactions; deployment credentials stay local.
+The buildspec copies only `BLOCKFROST_PROJECT_ID`, `BLOCKFROST_IPFS_PROJECT_ID`, `NEXT_PUBLIC_CARDANO_NETWORK` and `NEXT_PUBLIC_OFFCHAIN_API_URL` into `.env.production` for SSR. Never upload `CARDANO_WALLET_SEED`, signing keys or deployment journals. Browser wallets sign application transactions; deployment credentials stay local.
 
 Indexer deployment is explicitly deferred. Do not configure or replace `NEXT_PUBLIC_OFFCHAIN_API_URL` using historical API URLs; follow [the deferred indexer runbook](OFFCHAIN_DEPLOYMENT.md) when that work resumes.
 

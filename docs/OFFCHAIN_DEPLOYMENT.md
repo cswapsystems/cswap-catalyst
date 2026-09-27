@@ -35,4 +35,4 @@ After explicit approval to resume:
 
 The template defines an HTTP API, read-only API Lambda, scheduled projection Lambda, dependency layer, encrypted DynamoDB projection table, lease lock, logs, alarms and least-privilege secret access. This describes repository infrastructure, not a verified inventory of the new AWS account. Retain policies protect the table and API log group; mainnet additionally enables table deletion protection.
 
-The projection database is a cache, not an authority for ownership or transaction signing. Mainnet remains gated pending mainnet contracts and credentials. Private S3 operator-limit storage (`PRICE_BOOK_BUCKET` / `PRICE_BOOK_KEY`) is a separate production requirement; deferring the indexer does not configure or replace that storage.
+The projection database is a cache, not an authority for ownership or transaction signing. Mainnet remains gated pending mainnet contracts and credentials. Marketplace Instant Sell prices come from the on-chain pool; the old S3 operator-limit service is removed.

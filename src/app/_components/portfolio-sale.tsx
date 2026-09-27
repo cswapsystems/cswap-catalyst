@@ -2,13 +2,11 @@
 import { useEffect, useState, type FormEvent } from "react";
 import Link from "next/link";
 import type { WalletAsset } from "@/lib/wallet-assets";
-import { fetchPriceBook, checkOperatorLimits, type PriceBook } from "@/lib/price-book";
 import { parseAdaToLovelace } from "@/lib/dex";
 import { formatAda } from "@/lib/ada";
 import { addressData } from "@/lib/protocol/dex-client";
 import { marketplaceOrderbookAddress } from "@/lib/protocol/marketplace-deployment";
 import { reviewedOrderbook, readSharedPool, assertFreshPool, assertMarketWallet } from "@/lib/protocol/shared-pool-client";
-import { readInventory } from "@/lib/protocol/inventory";
 import { postedQuote, listingDatum, outputRef } from "@/lib/marketplace";
 import { useWallet } from "./wallet-context";
 
@@ -19,8 +17,6 @@ export default function PortfolioSale({ asset, onClose, onSubmitted }: { asset: 
   const [price, setPrice] = useState("");
   const [paymentUnit, setPaymentUnit] = useState("");
   const [pool, setPool] = useState<Awaited<ReturnType<typeof readSharedPool>> | null>(null);
-  const [book, setBook] = useState<PriceBook | null>(null);
-  const [held, setHeld] = useState<bigint | null>(null);
   const [quoteError, setQuoteError] = useState("");
   const [message, setMessage] = useState("");
   const [busy, setBusy] = useState(false);
@@ -28,20 +24,19 @@ export default function PortfolioSale({ asset, onClose, onSubmitted }: { asset: 
   const [revision, setRevision] = useState(0);
   useEffect(() => {
     let cancelled = false;
-    setPool(null); setBook(null); setHeld(null); setQuoteError("");
+    setPool(null); setQuoteError("");
     if (!lucid) return;
     void (async () => {
       const tools = await import("@lucid-evolution/lucid");
-      const [prices, current] = await Promise.all([fetchPriceBook(), readSharedPool(lucid, tools)]);
-      const inventory = await readInventory(lucid, tools, current);
-      if (!cancelled) { setPool(current); setBook(prices.book); setHeld(inventory.holdings[asset.unit] || BigInt(0)); }
+      const current = await readSharedPool(lucid, tools);
+      if (!cancelled) setPool(current);
     })().catch((error) => { if (!cancelled) setQuoteError(error instanceof Error ? error.message : "Instant Sell unavailable."); });
     return () => { cancelled = true; };
   }, [lucid, asset.unit, revision]);
   let quote: ReturnType<typeof postedQuote> | null = null;
-  let unavailable = quoteError || "Loading operator prices…";
+  let unavailable = quoteError || "Loading on-chain pool prices…";
   try {
-    if (book && pool && held !== null) { checkOperatorLimits(book, asset.unit, BigInt(quantity), held); quote = postedQuote(pool, asset.unit, BigInt(quantity)); }
+    if (pool) quote = postedQuote(pool, asset.unit, BigInt(quantity));
   } catch (error) { unavailable = error instanceof Error ? error.message : "Enter a valid quantity."; }
   async function submit(event: FormEvent) {
     event.preventDefault();
@@ -62,11 +57,8 @@ export default function PortfolioSale({ asset, onClose, onSubmitted }: { asset: 
       await reviewedOrderbook(tools);
       let datum;
       if (mode === "instant") {
-        if (!book || !quote || !pool) throw new Error("Load a current on-chain quote and operator limits first.");
+        if (!quote || !pool) throw new Error("Load a current on-chain quote first.");
         const current = await assertFreshPool(lucid, tools, pool);
-        const [latest, inventory] = await Promise.all([fetchPriceBook(), readInventory(lucid, tools, current)]);
-        if (latest.book.revision !== book.revision) { setRevision((n) => n + 1); throw new Error("Operator limits changed. Review the refreshed quote."); }
-        checkOperatorLimits(latest.book, asset.unit, amount, inventory.holdings[asset.unit] || BigInt(0));
         const payout = postedQuote(current, asset.unit, amount);
         datum = listingDatum(tools, { seller: address, sellerKey: key.hash, settlement: { kind: "instant", poolToken: current.poolToken }, rwa: { policyId: asset.policyId, assetName: asset.nameHex }, quantity: amount, priceAsset: current.quote, price: payout.bid });
       } else {
@@ -78,7 +70,7 @@ export default function PortfolioSale({ asset, onClose, onSubmitted }: { asset: 
         datum = new tools.Constr(0, [addressData(tools, address), key.hash, new tools.Constr(0, []), token(asset.unit), amount, unit ? token(unit) : new tools.Constr(0, ["", ""]), payout]);
       }
       const tx = await lucid.newTx().pay.ToContract(target, { kind: "inline", value: tools.Data.to(datum) }, { lovelace: BigInt(2_000_000), [asset.unit]: amount }).complete();
-      if (mode === "instant" && pool && book) { await assertFreshPool(lucid, tools, pool); if ((await fetchPriceBook()).book.revision !== book.revision) throw new Error("Operator limits changed while preparing. Refresh and review."); }
+      if (mode === "instant" && pool) await assertFreshPool(lucid, tools, pool);
       await assertMarketWallet(lucid, address);
       const submitted = await (await tx.sign.withWallet().complete()).submit();
       setHash(submitted); setMessage("Submitted. Wait for confirmation before treating this sale as open."); onSubmitted(submitted);
@@ -91,7 +83,7 @@ export default function PortfolioSale({ asset, onClose, onSubmitted }: { asset: 
     <form onSubmit={submit} className="wallet-listing-form"><fieldset className="module-fieldset" disabled={busy || Boolean(hash)}>
       <div className="marketplace-sell-mode"><button type="button" className={mode === "listing" ? "selected" : ""} onClick={() => setMode("listing")}>List on Marketplace</button><button type="button" className={mode === "instant" ? "selected" : ""} onClick={() => setMode("instant")}>Instant Sell to pool</button></div>
       <label className="field"><span>Quantity · base units (available: {asset.quantity.toString()})</span><input required inputMode="numeric" pattern="[1-9][0-9]*" value={quantity} onChange={(e) => setQuantity(e.target.value)} /></label>
-      {mode === "listing" ? <><label className="field"><span>Payment asset ID (blank for ADA)</span><input value={paymentUnit} onChange={(e) => setPaymentUnit(e.target.value)} placeholder="ADA, or exact native asset ID" /></label><label className="field"><span>Total lot price · {paymentUnit ? "payment base units" : "ADA"}</span><input required inputMode="decimal" value={price} onChange={(e) => setPrice(e.target.value)} /></label></> : <div className="execution-preview">{quote ? <><p>Quote asset: <code>{pool?.quote.policyId ? pool.quote.policyId + pool.quote.assetName : "ADA · 1 ADA = 1,000,000 lovelace"}</code></p><p>Your minimum total payout: <strong>{pool?.quote.policyId ? quote.bid.toString() + " quote base units" : formatAda(quote.bid) + " ADA"}</strong></p><p>Integer-rounded from the pool’s posted buy ratio. Pool snapshot: <code>{pool && outputRef(pool.utxo)}</code></p><p>Operator limits revision {book?.revision} · Current inventory {held?.toString()} units. Your asset is escrowed, not immediately paid. The operator must sign settlement at or above your minimum; you can cancel before settlement.</p></> : <p role="status">{unavailable}</p>}<button type="button" onClick={() => setRevision((n) => n + 1)}>Refresh quote</button></div>}
+      {mode === "listing" ? <><label className="field"><span>Payment asset ID (blank for ADA)</span><input value={paymentUnit} onChange={(e) => setPaymentUnit(e.target.value)} placeholder="ADA, or exact native asset ID" /></label><label className="field"><span>Total lot price · {paymentUnit ? "payment base units" : "ADA"}</span><input required inputMode="decimal" value={price} onChange={(e) => setPrice(e.target.value)} /></label></> : <div className="execution-preview">{quote ? <><p>Quote asset: <code>{pool?.quote.policyId ? pool.quote.policyId + pool.quote.assetName : "ADA · 1 ADA = 1,000,000 lovelace"}</code></p><p>Your minimum total payout: <strong>{pool?.quote.policyId ? quote.bid.toString() + " quote base units" : formatAda(quote.bid) + " ADA"}</strong></p><p>Integer-rounded from the pool’s posted buy ratio. Pool snapshot: <code>{pool && outputRef(pool.utxo)}</code></p><p>Your asset is escrowed, not immediately paid. The operator must sign settlement at or above your minimum; you can cancel before settlement. Pending requests do not reserve pool cash.</p></> : <p role="status">{unavailable}</p>}<button type="button" onClick={() => setRevision((n) => n + 1)}>Refresh quote</button></div>}
       <p className="wallet-assets-note">The selected tokens and an escrow deposit of at least 2 ADA move to the contract. The deposit is returned on sale or cancellation; network fees apply. Pending requests do not reserve pool capacity.</p>
       <button type="submit" className="primary-button" disabled={mode === "instant" && !quote}>{busy ? "Awaiting wallet…" : mode === "instant" ? "Request sale at this minimum" : "Create listing"}</button>
     </fieldset></form>

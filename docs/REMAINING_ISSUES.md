@@ -19,7 +19,7 @@ the burn-capable identity, so final LP exit and closure can complete.
 | D1 | Marketplace exploits (1-lovelace inventory theft, one payment for several direct listings). | **Resolved.** The new deployment runs the fixed validators. A read-only check on 2026-09-25 found the superseded deployment with no inventory, no LP supply and an empty orderbook, so its old scripts have nothing exposed. |
 | D2 | DEX bootstrap-offer owner cancel (R04). | **Deployed** in the new DEX factory (no pools or offers yet). Offers under older DEX factories keep the old cancel rule. |
 | D3 | No automatic migration. Outputs under superseded scripts keep their old rules. | Open. The superseded Marketplace pool still holds its 20 tADA protected reserve; its original `one_shot` identity cannot burn, so that pool can never close and the reserve is stranded. Older DEX factories still hold funds (see E1). Do not send new funds to superseded addresses. |
-| D4 | Operator price book returns 503 in production (R02). `amplify.yml` forwards `PRICE_BOOK_BUCKET`/`PRICE_BOOK_KEY`. | Open. Provision/confirm the private S3 bucket, IAM access and Amplify runtime values; verify `GET /api/price-book` returns 200 and a signed publish works. |
+| D4 | Historical operator price-book endpoint returned 503. | Superseded by the on-chain-only Instant Sell workflow. The off-chain endpoint and S3 requirement were removed in the current source; verify the hosted build serves the change before treating the live 503 as retired. |
 | D5 | Indexer registry authentication (R03 fix). | **Prepared, deployment deferred by the owner.** `infra/offchain/watched-addresses.preprod.json` holds the six watched addresses and the registry `token`; `node scripts/indexer-config-preprod.mjs` prints it for review. Apply it as the stack's `WatchedAddresses` only when rollout is approved, then verify `/v1/status` and `/v1/registry/assets` report `synced`. |
 | D6 | Hosted site publication. | Open. Confirm the Amplify branch, deployed commit and successful job before claiming `https://preprod.d1g3uigoyq3hsb.amplifyapp.com` serves the new manifests. |
 
@@ -49,7 +49,7 @@ the burn-capable identity, so final LP exit and closure can complete.
 | M1 | Orderbook `Reprice` does not check which redeemer the pool is spent with, so the batcher can let `inventory_value` (reporting only) drift. |
 | M2 | `pool_inventory_receipt_policy` accepts any negative burn; harmless today because every pool path requires exactly −1. |
 | M3 | Async refreshes in `reserves-workbench`, `team-workbench` and `legacy-request-recovery` have no cancellation guard, so a slow read can show a previous wallet's data (signing is protected by the wallet guard). |
-| M4 | The dev-mode price-book `.lock` file can stick after a crash (every publish then returns 409); raw storage/JSON errors are returned to the client with status 400. |
+| M4 | Retired with the off-chain price-book service; no local `.lock` or storage API remains in the current source. |
 | M5 | The operator console gate is client-side only. Acceptable because no secrets sit behind it, but docs must not describe it as a security boundary. |
 
 ## 5. Manual verification still needed

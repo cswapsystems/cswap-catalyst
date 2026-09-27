@@ -13,7 +13,7 @@
     "test:wallet": "node --experimental-strip-types --test tests/wallet-session.test.mjs tests/browser-chain-provider.test.mjs tests/operator-access.test.mjs tests/blockfrost-proxy.test.mjs tests/wallet-guard.test.mjs",
     "test:wallet-assets": "node --experimental-strip-types --test tests/wallet-assets.test.mjs",
     "test:dex": "node --experimental-strip-types --test tests/dex.test.mjs tests/dex-bootstrap.test.mjs",
-    "test:ui": "node --experimental-strip-types --test tests/ui-regressions.test.mjs tests/operator-controls.test.mjs tests/price-book.test.mjs tests/bootstrap-review.test.mjs",
+    "test:ui": "node --experimental-strip-types --test tests/ui-regressions.test.mjs tests/operator-controls.test.mjs tests/bootstrap-review.test.mjs",
     "test:metadata": "node --experimental-strip-types --test tests/rwa-metadata.test.mjs tests/ipfs-upload.test.mjs",
     "test:offchain": "npm --prefix infra/offchain test",
     "test:navigation": "node --experimental-strip-types --test tests/navigation.test.mjs",
@@ -24,7 +24,6 @@
     "e2e:dex:preprod": "node --experimental-strip-types scripts/dex-e2e-preprod.mjs"
   },
   "dependencies": {
-    "@aws-sdk/client-s3": "3.1137.0",
     "@lucid-evolution/lucid": "^0.6.2",
     "@lucid-evolution/tx-graph": "0.0.4",
     "effect": "3.22.2",

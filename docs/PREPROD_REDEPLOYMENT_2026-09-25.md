@@ -29,7 +29,7 @@ When deployment is explicitly resumed, use this JSON as the confirmed stack's `W
 
 **The owner confirmed a different AWS account is in use.** The historical account/stack instructions are not current deployment targets. Neither local AWS profile (`default`, `cswap`) found the historical stack in `us-west-1`; no indexer API URL was configured locally or found in the hosted page's initial bundles. This does not prove no indexer exists. Confirm the active account/profile, region and stack/API URL when resuming; do not guess or create a replacement stack.
 
-On-chain confirmation is separate from website publication. The public Preprod URL is `https://preprod.d1g3uigoyq3hsb.amplifyapp.com`; confirm the connected branch, deployed commit and successful Amplify job before claiming it serves these manifests. Private S3 storage for operator limits is a separate application dependency, not the deferred projection indexer.
+On-chain confirmation is separate from website publication. The public Preprod URL is `https://preprod.d1g3uigoyq3hsb.amplifyapp.com`; confirm the connected branch, deployed commit and successful Amplify job before claiming it serves these manifests. The S3 operator-limit service was subsequently removed; current Instant Sell quotes read the on-chain pool.
 
 ## Acceptance boundaries
 

@@ -43,7 +43,7 @@ Open http://localhost:3000. Configure a supported Cardano network and Blockfrost
 
 Portfolio (`/my-assets`) is the entry point for selling/listing wallet assets; `/portfolio/orders` manages owned listings. Marketplace is for buying. `/protocol` exposes public statistics; `/team/inventory` manages operator Instant Sell prices, activity and quantity limits. The Operator Console and all `/team/...` routes require an eligible connected operator/Team wallet; `/registry` remains available for public approval requests. See [UI modules](docs/UI_MODULES.md).
 
-Executable buy/sell ratios are posted on-chain by the batcher. Separate off-chain quantity/activity controls use an ignored development file locally and require private S3 storage in production (`PRICE_BOOK_BUCKET`, `PRICE_BOOK_KEY`, `AWS_REGION` and server IAM access). Publishing these controls requires a message signature from the configured batcher. Prices and reserve protection are enforced by validators; quantity caps and active switches are additional application controls. This S3 requirement is separate from the deferred projection indexer.
+The batcher posts executable buy/sell ratios on-chain at `/team/inventory`. Removing an entry stops new acquisitions for that exact asset. Sellers and the Team queue read the authenticated pool directly; no separate price-book service or S3 operator-limit storage is required. The on-chain reserve floor still applies, but there is no per-request or inventory quantity cap. Pending requests do not reserve capacity.
 
 ## Verification
 
