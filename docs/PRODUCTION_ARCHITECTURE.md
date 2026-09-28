@@ -56,12 +56,18 @@ The 14-field reserve datum tracks identities, authorities, quote asset, posted p
 | Role | On-chain authority | Primary UI |
 | --- | --- | --- |
 | Registry administrator | Approves or revokes exact asset units in the independent approval record | `/registry` |
-| Asset requester | Creates a cancellable one-or-more-asset admission request | `/registry` |
+| Asset requester | Creates a cancellable one-or-more-asset admission request | `/portfolio/asset-requests` |
 | Batcher | Posts ratios, acquires Instant Sell listings and reprices inventory | `/team`, `/team/inventory` |
 | Liquidity provider | Adds quote reserve, burns LP shares or completes final exit | `/portfolio/reserves` |
 | Marketplace user | Creates/manages listings in Portfolio; buys public listings in Marketplace | `/my-assets`, `/portfolio/orders`, `/marketplace` |
 
 The Team console is enabled only for configured operator/Team wallets, including direct `/team/...` visits. This client-side presentation guard is not an authorization boundary: builders, APIs and validators enforce the relevant signer. The console shows cash, available cash, inventory cost/ask/count and LP supply. Public registry requests are not operator-gated.
+
+### Future: multiple shared-pool quote assets
+
+Preprod currently runs **one Marketplace shared pool quoted in tADA** (`quoteUnit: lovelace` in `marketplace-deployment.preprod.json`). Inventory, posted prices, cash, LP shares and the protected reserve all belong to that pool. The tUSDC/tBTC DEX pairs are separate AMM pools; they are not additional Marketplace reserve quotes. The current Marketplace UI and deployment workflow should remain tADA-only.
+
+Multi-quote Marketplace support is deferred. It would require a separately identified reserve pool for each quote asset, with its own state UTxO, LP token/supply, reserve floor, on-chain price entries and inventory receipts. An individual pool would still have one fixed quote asset; a price entry cannot choose its own quote. The pools may use a shared validator address, but their identity tokens must distinguish their UTxOs. Before enabling this, design pool discovery/routing and an explicit quote choice throughout Marketplace, Portfolio and Team; verify native-token ADA buffers and LP accounting; extend deployment manifests, indexing and tests; and plan how existing listings and LP positions remain tied to their original tADA pool. No automatic migration is implied.
 
 ## Fraction DEX
 

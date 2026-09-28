@@ -11,7 +11,7 @@ type WalletSnapshot = {
   utxoCount: number;
 };
 
-export default function WalletWorkbench() {
+export default function WalletWorkbench({ team = false }: { team?: boolean }) {
   const { address, lucid, status, error: connectionError, connect } = useWallet();
   const [snapshot, setSnapshot] = useState<WalletSnapshot | null>(null);
   const [loading, setLoading] = useState(false);
@@ -52,14 +52,14 @@ export default function WalletWorkbench() {
       <section className="hero">
         <div>
           <span className="eyebrow">Connected wallet · Preprod</span>
-          <h1>My wallet</h1>
-          <p>Inspect the public payment key hash and the ADA total exposed by your connected Eternl wallet. This page does not request a transaction signature.</p>
+          <h1>{team ? "Team wallet" : "My wallet"}</h1>
+          <p>Inspect the public payment key hash and ADA total exposed by the connected Eternl wallet. This page does not request a transaction signature.</p>
         </div>
       </section>
 
       <section className="my-wallet-board">
         <div className="my-wallet-head">
-          <div><span className="section-kicker">Public wallet details</span><h2>Connected account</h2></div>
+          <div><span className="section-kicker">Public wallet details</span><h2>{team ? "Connected Team account" : "Connected account"}</h2></div>
           {connected && <button type="button" className="refresh-button" disabled={loading} onClick={() => void refresh()}>{loading ? "Refreshing…" : "↻ Refresh"}</button>}
         </div>
 

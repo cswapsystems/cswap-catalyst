@@ -22,7 +22,7 @@ For a later blueprint upgrade, an already-published journal is not a new deploym
 
 The current request-enabled registry was reused unchanged. Any future replacement would not discover or migrate requests against previous registries. Old requests and old pool funds require their original validators and a separate recovery plan. Publishing new prices and adding LP liquidity are subsequent operator actions, not part of deployment.
 
-The Operator Console menu and every `/team/...` route require the connected marketplace batcher, configured Team recovery key or DEX factory administrator. Account changes/disconnection revoke UI access. This is a navigation guard; transaction validators and API signature checks remain the authorization boundary. Public registry requests remain available to ordinary wallets.
+The Operator Console menu, `/registry`, and every `/team/...` route require an eligible connected operator/Team wallet, including the configured registry issuer. Account changes/disconnection revoke UI access. This is a navigation guard; transaction validators and API signature checks remain the authorization boundary. Owners create, view, and cancel their pending registry requests from Portfolio → Asset support (`/portfolio/asset-requests`).
 
 ### Verified fresh Preprod deployment
 
@@ -40,14 +40,14 @@ The preceding deployment exposed a Blockfrost indexing delay: confirmation prece
 - The administrator changes reserve floor / pause state.
 - LPs deposit, withdraw cash, or recover inventory during an already-started closing sequence.
 
-On-chain price entries contain an exact asset plus positive integer buy and sell ratios. For quantity Q, bid and ask are respectively `floor(Q * numerator / denominator)` in quote-asset base units. Zero-rounded results are rejected. At most 50 unique assets may be priced. Removing an entry disables new acquisitions for that asset on-chain; existing inventory remains independently priced.
+On-chain price entries contain an exact asset plus positive integer buy and sell ratios. For quantity Q, bid and ask are respectively `floor(Q * numerator / denominator)` in quote-asset base units. Zero-rounded results are rejected. At most 50 unique assets may be priced. The operator UI selects exact IDs from the authenticated issuer registry, but current pool validators do **not** enforce registry membership. The quote asset belongs to the pool's identity/state and is unchanged by price updates; changing it requires a separate reviewed pool deployment, not a per-entry selector. The UI asks for a quote amount **for a specified number of asset base units**, converting ADA amounts exactly to lovelace. This preserves ratios below one quote base unit per asset unit without exposing numerator/denominator as the primary form labels. Removing an entry disables new acquisitions for that asset on-chain; existing inventory remains independently priced.
 
 There is no separate off-chain price book, active switch or quantity cap. Removing an on-chain entry disables new acquisitions for that asset; it does not cancel existing requests or reprice existing inventory. Pending listings reserve no capacity.
 
 ## Operator workflow
 
 1. Connect the batcher at `/team/inventory`. Review pool identity, quote unit and current state.
-2. Stage buy/sell ratios and sign the on-chain price update. Updates are allowed while paused, but not during closing.
+2. Select an issuer-approved exact asset and stage seller payout and buyer ask amounts for specified asset quantities. Review the fixed pool quote asset and any integer rounding, then sign the on-chain price update. Updates are allowed while paused, but not during closing. The UI rechecks registry approval for newly added or edited entries before signing; this is not an on-chain admission rule.
 3. At `/team`, review pending listings, exact units, minimum payout, current bid/ask and cash. Enter an approval reference. Neither the registry nor an oracle determines executable prices.
 4. Sign acquisition. The transaction consumes the seller listing and pool, pays the bid plus the old listing deposit to the seller, mints a receipt and creates inventory with stored acquisition cost. The operator funds the new inventory ADA deposit; pool quote cash falls by the bid only.
 5. Confirm and archive the downloadable approval receipt. It records the pool/listing references, prices and transaction hash; downloading alone does not prove confirmation.
@@ -58,6 +58,8 @@ Prices and the acquisition reserve floor are enforced on-chain. There is no on-c
 ## LP accounting
 
 The 14-field pool tracks cash, protected reserve, LP supply, inventory **cost**, inventory **ask**, inventory **count**, posted prices and optional closing recipient.
+
+The current Preprod shared pool is quoted only in tADA. At `/portfolio/reserves`, LP deposits and reserve top-ups are entered in **ADA** (up to six decimals); the app converts them to lovelace before building the transaction. Cash balances and withdrawal payouts are displayed in ADA. LP withdrawals instead ask for a whole number of **LP units to burn**, not an ADA amount; the payout is calculated from the pool state. For example, entering `1.5` for a deposit means 1.5 tADA (1,500,000 lovelace), while entering `1` for a withdrawal burns one LP unit. Future non-ADA Marketplace quote pools are only an [architecture plan](PRODUCTION_ARCHITECTURE.md#future-multiple-shared-pool-quote-assets), not a Preprod feature.
 
 - Deposits mint against cash plus acquisition cost, not resale asks; deposits can proceed with open inventory but not while paused/closing.
 - Partial withdrawals pay only the burned fraction of cash above the reserve floor. They can proceed with open inventory or while paused. Burning shares gives up their inventory exposure.

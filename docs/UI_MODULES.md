@@ -1,6 +1,6 @@
 # UI modules
 
-The primary navigation is **Marketplace, Swap, Portfolio, Create**. The More disclosure separates public protocol information from the Operator console. The console and direct `/team/...` routes are enabled only for a connected configured operator/Team wallet (Marketplace batcher, Team recovery key or DEX administrator). Account changes and disconnection revoke UI access. This is a presentation guard, not a security boundary: APIs and validators independently verify signatures and authority. Public `/registry` requests remain accessible. The connected wallet disclosure contains wallet details, activity and an explicit Disconnect action, rather than disconnecting when its address is clicked.
+The primary navigation is **Marketplace, Swap, Portfolio, Create**. The More disclosure separates public protocol information from the Operator console. The console, direct `/team/...` routes, and `/registry` are enabled only for a connected configured operator/Team wallet (Marketplace batcher, registry issuer, Team recovery key or DEX administrator). Account changes and disconnection revoke UI access. This is a presentation guard, not a security boundary: APIs and validators independently verify signatures and authority. Asset owners create, view, and cancel their own pending approval requests at public Portfolio route `/portfolio/asset-requests`. The connected wallet disclosure contains wallet details, activity and an explicit Disconnect action, rather than disconnecting when its address is clicked.
 
 Sections share a compact page heading, a persistent Preprod testnet indicator and keyboard skip-to-content support. Menus close on Escape, outside interaction and route changes. Narrow screens keep all four primary destinations visible and allow the section tabs to scroll without overflowing the page. No Explore entry is reintroduced.
 
@@ -10,10 +10,10 @@ Existing working URLs remain available. `/list` and the retired demo `/liquidate
 | --- | --- | --- |
 | Marketplace | `/marketplace` | Buy listings; owners can edit/cancel direct listings. Sale creation lives in Portfolio. |
 | Protocol (More) | `/protocol`, `/asset-registry`, `/vault` | Public statistics, admission and custody inspection. |
-| Portfolio | `/my-assets`, `/portfolio/positions`, `/portfolio/orders`, `/portfolio/reserves`, `/wallet`, `/history` | Wallet holdings, configured-deployment positions, owned listing management, shared reserve LP actions, wallet details and activity. |
+| Portfolio | `/my-assets`, `/portfolio/positions`, `/portfolio/orders`, `/portfolio/asset-requests`, `/portfolio/reserves`, `/wallet`, `/history` | Wallet holdings, positions, owned listings, owner asset-support requests, shared reserve LP actions, wallet details and activity. |
 | DEX | `/dex`, `/dex/liquidity`, `/dex/launch` | Swaps, LP deposits/withdrawals, and three-party bootstrap. |
 | Create | `/mint`, `/fractionalize` | Mint metadata-backed tokens or split/combine ownership. Minting does not imply registry admission or independent verification. |
-| Operations | `/team`, `/team/inventory`, `/registry`, `/team/controls`, `/team/dex`, `/team/recovery`, `/wallets` | Request approval, operator prices and inventory limits, admission, pool configuration, three-party DEX bootstrap review, factory administration, recovery, and deployment wallets. |
+| Operations | `/team`, `/team/inventory`, `/registry`, `/team/controls`, `/team/dex`, `/team/recovery`, `/wallets` | Issuer request approval, on-chain prices and inventory, pool configuration, three-party DEX bootstrap review, factory administration, recovery, and the connected Team wallet. |
 
 ## Portfolio data
 
@@ -49,7 +49,7 @@ Shared-pool controls permit an authorized administrator to update the protected 
 
 Bootstrap approval additionally rejects Team or third-party collateral, unrelated inputs/outputs, governance actions, certificates, withdrawals, and reference inputs. It displays participant addresses, exact asset units and base-unit reserves, LP allocations, transaction hash and fee; acknowledgment is required. The current inputs are rechecked before signing and submission. Pending hashes and confirmation controls remain in the active page, not across reloads. Factory deployment/redeployment still uses the reviewed CLI, not a browser button; its public manifest is replaced only after confirmation, with a pending recovery record for interrupted runs.
 
-The pricing queue reads the 14-field pool’s on-chain buy/sell ratios and shows remaining cash. On-chain prices admit an exact asset; a registry entry is not required by this acquisition path. An approval reference is required, and a session-only JSON receipt records state references, prices and submitted hash.
+The pricing queue reads the 14-field pool’s on-chain buy/sell ratios and shows remaining cash. The price editor selects exact assets from the authenticated issuer registry and displays the pool's fixed quote asset; amounts are entered as quote paid/asked for an asset-base-unit quantity, then encoded as exact ratios. This selection is a UI safeguard: on-chain prices admit an exact asset, and the acquisition validator does not require registry membership. An approval reference is required, and a session-only JSON receipt records state references, prices and submitted hash.
 
 `/team/inventory` stages exact-asset buy/sell ratios, displays their base-unit interpretation and publishes changes in a batcher-signed on-chain transaction. Drafts are labeled until confirmation. It also reprices existing inventory atomically. Removing an entry stops new acquisitions for that asset, but does not cancel pending requests or change existing inventory asks.
 

@@ -13,6 +13,7 @@ export const navigationSections: Record<string, NavigationSection> = {
     { href: "/my-assets", label: "Holdings" },
     { href: "/portfolio/positions", label: "Open positions" },
     { href: "/portfolio/orders", label: "Listings & requests" },
+    { href: "/portfolio/asset-requests", label: "Asset support" },
     { href: "/portfolio/reserves", label: "Shared liquidity" },
     { href: "/history", label: "Activity" },
   ] },
@@ -32,7 +33,7 @@ export const navigationSections: Record<string, NavigationSection> = {
     { href: "/team/controls", label: "Shared pool" },
     { href: "/team/dex", label: "DEX controls" },
     { href: "/team/recovery", label: "Recovery" },
-    { href: "/wallets", label: "Deployment wallets" },
+    { href: "/wallets", label: "Team wallet" },
   ] },
   protocol: { label: "Protocol", primary: null, items: [
     { href: "/protocol", label: "Overview" },

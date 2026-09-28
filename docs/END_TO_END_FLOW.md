@@ -74,7 +74,7 @@ The vault preserves the link between the original NFT and its fractions. Combini
 ~~~text
 [Asset holder]
    |
-   | 1. Asset controls > Request asset support.
+   | 1. Portfolio > Asset support > Request asset support.
    |    The picker chooses known original RWA assets in the connected wallet.
    v
 {asset_registry_request}
@@ -84,7 +84,7 @@ The vault preserves the link between the original NFT and its fractions. Combini
   value:
     refundable ADA deposit
    |
-   | 2. The request is visible in Asset Registry / Asset controls.
+   | 2. The owner sees it in Portfolio > Asset support; the issuer sees it in Operations > Asset approvals.
    v
 [Team registry administrator]
    |

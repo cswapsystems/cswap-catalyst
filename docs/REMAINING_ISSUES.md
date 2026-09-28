@@ -29,6 +29,7 @@ the burn-capable identity, so final LP exit and closure can complete.
 | --- | --- | --- |
 | X1 | **LP value transfer on early exit.** Shares are minted against `cash + inventory_cost`, but `RemoveLiquidity` pays only `lp_burned × (cash − reserve) / supply`. Early leavers forfeit their share of inventory and reserve to remaining LPs. | `shared_reserve_pool.ak` LP math. Documented in the contract README, but a real economic effect. Changing it is a validator + deployment change. |
 | X2 | **Batcher trust (R05, partly fixed).** The reserve floor is now enforced on-chain. Still trusted: `UpdatePrices` has no bands/spread/buy≤sell rule; the admin can set any `min_cash_reserve`; Team and batcher are the same key in the manifest. | Either enforce more on-chain or document the trusted-operator model, monitoring and incident response. |
+| X3 | **Future multi-quote Marketplace pools.** Preprod is intentionally one tADA-quoted shared pool; tUSDC/tBTC are DEX pairs, not reserve quotes. | Defer until separate pool identities/state, quote-aware routing, per-pool LP/inventory accounting, deployment and migration plans are designed; see [architecture plan](PRODUCTION_ARCHITECTURE.md#future-multiple-shared-pool-quote-assets). |
 
 ## 3. Open engineering work
 

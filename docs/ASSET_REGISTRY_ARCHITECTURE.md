@@ -1,141 +1,69 @@
-# Asset Registry Architecture
+# Asset registry architecture — current implementation
 
-> Status: proposed sharded-registry architecture. The current basic registry is
-> a single authenticated UTxO, and current shared-pool validators do not yet
-> consume either registry form as a reference input. See
-> [Asset registry](ASSET_REGISTRY.md) for the implemented boundary.
+The current Preprod registry is a **single issuer-managed, authenticated UTxO** containing an approved list of exact Cardano asset IDs. A separate request validator holds refundable, permissionless proposals until the issuer approves or rejects them, or the requester cancels. This is the implemented design. See [Basic on-chain asset registry](ASSET_REGISTRY.md) for operating details, [Validator inventory](VALIDATOR_INVENTORY.md) for active sources, and [Future sharded registry plan](FUTURE_SHARDED_REGISTRY.md) for a possible scaling path.
 
-## Decision
-
-Use a **sharded on-chain registry**: multiple authenticated registry UTxOs, each containing a bounded list of supported assets in its inline datum.
-
-This is the production compromise between:
-
-1. one asset per UTxO, which creates excessive UTxO and min-ADA overhead;
-2. bounded lists across several UTxOs, which retain simple on-chain membership checks and permit parallel updates; and
-3. a single Merkle-root UTxO, which reduces on-chain storage but introduces proof-generation and data-availability dependencies.
-
-Cardano remains the authority. The off-chain database indexes registry state for discovery and proof-free UI queries, but it does not determine whether an asset is supported.
-
-## Proposed layout
+## Boundary and authority
 
 ```text
-Registry address
-├── Shard 0 UTxO + REGISTRY_SHARD_0 NFT
-│   └── [entry, entry, ...]
-├── Shard 1 UTxO + REGISTRY_SHARD_1 NFT
-│   └── [entry, entry, ...]
-├── Shard 2 UTxO + REGISTRY_SHARD_2 NFT
-│   └── [entry, entry, ...]
-└── ...
+requester ──► asset_registry_request UTxO ──► issuer approval + refund
+                  │ cancel or reject ─────────► requester refund
+                  ▼ approval consumes both request and registry
+issuer ─────► asset_registry UTxO (identity NFT + inline version/list datum)
+public UI ◄── authenticated registry read
+
+Marketplace shared pool ── its own on-chain prices, NOT registry membership
+DEX pools ──────────────── AMM reserves, NOT registry membership
 ```
 
-Each shard has a unique authentication NFT. Marketplace and shared-pool validators authenticate the referenced shard by this token before trusting its datum.
+The registry records issuer approval of an exact `(policy_id, asset_name)` pair. It does **not** prove ownership, asset quality, legal compliance, or supported mint provenance on-chain. Approval does not create a shared-pool price, authorize Instant Sell settlement, or gate direct Marketplace listings. Current `shared_reserve_pool` and `marketplace_listing_escrow` validators do not require a registry reference input; settlement uses posted on-chain pool prices. DEX pricing follows pool reserves. There is no current per-asset buy/sell flag, policy-wide approval, quantity cap, or off-chain operator price book.
 
-## Datum model
+## State and deployment identity
+
+The active `asset_registry` Plutus V3 validator is parameterized by the registry identity asset and issuer payment verification-key hash. One state UTxO at its derived script address holds exactly one identity NFT and an inline datum:
 
 ```aiken
-type RegistryEntry {
-  asset: AssetClass,
-  buy_enabled: Bool,
-  sell_enabled: Bool,
-}
-
-type RegistryShardDatum {
-  shard_id: Int,
+RegistryDatum {
   version: Int,
-  entries: List<RegistryEntry>,
+  entries: List<AssetClass>, // exact policy ID and asset name pairs
 }
 ```
 
-The registry controls only whether an asset may be bought or sold. Team-controlled buy and sell prices belong in shared-pool state. DEX prices remain derived from pool reserves. Keeping these responsibilities separate prevents conflicting price authorities.
+The one-shot identity policy consumes a deployment seed UTxO to mint the singleton NFT. The initialization builder places it in an empty version-0 registry UTxO. The identity token and issuer are public deployment configuration, recorded for Preprod in `marketplace-deployment.preprod.json`. The client rebuilds the script from the current blueprint and those parameters, locates the token, then checks the expected address, singleton quantity, and inline datum. An arbitrary output at the same address or a same-named token is not sufficient. The current request-enabled registry was reused in the [2026-09-25 Preprod deployment](PREPROD_REDEPLOYMENT_2026-09-25.md); creating another registry is **not** a routine setup step.
 
-## Asset identity
+Each entry has a 28-byte policy ID and an asset name of at most 32 bytes. The list permits at most 50 distinct exact assets. Entries are not sorted by a protocol requirement: new approvals are prepended, and the validator checks uniqueness and the exact transition. A policy ID alone does not approve every token under that policy; an original NFT's approval does not approve its fraction token.
 
-Use the complete asset unit by default:
+## Issuer-controlled transitions
 
-```text
-policy_id + asset_name
-```
+Every update spends the current registry UTxO and recreates exactly one continuing UTxO with the same identity NFT at the same address. The validator requires the configured issuer signature, no transaction mint/burn, unchanged non-ADA value, no decrease in locked ADA, valid old/new lists, and an exact one-step version increment. It accepts only these redeemers:
 
-Allowlisting only a policy ID also approves every asset name that policy can mint in the future. Policy-wide approval should therefore be an explicit, exceptional rule for issuers whose entire policy is trusted.
+| Action | Required list change |
+| --- | --- |
+| `Register(asset)` | Prepend one valid asset not already present. |
+| `RegisterMany(assets)` | Prepend a nonempty, unique batch whose assets are not already present. |
+| `Revoke(asset)` | Remove one currently present asset. |
 
-If both modes are required later, represent the distinction explicitly:
+There is no close action, issuer rotation, automatic expiry, or on-chain price update in this validator. The one state UTxO serializes changes: after a competing update confirms, a transaction built from the old UTxO must be rebuilt. Locked ADA may need a top-up as the datum grows. Revocation changes the registry record only; it does not burn or move an asset or cancel existing Marketplace positions.
 
-```aiken
-type RegistryRule {
-  ExactAsset(AssetClass)
-  TrustedPolicy(ByteArray)
-}
-```
+## Permissionless request escrow
 
-## Deterministic sharding
+`asset_registry_request` is a separate Plutus V3 spending validator parameterized by the registry address, identity token, and issuer key. A request UTxO contains ADA only and an inline datum with the requester address, requester payment-key hash, and a nonempty list of up to 50 unique exact asset IDs. The validator requires at least 2 tADA locked; the current browser UI deposits 3 tADA.
 
-Start with a fixed shard count of 16 or 32. Both the client and validator calculate the required shard from the complete asset unit:
+| Request action | Signer and enforced outcome |
+| --- | --- |
+| `Approve` | The issuer signs. The same transaction consumes the authenticated registry UTxO, recreates it with version + 1 and **all** requested assets prepended, and refunds at least the full request deposit to the stored requester address. The registry validator independently checks the matching `RegisterMany` transition. |
+| `Reject` | The issuer signs and refunds at least the full locked ADA to the requester. The registry need not change. |
+| `Cancel` | The stored requester key signs and receives at least the full locked ADA back. The registry need not change. |
 
-```text
-shard_id = blake2b_256(asset_unit)[0] mod SHARD_COUNT
-```
+Approval is all-or-nothing: the request validator checks registry identity/address, capacity, version, and the exact batch transition. A request does not auto-approve an asset and cannot approve only a subset. A request containing an already registered asset cannot be approved as-is; reject it and submit a corrected request. Transaction fees must be accounted for separately from the refund rule.
 
-Entries in each datum must be sorted by complete asset unit and contain no duplicates. Begin with a conservative limit of approximately 32 entries per shard, then finalize it using transaction-size and Aiken execution-budget benchmarks rather than treating 32 as a protocol constant.
+## Browser and trust boundaries
 
-## Membership validation
+`/registry` exposes requests, issuer review, direct registration/revocation, and authenticated state. `/asset-registry` exposes public approval status. Before offering direct registration or request approval, the UI checks that an original NFT was minted by the currently supported CSWAP policy, using chain data from the configured provider. This provenance check is **off-chain**. The validator authorizes the issuer and valid exact asset IDs, so a different builder can register any valid ID if the issuer signs. The check cannot establish legal ownership or document authenticity. UI operator gating likewise does not replace validator authorization.
 
-A marketplace or instant-sell transaction references the applicable shard UTxO without consuming it. The validator checks that:
+The registry reader depends on the configured chain provider for UTxO discovery and mint-history lookup; it is not a light-client proof. Provider/indexer delays can affect display after confirmation without changing ledger state. The project's indexer cloud deployment remains deferred. On-chain confirmation, blueprint compatibility, and public deployment identities must be verified separately from a website build.
 
-1. the reference input contains the expected shard authentication NFT;
-2. the asset hashes to the shard ID in the datum;
-3. the exact asset unit occurs in the sorted entry list; and
-4. the applicable `buy_enabled` or `sell_enabled` flag is true.
+## Limits and future evolution
 
-Reference-input reads do not contend with each other. If the team spends a shard to update it while a user transaction references the previous output, the user transaction must be rebuilt against the new registry state. This makes revocation atomic relative to marketplace execution.
+The 50-entry cap and single mutable UTxO limit capacity and concurrent writes. Changing validator parameters or schema changes script addresses; existing UTxOs are not upgraded in place. Any replacement needs a reviewed deployment and migration plan for approved entries **and outstanding request UTxOs**, plus a controlled frontend configuration switch. Do not deploy a replacement merely to address temporary provider lag.
 
-## Registry updates
-
-An update consumes and recreates only the affected shard. The registry validator must enforce:
-
-- authorization by the configured team key;
-- preservation of exactly one correct shard NFT;
-- an unchanged shard ID;
-- deterministic assignment of every entry to that shard;
-- sorted entries with no duplicates;
-- the maximum entry count;
-- an exact one-step version increment;
-- the requested register, revoke, or flag change without unrelated mutations; and
-- no unauthorized minting or burning of registry authentication tokens.
-
-Updates to different shards may execute concurrently.
-
-## Alternatives considered
-
-### One asset per UTxO
-
-This provides independent updates and very simple entry datums, but requires a UTxO, min-ADA deposit, authentication mechanism, and indexer record for every supported asset. It is better suited to permissionless registration by independent issuers than to a team-administered marketplace.
-
-### Single UTxO containing the complete list
-
-This is acceptable for a small prototype but grows datum size and linear membership-checking cost. All administrative changes also contend for the same UTxO. The current unsharded registry should be treated as a migration source rather than the final scaling model.
-
-### Single Merkle-root UTxO
-
-Merkle membership reduces the on-chain registry to one root and logarithmic membership proofs. However, the root cannot reconstruct the asset list or generate proofs. Production use would require a rollback-aware proof service, replicated full-tree snapshots, an independently retrievable manifest, and client proof verification.
-
-Integrity without proof availability is insufficient: users could be unable to produce valid membership transactions even though the root remains on-chain.
-
-## Merkle migration threshold
-
-Remain with bounded direct-list shards while the measured datum size and execution cost stay comfortably within protocol limits. Consider a Merkle design when the registry grows into thousands or tens of thousands of assets, or benchmarks show that sharded direct membership materially restricts transaction composition.
-
-The migration should publish the complete sorted leaf manifest to durable replicated storage and bind its content hash to the on-chain root. Exit and cancellation paths must never depend on registry membership or proof-service availability.
-
-## Implementation checklist
-
-- Parameterize the registry validator with shard count and team key.
-- Define and mint one immutable authentication NFT per shard.
-- Add deterministic shard calculation to the browser transaction builder.
-- Require registry reference inputs only for gated entry operations, not exits.
-- Implement register, revoke, enable-buy, and enable-sell transitions.
-- Add property tests for shard assignment, uniqueness, ordering, token preservation, and unauthorized updates.
-- Benchmark datum sizes and execution units before selecting the final per-shard capacity.
-- Extend the off-chain indexer and API to expose shard version and buy/sell flags.
-- Provide a migration transaction or controlled staged migration from the current registry state.
+For a possible multi-UTxO registry and benchmark/migration questions, see [Future sharded registry plan](FUTURE_SHARDED_REGISTRY.md). That proposal is not implemented or a deployment instruction.

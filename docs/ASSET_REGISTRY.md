@@ -1,7 +1,6 @@
 # Basic on-chain asset registry
 
-The registry records **issuer approval of exact asset IDs**. One authenticated
-UTxO holds a version counter and up to 50 `(policy_id, asset_name)` entries.
+The registry records **issuer approval of exact asset IDs**. Owners create, view, and cancel their own pending requests at `/portfolio/asset-requests`; issuer review and direct registration are at operator-gated `/registry`. One authenticated UTxO holds a version counter and up to 50 `(policy_id, asset_name)` entries.
 It is independent of the older registry/oracle marketplace contracts.
 
 ## Trust and contract rules
@@ -83,7 +82,7 @@ upgrades need explicit version support. Fraction tokens are separate asset IDs;
 approving an original NFT does not approve its fractions. Fraction provenance
 verification is not implemented in this basic version.
 
-Public approval status is available at `/asset-registry`. The Marketplace no longer has a registered-assets-only checkbox. Registry approval is separate from shared-pool admission: the current acquisition builder and validators use on-chain posted prices, with off-chain quantity/activity controls, not registry membership. An original NFT's approval does not approve its fraction token. Other applications may choose to enforce authenticated membership through a reference input.
+Public approval status is available at `/asset-registry`. The Marketplace no longer has a registered-assets-only checkbox. Registry approval is separate from shared-pool admission: the current acquisition builder and validators use on-chain posted prices, not registry membership. There is no off-chain operator quantity/activity control. An original NFT's approval does not approve its fraction token. Other applications may choose to enforce authenticated membership through a reference input. See the [current architecture](ASSET_REGISTRY_ARCHITECTURE.md) and separate [future sharding proposal](FUTURE_SHARDED_REGISTRY.md).
 
 ## Future registry initialization — only if an approved replacement is needed
 

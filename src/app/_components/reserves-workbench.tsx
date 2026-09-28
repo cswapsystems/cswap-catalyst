@@ -5,6 +5,7 @@ import { readSharedPool, assertFreshPool } from "@/lib/protocol/shared-pool-clie
 import { readInventory } from "@/lib/protocol/inventory";
 import { buildMarketAction, lpDeposit, lpWithdrawal, marketUnit, type MarketAction } from "@/lib/marketplace";
 import { formatAda } from "@/lib/ada";
+import { parseQuoteAmount, positiveBaseUnits } from "@/lib/pool-price-editor";
 import { useMarketTransaction } from "./use-market-transaction";
 import MarketTransactionStatus from "./market-transaction-status";
 
@@ -33,18 +34,19 @@ export default function ReservesWorkbench({ revision = 0 }: { revision?: number 
   const blocked = transaction.busy || Boolean(transaction.hash) || loading;
   const display = (value: bigint) => pool?.quote.policyId ? value.toString() + " quote base units" : formatAda(value) + " ADA";
   let preview = "", invalid = "", final = false;
+  let parsedAmount: bigint | null = null;
   try {
     if (pool && amount) {
-      if (!/^[1-9][0-9]*$/.test(amount)) throw new Error("Use positive whole base units.");
-      if (mode === "deposit") preview = "LP shares minted: " + lpDeposit(pool, BigInt(amount));
+      parsedAmount = mode === "withdraw" ? positiveBaseUnits(amount, "LP shares") : parseQuoteAmount(amount, !pool.quote.policyId);
+      if (mode === "deposit") preview = "Add " + display(parsedAmount) + ". LP shares minted: " + lpDeposit(pool, parsedAmount);
       else if (mode === "withdraw") {
-        const result = lpWithdrawal(pool, BigInt(amount)); final = result.final;
-        if (BigInt(amount) > held) throw new Error("Burn exceeds your wallet LP balance.");
+        const result = lpWithdrawal(pool, parsedAmount); final = result.final;
+        if (parsedAmount > held) throw new Error("Burn exceeds your wallet LP balance.");
         if (result.amount === BigInt(0) && !acceptZero) throw new Error("Confirm the zero-cash burn explicitly.");
         if (final && !pool.scripts.identity) throw new Error("Final exit is blocked: this deployment records no burn-capable pool identity policy.");
         if (final && !acceptExit) throw new Error("Confirm final exit and inventory recovery.");
         preview = "Burn " + amount + " LP units for " + display(result.amount) + (final ? ". Starts final LP exit." : ". This is cash-only; unsold inventory stays in the pool.");
-      } else preview = "Donate " + display(BigInt(amount)) + " to reserve cash. No LP shares minted.";
+      } else preview = "Donate " + display(parsedAmount) + " to reserve cash. No LP shares minted.";
     }
   } catch (cause) { invalid = cause instanceof Error ? cause.message : "Invalid amount."; }
   async function execute(action: MarketAction) {
@@ -67,11 +69,14 @@ export default function ReservesWorkbench({ revision = 0 }: { revision?: number 
         {!pool.scripts.identity && <p role="alert">Completion requires a burn-capable pool identity. This deployment predates it, so closure cannot complete.</p>}
       </section> : <fieldset className="module-fieldset" disabled={blocked}>
         <div className="segmented-control">{(["deposit", "withdraw", "topup"] as const).map((item) => <button type="button" className={mode === item ? "selected" : ""} key={item} onClick={() => { setMode(item); setAmount(""); setAcceptZero(false); setAcceptExit(false); }}>{item === "deposit" ? "LP deposit" : item === "withdraw" ? "Cash-only LP withdrawal" : "Top up (no shares)"}</button>)}</div>
-        <label className="field"><span>{mode === "withdraw" ? "LP base units to burn" : "Quote base units to add"}</span><input inputMode="numeric" value={amount} onChange={(event) => { setAmount(event.target.value); setAcceptZero(false); setAcceptExit(false); }} /></label>
-        <p className="wallet-assets-note">{pool.quote.policyId ? "Use the exact native quote asset's base units." : "ADA input is lovelace: 1 ADA = 1,000,000 lovelace."}</p>
+        <label className="field"><span>{mode === "withdraw" ? "LP units to burn" : pool.quote.policyId ? "Quote base units to add" : "ADA to add"}</span><input inputMode={mode === "withdraw" || pool.quote.policyId ? "numeric" : "decimal"} value={amount} onChange={(event) => { setAmount(event.target.value); setAcceptZero(false); setAcceptExit(false); }} /></label>
+        <p className="wallet-assets-note">{mode === "withdraw" ? "Enter whole LP units. The cash payout is shown in ADA." : pool.quote.policyId ? "Use the exact native quote asset's base units." : "Enter ADA (up to six decimal places). Transactions convert it to lovelace on-chain."}</p>
         {mode === "withdraw" && <><label><input type="checkbox" checked={acceptZero} onChange={(event) => setAcceptZero(event.target.checked)} /> I accept burning these shares even if the cash payout is zero.</label><label><input type="checkbox" checked={acceptExit} onChange={(event) => setAcceptExit(event.target.checked)} /> If this burns the final supply, I accept starting the multi-transaction inventory recovery and exit.</label></>}
         {preview && <p className="execution-preview">{preview}</p>}{invalid && <p role="status">{invalid}</p>}
-        <button type="button" className="primary-button" disabled={!amount || Boolean(invalid) || (mode === "deposit" && pool.paused)} onClick={() => void execute(mode === "withdraw" ? { kind: "withdraw", burned: BigInt(amount), acceptZero } : { kind: mode, amount: BigInt(amount) })}>Sign {mode === "withdraw" && final ? "final LP exit" : mode}</button>
+        <button type="button" className="primary-button" disabled={parsedAmount === null || Boolean(invalid) || (mode === "deposit" && pool.paused)} onClick={() => {
+          if (parsedAmount === null) return;
+          void execute(mode === "withdraw" ? { kind: "withdraw", burned: parsedAmount, acceptZero } : { kind: mode, amount: parsedAmount });
+        }}>Sign {mode === "withdraw" && final ? "final LP exit" : mode}</button>
       </fieldset>}
     </>}
     <MarketTransactionStatus {...transaction} />

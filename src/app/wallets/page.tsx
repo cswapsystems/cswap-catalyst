@@ -1,5 +1,6 @@
-import RwaPlatform from "../_components/rwa-platform";
+import OperatorGate from "../_components/operator-gate";
+import WalletWorkbench from "../_components/wallet-workbench";
 
 export default function WalletsPage() {
-  return <RwaPlatform page="wallets" />;
+  return <OperatorGate><WalletWorkbench team /></OperatorGate>;
 }

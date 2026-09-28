@@ -6,6 +6,7 @@ import { createWalletSession, WALLET_STORAGE_KEY, type WalletSnapshot } from "@/
 import { createBrowserChainProvider } from "@/lib/browser-chain-provider";
 import { isOperatorIdentity } from "@/lib/operator-access";
 import { marketplaceDeployment, marketplaceTeamKey } from "@/lib/protocol/marketplace-deployment";
+import { registryIssuer } from "@/lib/asset-registry";
 import dexDeployment from "../../../dex-deployment.preprod.json";
 
 type WalletContextValue = WalletSnapshot & {
@@ -40,7 +41,7 @@ export function WalletProvider({ children }: { children: ReactNode }) {
       try {
         const tools = await import("@lucid-evolution/lucid");
         const currentAddress = await lucid.wallet().address();
-        allowed = currentAddress === address && isOperatorIdentity(tools.getAddressDetails(currentAddress), [marketplaceDeployment.batcher, marketplaceTeamKey, dexDeployment.admin]);
+        allowed = currentAddress === address && isOperatorIdentity(tools.getAddressDetails(currentAddress), [marketplaceDeployment.batcher, marketplaceTeamKey, dexDeployment.admin, registryIssuer]);
       } catch { /* A failed wallet check must never retain operator access. */ }
       if (!cancelled) setAccess(previous => previous?.wallet === lucid && previous.address === address && previous.allowed === allowed ? previous : { wallet: lucid, address, allowed });
       running = false;

@@ -51,7 +51,7 @@ export default function AssetRegistryBoard() {
         <div>
           <span className="eyebrow">Shared pool marketplace · Preprod</span>
           <h1>Asset Registry</h1>
-          <p>Read the on-chain allowlist that controls which RWA assets can trade through the shared pool, and review the outstanding requests for new asset support.</p>
+          <p>Read the on-chain issuer approval record and review outstanding requests for new asset support. Shared-pool Instant Sell also requires a posted on-chain price and available reserves.</p>
         </div>
       </section>
 
@@ -63,9 +63,9 @@ export default function AssetRegistryBoard() {
           </div>
           <button type="button" className="refresh-button" disabled={reading} onClick={() => void refresh()}>{reading ? "Refreshing…" : "↻ Refresh"}</button>
         </div>
-        <p>The Team must approve an exact asset unit before it can be admitted to the shared pool. A pending request is an intake record, not approval to trade.</p>
+        <p>A pending request is an intake record, not approval to trade. Registry approval is separate from the shared pool&apos;s on-chain price entries.</p>
         <div className="asset-registry-counts" aria-label="Registry totals">
-          <dl><dt>Approved for trading</dt><dd>{approved.length}</dd><p>of {MAX_REGISTRY_ENTRIES} capacity</p></dl>
+          <dl><dt>Issuer-approved assets</dt><dd>{approved.length}</dd><p>of {MAX_REGISTRY_ENTRIES} capacity</p></dl>
           <dl><dt>Pending support requests</dt><dd>{pending.length}</dd><p>waiting for Team review</p></dl>
           <dl><dt>Registry revision</dt><dd>{contents ? contents.registry.version.toString() : "—"}</dd><p>increments on each approval change</p></dl>
         </div>
@@ -81,7 +81,7 @@ export default function AssetRegistryBoard() {
             <div><span className="section-kicker">Live allowlist</span><h2>Approved assets</h2></div>
             <span>{approved.length}</span>
           </div>
-          <p>These exact original-asset units are approved for shared-pool trading.</p>
+          <p>These exact asset units have issuer approval. Approval alone does not enable Instant Sell.</p>
           {approved.length === 0
             ? <div className="asset-registry-empty"><strong>No approved assets yet</strong><p>When the Team approves an asset request, it will appear here after the registry transaction confirms.</p></div>
             : <ul className="asset-registry-units">{approved.map((unit) => <li key={unit}><div><span>Original asset unit</span><code>{unit}</code></div><Link href={"/assets?asset=" + unit}>View asset <span aria-hidden="true">→</span></Link></li>)}</ul>}
@@ -94,14 +94,14 @@ export default function AssetRegistryBoard() {
           </div>
           <p>These request UTxOs are awaiting a Team approval or rejection. They do not make an asset tradable.</p>
           {pending.length === 0
-            ? <div className="asset-registry-empty"><strong>No pending requests</strong><p>New requests submitted through Asset controls will appear here while they await Team review.</p></div>
+            ? <div className="asset-registry-empty"><strong>No pending requests</strong><p>New requests submitted from Portfolio → Asset support will appear here while they await Team review.</p></div>
             : <ul className="asset-registry-requests">{pending.map((request) => <li key={request.id}><div className="asset-registry-request-head"><div><span>Request UTxO</span><code>{request.id}</code></div><small>{request.assets.length} asset{request.assets.length === 1 ? "" : "s"}</small></div><dl><dt>Requester</dt><dd><code>{request.requester}</code></dd><dt>Refundable deposit</dt><dd>{formatAda(request.lockedLovelace)} ADA</dd></dl><ul>{request.assets.map((unit) => <li key={unit}><Link href={"/assets?asset=" + unit}><code>{unit}</code></Link></li>)}</ul></li>)}</ul>}
         </section>
       </div>}
 
       <section className="asset-registry-actions">
-        <div><span className="section-kicker">Registry workflow</span><h2>Need to request or administer support?</h2><p>Users can submit an exact asset-unit request. The configured registry issuer can verify the mint and approve or reject it.</p></div>
-        <Link className="primary-button" href="/registry">Open Asset controls <span aria-hidden="true">→</span></Link>
+        <div><span className="section-kicker">Registry workflow</span><h2>Want to request asset support?</h2><p>Asset owners can request review and cancel their own pending requests from Portfolio. The configured issuer handles approvals in Operations.</p></div>
+        <Link className="primary-button" href="/portfolio/asset-requests">Manage my requests <span aria-hidden="true">→</span></Link>
       </section>
     </main>
   </div>;

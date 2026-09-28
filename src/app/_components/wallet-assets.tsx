@@ -221,6 +221,7 @@ export default function WalletAssets() {
     <WorkflowLinks label="Portfolio workflows" items={[
       { href: "/portfolio/positions", title: "Open positions", description: "Find assets in escrow, vaults and liquidity pools." },
       { href: "/portfolio/orders", title: "Listings & requests", description: "Edit listings or cancel pending Instant Sell requests." },
+      { href: "/portfolio/asset-requests", title: "Asset support", description: "Request Team review and manage your asset support requests." },
       { href: "/portfolio/reserves", title: "Shared liquidity", description: "Manage your share of the Instant Sell settlement pool." },
     ]} />
     <section className="wallet-assets-board" aria-labelledby="wallet-assets-title">

@@ -12,7 +12,7 @@ for (const width of [320, 390, 768, 1440]) {
     await page.setViewportSize({ width, height: 900 });
     const errors: string[] = [];
     page.on("pageerror", error => errors.push(error.message));
-    for (const path of ["/my-assets", "/team", "/dex", "/mint", "/portfolio/orders", "/fractionalize", "/marketplace", "/wallet", "/protocol", "/team/dex", "/team/inventory", "/team/controls", "/portfolio/reserves"]) {
+    for (const path of ["/my-assets", "/team", "/dex", "/mint", "/portfolio/orders", "/portfolio/asset-requests", "/fractionalize", "/marketplace", "/wallet", "/protocol", "/team/dex", "/team/inventory", "/team/controls", "/portfolio/reserves"]) {
       await page.goto(path);
       await expect(page.getByRole("navigation", { name: "Main navigation", exact: true }).getByRole("link")).toHaveText(["Marketplace", "Swap", "Portfolio", "Create"]);
       expect(await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth + 1), path).toBe(true);
@@ -129,15 +129,17 @@ test("connected wallet menu does not disconnect on open and fits mobile", async 
   await expect(page.locator("header").getByRole("button", { name: "Connect Eternl" })).toBeVisible();
 });
 
-test("disconnected direct operator URLs stay locked, while public requests remain available", async ({ page }) => {
-  for (const path of ["/team", "/team/dex", "/team/inventory", "/team/controls", "/team/recovery"]) {
+test("disconnected direct operator URLs stay locked, while owner requests remain available", async ({ page }) => {
+  for (const path of ["/team", "/team/dex", "/team/inventory", "/team/controls", "/team/recovery", "/registry", "/wallets"]) {
     await page.goto(path);
     await expect(page.getByRole("heading", { name: "Connect an operator or Team wallet" })).toBeVisible();
     await expect(page.getByRole("navigation", { name: "Operations navigation", exact: true })).toHaveCount(0);
     await expect(page.locator(".team-hero, .price-book-panel, .shared-pool-workspace")).toHaveCount(0);
   }
-  await page.goto("/registry");
+  await page.goto("/portfolio/asset-requests");
   await expect(page.locator(".operator-access-card")).toHaveCount(0);
+  await expect(page.getByRole("heading", { name: "Asset support requests" })).toBeVisible();
+  await expect(page.getByRole("heading", { name: "Manage approved assets" })).toHaveCount(0);
 });
 
 test("ordinary wallet cannot enter the operator console", async ({ page }) => {
@@ -146,6 +148,14 @@ test("ordinary wallet cannot enter the operator console", async ({ page }) => {
   await page.locator("header").getByRole("button", { name: "Connect Eternl" }).click();
   await expect(page.getByRole("heading", { name: "This wallet does not have operator access" })).toBeVisible();
   await expect(page.getByRole("navigation", { name: "Operations navigation", exact: true })).toHaveCount(0);
+  await page.goto("/portfolio/asset-requests");
+  await expect(page.getByRole("heading", { name: "Asset support requests" })).toBeVisible();
+  await expect(page.getByRole("heading", { name: "Manage approved assets" })).toHaveCount(0);
+  await page.locator("header").getByRole("button", { name: "Connect Eternl" }).click();
+  await expect(page.getByRole("heading", { name: "Asset support requests" })).toBeVisible();
+  await page.goto("/registry");
+  await page.locator("header").getByRole("button", { name: "Connect Eternl" }).click();
+  await expect(page.getByRole("heading", { name: "This wallet does not have operator access" })).toBeVisible();
 });
 
 test("operator access is enabled only while the authorized wallet remains connected", async ({ page }) => {
@@ -154,6 +164,11 @@ test("operator access is enabled only while the authorized wallet remains connec
   await page.locator("header").getByRole("button", { name: "Connect Eternl" }).click();
   await expect(page.getByRole("heading", { name: "Shared pool capacity" })).toBeVisible();
   await expect(page.getByRole("navigation", { name: "Operations navigation", exact: true })).toBeVisible();
+  await page.getByRole("navigation", { name: "Operations navigation", exact: true }).getByRole("link", { name: "Team wallet" }).click();
+  await expect(page.getByRole("heading", { name: "Team wallet" })).toBeVisible();
+  await expect(page.getByRole("heading", { name: "Connected Team account" })).toBeVisible();
+  await expect(page.getByRole("navigation", { name: "Operations navigation", exact: true }).getByRole("link", { name: "Team wallet" })).toBeVisible();
+  await page.getByRole("navigation", { name: "Operations navigation", exact: true }).getByRole("link", { name: "Overview & requests" }).click();
   await page.locator("summary").filter({ hasText: "More" }).click();
   await expect(page.getByRole("link", { name: /Operator console Approvals/ })).toBeVisible();
   await page.keyboard.press("Escape");

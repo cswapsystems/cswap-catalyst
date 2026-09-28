@@ -586,8 +586,16 @@ footer b, footer a:hover { color: var(--moss); }
 .price-book-panel > p { color: var(--muted); line-height: 1.6; margin-block: 16px; }
 .price-book-panel .marketplace-form-grid { margin-block: 24px; }
 .price-book-panel .field, .wallet-listing-form .field { min-width: 0; }
-.price-book-panel .field input, .wallet-listing-form .field input { width: 100%; min-width: 0; }
+.price-book-panel .field input, .price-book-panel .field select, .wallet-listing-form .field input { width: 100%; min-width: 0; }
 .price-book-panel .marketplace-toolbar { flex-wrap: wrap; gap: 12px; }
+.price-quote-card { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1.4fr); gap: 20px; align-items: center; margin: 22px 0; padding: 20px; border: 1px solid var(--line); border-radius: 12px; background: var(--surface-deep); }
+.price-quote-card strong, .price-quote-card code { display: block; overflow-wrap: anywhere; }
+.price-quote-card strong { margin-top: 6px; color: var(--lime); font-size: 20px; }
+.price-quote-card code { margin-top: 5px; color: var(--muted); font-size: 11px; }
+.price-quote-card p, .price-book-panel .price-ratio-note { margin: 0; color: var(--muted); font-size: 12px; line-height: 1.6; }
+.price-book-panel .price-ratio-note { margin: 0 0 18px; }
+.price-selected-unit { margin: 0; color: var(--muted); font-size: 11px; overflow-wrap: anywhere; }
+@media (max-width: 700px) { .price-quote-card { grid-template-columns: 1fr; } }
 .asset-unit { display: block; overflow-wrap: anywhere; color: var(--muted); font-size: 11px; margin-bottom: 18px; }
 .wallet-listing-form .module-fieldset { display: grid; gap: 18px; }
 .module-nav { display: flex; gap: 7px; overflow-x: auto; padding: 12px clamp(20px, 4vw, 64px); border-bottom: 1px solid var(--line); background: var(--surface-deep); }
@@ -649,6 +657,7 @@ footer b, footer a:hover { color: var(--moss); }
 .registry-transaction a { color: var(--moss); font-size: 12px; font-weight: 700; text-decoration: underline; text-underline-offset: 3px; }
 
 .registry-control-workflow { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); gap: 16px; margin-bottom: 16px; }
+.registry-operator-workflow { grid-template-columns: minmax(0, 1fr); }
 .registry-control-card { min-width: 0; margin: 0; }
 .registry-control-card-head { display: flex; align-items: flex-start; gap: 12px; }
 .registry-control-card-head > span { display: grid; place-items: center; width: 31px; height: 31px; flex: 0 0 auto; color: #001b05; border-radius: 50%; background: var(--lime); font-family: var(--font-display); font-size: 12px; font-weight: 700; }
