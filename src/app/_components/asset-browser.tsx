@@ -86,21 +86,19 @@ async function loadAsset(assetId: string): Promise<BrowserState> {
   return { registration, details, metadata: findMetadata([transactionMetadata, metadataPayload, details.onchain_metadata], details.policy_id, details.asset_name), transaction };
 }
 
-export default function AssetBrowser() {
-  const initialAssetId = typeof window === "undefined" ? "" : normalizeAssetId(new URLSearchParams(window.location.search).get("asset") ?? "");
-  const [assetId, setAssetId] = useState(initialAssetId);
+export default function AssetBrowser({ initialAssetId }: { initialAssetId: string }) {
+  const requestedAssetId = normalizeAssetId(initialAssetId);
+  const [assetId, setAssetId] = useState(requestedAssetId);
   const [state, setState] = useState<BrowserState | null>(null);
-  const [status, setStatus] = useState<"idle" | "loading" | "ready" | "error">(isAssetId(initialAssetId) ? "loading" : "idle");
+  const [status, setStatus] = useState<"idle" | "loading" | "ready" | "error">(isAssetId(requestedAssetId) ? "loading" : "idle");
   const [error, setError] = useState<string | null>(null);
 
   useEffect(() => {
-    if (!isAssetId(initialAssetId)) return;
+    if (!isAssetId(requestedAssetId)) return;
     let cancelled = false;
-    void loadAsset(initialAssetId).then((result) => { if (!cancelled) { setState(result); setStatus("ready"); } }).catch((cause) => { if (!cancelled) { setStatus("error"); setError(cause instanceof Error ? cause.message : "Unable to load this asset."); } });
+    void loadAsset(requestedAssetId).then((result) => { if (!cancelled) { setState(result); setStatus("ready"); } }).catch((cause) => { if (!cancelled) { setStatus("error"); setError(cause instanceof Error ? cause.message : "Unable to load this asset."); } });
     return () => { cancelled = true; };
-    // The shareable query is intentionally loaded once on mount.
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, []);
+  }, [requestedAssetId]);
 
   async function lookup(value = assetId) {
     const normalized = normalizeAssetId(value);

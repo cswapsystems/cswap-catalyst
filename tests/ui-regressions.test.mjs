@@ -29,13 +29,18 @@ test("withdrawal preview refuses zero-sided outputs and reports the minimum burn
   assert.deepEqual(quoteLiquidityWithdrawal(10_000n, 10_000_000n, 100n, 1_000_000n), { amountA: 100_000n, amountB: 1n, lp: 10_000n });
 });
 
-test("IPFS gateway serves only sniffed inert media inline, never upstream HTML/SVG", () => {
+test("IPFS gateway serves images, PDFs and valid JSON inline, never upstream HTML/SVG", () => {
   const bytes = (text) => new TextEncoder().encode(text);
   const png = new Uint8Array([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a, 0, 0]);
   assert.deepEqual(sniffGatewayMedia(png), { type: "image/png", inline: true });
   assert.equal(sniffGatewayMedia(bytes("RIFF\0\0\0\0WEBPVP8 "))?.type, "image/webp");
-  assert.deepEqual(sniffGatewayMedia(bytes("%PDF-1.7")), { type: "application/pdf", inline: false });
-  for (const hostile of ["<!doctype html><script>alert(1)</script>", "<svg xmlns='http://www.w3.org/2000/svg' onload='alert(1)'/>", "{\"name\":\"x\"}"]) {
+  const pdf = gatewayHeaders("bafyexample", sniffGatewayMedia(bytes("%PDF-1.7")));
+  assert.equal(pdf["content-type"], "application/pdf");
+  assert.equal(pdf["content-disposition"], "inline");
+  const json = gatewayHeaders("bafyexample", sniffGatewayMedia(bytes("{\"name\":\"x\"}")));
+  assert.equal(json["content-type"], "application/json; charset=utf-8");
+  assert.equal(json["content-disposition"], "inline");
+  for (const hostile of ["<!doctype html><script>alert(1)</script>", "<svg xmlns='http://www.w3.org/2000/svg' onload='alert(1)'/>", "{\"name\":", "1"]) {
     assert.equal(sniffGatewayMedia(bytes(hostile)), null);
     const headers = gatewayHeaders("bafyexample", null);
     assert.equal(headers["content-type"], "application/octet-stream");

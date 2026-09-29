@@ -2,6 +2,7 @@
 
 import { useCallback, useEffect, useMemo, useState } from "react";
 import Image from "next/image";
+import Link from "next/link";
 import { useWallet } from "./wallet-context";
 import { marketplaceOrderbookAddress } from "@/lib/protocol/marketplace-deployment";
 import { formatAda } from "@/lib/ada";
@@ -182,6 +183,7 @@ export default function MarketplaceWorkbench({ ownerOnly = false }: { ownerOnly?
           <strong>{tokenName} × {listing.quantity.toString()}</strong>
           <code>{listing.rwa.policyId}{listing.rwa.assetName}</code>
           {listing.fraction && <span className="marketplace-fraction-detail">Fraction of {originalName} · total supply {listing.fraction.totalFractions.toString()}</span>}
+          {listing.settlement === "direct" && <Link className="marketplace-asset-details-link" href={"/assets?asset=" + unit(listing.fraction?.original ?? listing.rwa)}>View metadata &amp; attestation ↗</Link>}
           <span className={listing.settlement === "pool" ? "marketplace-badge pool" : "marketplace-badge"}>{listing.settlement === "pool" ? "Pool owned" : listing.settlement === "instant" ? "Instant Sell · pending" : "P2P seller"}</span>
         </div>
       </div>

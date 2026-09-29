@@ -260,6 +260,6 @@ export default function WalletAssets() {
 
     </section>
     {fractionalizeAction && <div className="listing-dialog-backdrop" role="presentation" onMouseDown={() => setFractionalizeAction(null)}><section className="asset-action-dialog" role="dialog" aria-modal="true" aria-label={(fractionalizeAction.mode === "split" ? "Fractionalize asset: " : "Combine fractions: ") + fractionalizeAction.assetName} onMouseDown={(event) => event.stopPropagation()}><button type="button" className="listing-dialog-close asset-action-dialog-close" onClick={() => setFractionalizeAction(null)} aria-label="Close asset action">×</button><FractionalizeForm key={fractionalizeAction.mode + fractionalizeAction.originalUnit} initialMode={fractionalizeAction.mode} initialAssetUnit={fractionalizeAction.originalUnit} /></section></div>}
-    {listingAsset && <PortfolioSale key={listingAsset.unit} asset={listingAsset} onClose={() => setListingAsset(null)} onSubmitted={() => setRevision((value) => value + 1)} />}
+    {listingAsset && <PortfolioSale key={listingAsset.unit} asset={listingAsset} onClose={() => setListingAsset(null)} onConfirmed={() => setRevision((value) => value + 1)} />}
   </main></div>;
 }

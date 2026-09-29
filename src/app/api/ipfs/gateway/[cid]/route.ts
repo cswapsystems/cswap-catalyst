@@ -14,9 +14,9 @@ export async function GET(_request: Request, context: RouteContext<"/api/ipfs/ga
     try {
       const response = await fetch(gateway + cid, { cache: "force-cache" });
       if (!response.ok) continue;
-      // Upstream content type is attacker-controlled; classify by magic bytes.
+      // Upstream content type is attacker-controlled; inspect the returned bytes.
       const body = new Uint8Array(await response.arrayBuffer());
-      return new Response(body, { headers: gatewayHeaders(cid, sniffGatewayMedia(body.subarray(0, 16))) });
+      return new Response(body, { headers: gatewayHeaders(cid, sniffGatewayMedia(body)) });
     } catch {
       // Try the next gateway; the CID makes every successful response immutable.
     }

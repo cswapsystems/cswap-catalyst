@@ -9,8 +9,9 @@ import { marketplaceOrderbookAddress } from "@/lib/protocol/marketplace-deployme
 import { reviewedOrderbook, readSharedPool, assertFreshPool, assertMarketWallet } from "@/lib/protocol/shared-pool-client";
 import { postedQuote, listingDatum, marketUnit, outputRef } from "@/lib/marketplace";
 import { useWallet } from "./wallet-context";
+import { confirmTransaction } from "@/lib/transaction-confirmation";
 
-export default function PortfolioSale({ asset, onClose, onSubmitted }: { asset: WalletAsset; onClose: () => void; onSubmitted: (hash: string) => void }) {
+export default function PortfolioSale({ asset, onClose, onConfirmed }: { asset: WalletAsset; onClose: () => void; onConfirmed: () => void }) {
   const { lucid, address } = useWallet();
   const [mode, setMode] = useState("listing");
   const [quantity, setQuantity] = useState("1");
@@ -21,6 +22,7 @@ export default function PortfolioSale({ asset, onClose, onSubmitted }: { asset: 
   const [message, setMessage] = useState("");
   const [busy, setBusy] = useState(false);
   const [hash, setHash] = useState("");
+  const [confirming, setConfirming] = useState(false);
   const [revision, setRevision] = useState(0);
   useEffect(() => {
     let cancelled = false;
@@ -39,6 +41,24 @@ export default function PortfolioSale({ asset, onClose, onSubmitted }: { asset: 
     if (pool) quote = postedQuote(pool, asset.unit, BigInt(quantity));
   } catch (error) { unavailable = error instanceof Error ? error.message : "Enter a valid quantity."; }
   const missingPostedPrice = Boolean(pool && !pool.paused && !pool.closing && !pool.prices.some((entry) => marketUnit(entry.asset) === asset.unit));
+  async function checkConfirmation(submitted: string, manual = false) {
+    setConfirming(true);
+    setMessage("");
+    try {
+      if (manual) {
+        const response = await fetch("/api/blockfrost/txs/" + submitted, { cache: "no-store" });
+        if (!response.ok) throw new Error("Confirmation is not available yet. Check the transaction before retrying.");
+      } else if (!lucid || !await confirmTransaction(lucid, submitted)) {
+        throw new Error("Confirmation is not available yet. Check the transaction before retrying.");
+      }
+      onConfirmed();
+      onClose();
+    } catch (error) {
+      setMessage(error instanceof Error ? error.message : "Confirmation could not be checked. Use the explorer and check again.");
+    } finally {
+      setConfirming(false);
+    }
+  }
   async function submit(event: FormEvent) {
     event.preventDefault();
     if (!lucid || !address || hash) return;
@@ -74,7 +94,8 @@ export default function PortfolioSale({ asset, onClose, onSubmitted }: { asset: 
       if (mode === "instant" && pool) await assertFreshPool(lucid, tools, pool);
       await assertMarketWallet(lucid, address);
       const submitted = await (await tx.sign.withWallet().complete()).submit();
-      setHash(submitted); setMessage("Submitted. Wait for confirmation before treating this sale as open."); onSubmitted(submitted);
+      setHash(submitted);
+      void checkConfirmation(submitted);
     } catch (error) { setMessage(error instanceof Error ? error.message : "Sale could not be submitted."); }
     finally { setBusy(false); }
   }
@@ -89,7 +110,8 @@ export default function PortfolioSale({ asset, onClose, onSubmitted }: { asset: 
       <p className="wallet-assets-note">Your selected tokens and at least 2 ADA move into escrow. The deposit is returned on sale or cancellation; network fees apply. {mode === "instant" ? "Team must settle at or above your minimum, or you can cancel before settlement." : "The buyer pays your listed total price."}</p>
       <button type="submit" className="primary-button" disabled={mode === "instant" && !quote}>{busy ? "Awaiting wallet…" : mode === "instant" ? "Request sale at this minimum" : "Create listing"}</button>
     </fieldset></form>
+    {confirming && <p className="sale-confirmation-progress" role="status"><span className="sale-confirmation-spinner" aria-hidden="true" />Transaction submitted. Waiting for network confirmation…</p>}
     {message && <p role="status" className="form-message">{message}</p>}
-    {hash && <p><a href={"https://preprod.cardanoscan.io/transaction/" + hash} target="_blank" rel="noreferrer">Inspect submitted transaction</a> · <Link href="/portfolio/orders">Manage listings & requests</Link></p>}
+    {hash && <p><a href={"https://preprod.cardanoscan.io/transaction/" + hash} target="_blank" rel="noreferrer">Inspect submitted transaction</a> · <Link href="/portfolio/orders">Manage listings & requests</Link>{!confirming && <> · <button type="button" className="sale-confirmation-check" onClick={() => void checkConfirmation(hash, true)}>Check confirmation</button></>}</p>}
   </section></div>;
 }
