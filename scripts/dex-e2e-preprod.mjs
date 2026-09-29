@@ -9,8 +9,6 @@ import { readFile } from 'node:fs/promises';
 import { preprodHarness, ROOT } from './lib/preprod-harness.mjs';
 import { addressData, assetData, assetUnit, decodePool, nextDatum, poolName, poolValue, reservePayout, integerSqrt } from '../src/lib/protocol/dex-client.ts';
 import { quoteConstantProduct, quoteLiquidityDeposit, quoteLiquidityWithdrawal } from '../src/lib/dex.ts';
-import { reviewBootstrapTransaction } from '../src/lib/bootstrap-review.ts';
-import { decodeCardanoAddress } from '../src/lib/address-codec.ts';
 
 let deployment;
 const h = await preprodHarness('dex-e2e-preprod', {
@@ -136,59 +134,50 @@ await step('LP removes part of its liquidity', async () => {
 await attack('swap takes one unit more than the constant product allows', 'settlement', () => swap('settlement', 'lovelace', 'a', 3_000_000n, 1n));
 await attack('liquidity withdrawal overpays the quote side', 'treasury', async () => removeLiquidity('lovelace', await balance(provider.address, lpUnitOf(await poolFor('lovelace'))), 1n));
 
-// ---- Three-party bootstrap ------------------------------------------------------
+// ---- Three-stage on-chain bootstrap ---------------------------------------------
 const FRACTION = 100n, QUOTE = 9_000_000n, BUFFER = 4_000_000n, SHARE = 5_000n;
-const offerDatum = (quote, poolLovelace = BUFFER) => c(0, [addressData(t, owner.address), owner.key, assetData(t, factoryAsset), assetData(t, asset(FT)), FRACTION, assetData(t, asset(quote)), QUOTE, poolLovelace, SHARE]);
+const offerTerms = (quote, poolLovelace = BUFFER) => c(0, [addressData(t, owner.address), owner.key, assetData(t, factoryAsset), assetData(t, asset(FT)), FRACTION, assetData(t, asset(quote)), QUOTE, poolLovelace, SHARE]);
 const createOffer = (quote, value = { lovelace: BUFFER, [FT]: FRACTION }, poolLovelace = BUFFER) =>
-  submit('custody', () => lucid.newTx().pay.ToContract(deployment.bootstrapOfferAddress, { kind: 'inline', value: data(offerDatum(quote, poolLovelace)) }, value));
-// The offer address is unparameterized and shared with every deployment: only
-// consider this factory's offers from the test FT provider.
-const offers = async quote => (await lucid.utxosAt(deployment.bootstrapOfferAddress)).filter(u => {
+  submit('custody', () => lucid.newTx().pay.ToContract(deployment.bootstrapOfferAddress, { kind: 'inline', value: data(c(0, [offerTerms(quote, poolLovelace)])) }, value));
+const offers = async (quote, stage = 0) => (await lucid.utxosAt(deployment.bootstrapOfferAddress)).filter(u => {
   if (!u.datum) return false;
   try {
-    const f = t.Data.from(u.datum).fields;
-    return f[1] === owner.key && f[2].fields[0] === factoryAsset.policyId && f[2].fields[1] === factoryAsset.assetName && f[5].fields[0] === asset(quote).policyId && f[5].fields[1] === asset(quote).assetName;
+    const root = t.Data.from(u.datum), f = root.fields[0].fields;
+    return root.index === stage && f[1] === owner.key && f[2].fields[0] === factoryAsset.policyId && f[2].fields[1] === factoryAsset.assetName && f[5].fields[0] === asset(quote).policyId && f[5].fields[1] === asset(quote).assetName;
   } catch { return false; }
 });
-async function acceptance(offer, quote, { payer = provider, team = true, split = 0n } = {}) {
+async function fundOffer(offer, quote, payer = provider) {
+  const state = await factory(), terms = t.Data.from(offer.datum).fields[0];
+  const value = quote === 'lovelace' ? { lovelace: QUOTE, [FT]: FRACTION } : { lovelace: BUFFER, [quote]: QUOTE, [FT]: FRACTION };
+  return lucid.newTx().collectFrom([offer], data(c(0, [addressData(t, payer.address), payer.key]))).readFrom([state.utxo]).attach.SpendingValidator(offerScript)
+    .pay.ToContract(deployment.bootstrapOfferAddress, { kind: 'inline', value: data(c(1, [terms, addressData(t, payer.address), payer.key])) }, value)
+    .addSigner(payer.address);
+}
+async function finalization(funded, quote, { team = true, split = 0n } = {}) {
   const state = await factory(), name = poolName(state.fields[3]);
   const nft = deployment.poolPolicyId + name, lpUnit = deployment.lpPolicyId + name;
   const liquidity = integerSqrt(QUOTE * FRACTION), ownerLp = liquidity * SHARE / 10_000n;
   const ada = quote === 'lovelace';
   const pool = c(0, [assetData(t, asset(nft)), assetData(t, asset(quote)), assetData(t, asset(FT)), assetData(t, asset(lpUnit)), 997n, 1000n, QUOTE, FRACTION, liquidity, ada ? QUOTE : BUFFER]);
-  let builder = factoryAdvance(lucid.newTx().collectFrom([offer], data(c(0, [addressData(t, payer.address), payer.key]))).attach.SpendingValidator(offerScript), state, c(1))
+  let builder = factoryAdvance(lucid.newTx().collectFrom([funded], data(c(1))).attach.SpendingValidator(offerScript), state, c(1))
     .mintAssets({ [nft]: 1n }, data(c(0))).mintAssets({ [lpUnit]: liquidity }, data(c(0, [assetData(t, asset(nft))])))
     .attach.MintingPolicy(poolPolicy).attach.MintingPolicy(lp)
     .pay.ToContract(deployment.ammAddress, { kind: 'inline', value: data(pool) }, ada ? { lovelace: QUOTE, [FT]: FRACTION, [nft]: 1n } : { lovelace: BUFFER, [quote]: QUOTE, [FT]: FRACTION, [nft]: 1n })
     .pay.ToAddress(owner.address, { [lpUnit]: ownerLp - split })
-    .pay.ToAddress(payer.address, { [lpUnit]: liquidity - ownerLp + split })
-    .addSigner(payer.address);
+    .pay.ToAddress(provider.address, { [lpUnit]: liquidity - ownerLp + split });
   if (team) builder = builder.addSigner(admin.address);
   return builder;
 }
-// LP builds and signs; the Team reviews the exact CBOR, co-signs; the LP submits.
-async function bootstrap(quote) {
-  const [offer] = await offers(quote);
-  as('treasury');
-  const completed = await (await acceptance(offer, quote)).complete();
-  const cbor = completed.toCBOR();
-  as('admin');
-  const reviewed = await reviewBootstrapTransaction(t, lucid, cbor, deployment, decodeCardanoAddress);
-  if (!reviewed.result.ok) throw new Error('Team review rejected the approval: ' + reviewed.result.issues.join(' '));
-  const teamWitness = await lucid.fromTx(cbor).partialSign.withWallet();
-  as('treasury');
-  const providerWitness = await lucid.fromTx(cbor).partialSign.withWallet();
-  const signed = await lucid.fromTx(cbor).assemble([providerWitness, teamWitness]).complete();
-  return settle(signed, await signed.submit());
-}
-
+const cancelOffer = (offer, signer) => lucid.newTx().collectFrom([offer], data(c(2))).attach.SpendingValidator(offerScript).pay.ToAddress(owner.address, offer.assets).addSigner(signer);
 for (const [label, quote] of [['tADA', 'lovelace'], ['token', USD]]) {
   await step(`bootstrap ${label}: FT provider locks offer`, () => createOffer(quote));
-  await attack(`bootstrap ${label}: approval without Team signature`, 'treasury', async () => acceptance((await offers(quote))[0], quote, { team: false }));
-  await attack(`bootstrap ${label}: LP allocation shifted by one share`, 'treasury', async () => acceptance((await offers(quote))[0], quote, { split: 1n }));
-  if (quote === 'lovelace') await attack('bootstrap tADA: FT provider acts as its own LP', 'custody', async () => acceptance((await offers(quote))[0], quote, { payer: owner }));
-  await step(`bootstrap ${label}: LP + Team approve, pool created`, async () => {
-    const hash = await bootstrap(quote);
+  if (quote === 'lovelace') await attack('bootstrap tADA: FT provider acts as own LP', 'custody', async () => fundOffer((await offers(quote))[0], quote, owner));
+  await step(`bootstrap ${label}: LP funds same escrow`, async () => submit('treasury', async () => fundOffer((await offers(quote))[0], quote)));
+  await attack(`bootstrap ${label}: owner cancels funded escrow`, 'custody', async () => cancelOffer((await offers(quote, 1))[0], owner.address));
+  await attack(`bootstrap ${label}: pool creation without Team signature`, 'treasury', async () => finalization((await offers(quote, 1))[0], quote, { team: false }));
+  await attack(`bootstrap ${label}: LP allocation shifted by one share`, 'admin', async () => finalization((await offers(quote, 1))[0], quote, { split: 1n }));
+  await step(`bootstrap ${label}: Team creates pool`, async () => {
+    const hash = await submit('admin', async () => finalization((await offers(quote, 1))[0], quote));
     const pool = await poolFor(quote, 'newest');
     if (await balance(owner.address, lpUnitOf(pool)) <= 0n || await balance(provider.address, lpUnitOf(pool)) <= 0n) throw new Error('LP shares were not split.');
     return hash;
@@ -197,20 +186,17 @@ for (const [label, quote] of [['tADA', 'lovelace'], ['token', USD]]) {
   await step(`bootstrap ${label}: swap on new pool`, () => submit('settlement', () => swap('settlement', quote, 'a', 1_000_000n, 0n, 'newest')));
 }
 
-// ---- Cancellation, including the R04 malformed escrow ---------------------------
-const cancelOffer = (offer, signer) => lucid.newTx().collectFrom([offer], data(c(1))).attach.SpendingValidator(offerScript).pay.ToAddress(owner.address, offer.assets).addSigner(signer);
+// ---- Cancellation, including the R04 malformed open escrow -----------------------
 await step('offer: lock then owner cancels', async () => {
   await createOffer('lovelace');
-  const [offer] = await offers('lovelace');
-  return submit('custody', () => cancelOffer(offer, owner.address));
+  return submit('custody', async () => cancelOffer((await offers('lovelace'))[0], owner.address));
 });
 await step('offer: lock malformed escrow (value exceeds datum)', () => createOffer('lovelace', { lovelace: BUFFER, [FT]: FRACTION }, 3_000_000n));
-await attack('offer: malformed escrow cannot be accepted', 'treasury', async () => acceptance((await offers('lovelace'))[0], 'lovelace'));
+await attack('offer: malformed escrow cannot be funded', 'treasury', async () => fundOffer((await offers('lovelace'))[0], 'lovelace'));
 await attack('offer: non-owner cancels', 'settlement', async () => cancelOffer((await offers('lovelace'))[0], attacker.address));
 await step('offer: owner recovers malformed escrow', async () => {
   const before = await balance(owner.address, FT);
-  const [offer] = await offers('lovelace');
-  const hash = await submit('custody', () => cancelOffer(offer, owner.address));
+  const hash = await submit('custody', async () => cancelOffer((await offers('lovelace'))[0], owner.address));
   if (await balance(owner.address, FT) !== before + FRACTION) throw new Error('Malformed escrow was not refunded in full.');
   return hash;
 });
@@ -250,5 +236,5 @@ for (const pool of (await pools()).sort((x, y) => x.poolNft.assetName.localeComp
     return hash;
   });
 }
-if ((await pools()).length || (await lucid.utxosAt(deployment.bootstrapOfferAddress)).some(u => u.datum && t.Data.from(u.datum).fields[1] === owner.key)) throw new Error('Test pools or offers remain.');
+if ((await pools()).length || (await lucid.utxosAt(deployment.bootstrapOfferAddress)).some(u => u.datum && t.Data.from(u.datum).fields[0].fields[1] === owner.key)) throw new Error('Test pools or offers remain.');
 h.summary();

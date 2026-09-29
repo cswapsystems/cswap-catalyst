@@ -87,10 +87,22 @@ pub type BootstrapOfferDatum {
   }
 }
 
-pub type BootstrapOfferAction {
-  AcceptBootstrap {
+/// The escrow moves on-chain from an owner-funded offer to a fully funded
+/// commitment. Only the Team can turn the funded commitment into a pool.
+pub type BootstrapEscrowDatum {
+  OpenBootstrap { offer: BootstrapOfferDatum }
+  FundedBootstrap {
+    offer: BootstrapOfferDatum,
     liquidity_provider: Address,
     liquidity_provider_key: VerificationKeyHash,
   }
+}
+
+pub type BootstrapOfferAction {
+  FundBootstrap {
+    liquidity_provider: Address,
+    liquidity_provider_key: VerificationKeyHash,
+  }
+  FinalizeBootstrap
   CancelBootstrap
 }

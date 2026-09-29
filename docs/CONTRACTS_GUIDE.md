@@ -554,9 +554,9 @@ and trading. Its second parameter is the shared bootstrap-offer address.
 `Advance` and `SetPaused` require the factory-admin signature.
 `AdvanceBootstrap` also requires that Team-admin signature plus an input at
 the configured bootstrap-offer script address. The offer validator must then
-independently pass and requires the distinct LP signer, so this is a
-three-party constrained pool creation path, not a general permissionless
-factory update.
+independently pass for a funded escrow whose LP signed the earlier funding
+transaction. This is a three-stage constrained pool creation path, not a
+general permissionless factory update.
 
 ### 9.2 Pool creation and identity
 
@@ -574,15 +574,20 @@ quantity, quote asset/reserve, fixed ADA buffer, and owner LP share in basis
 points. The offer UTxO contains exactly the FT contribution plus its ADA
 buffer.
 
-The FT provider signs the offer-creation transaction. A distinct LP prepares
-and signs acceptance, and the configured factory Team creator/admin must sign
-the same complete transaction. Acceptance consumes the offer and factory
-state, creates the next deterministic pool, mints exactly the initial LP
-supply, and pays both declared participants. For tADA/FT, the LP supplies the
-amount needed to reach the final ADA reserve after the owner buffer. For
-USDCx/FT, the LP supplies the full USDCx reserve while the owner buffer stays
-as `pool_lovelace`. The FT provider can cancel an unaccepted offer with its
-payment-key signature. All three payment-key hashes must be different.
+The FT provider signs the offer-creation transaction. The FT owner can set a
+100% LP share and fund the quote side, or a distinct LP can fund a split offer. The funder signs a
+second transaction that replaces the open offer with a funded UTxO at the same
+script address. The funded datum records the LP identity and both reserves
+are locked. The owner may cancel only before funding; neither provider can
+cancel or recover a funded escrow. The configured factory Team creator/admin
+signs a third transaction that consumes the funded escrow and factory state,
+creates the next deterministic pool, mints exactly the initial LP supply, and
+pays both declared participants. For tADA/FT, the LP supplies the amount
+needed to reach the final ADA reserve after the owner buffer. For USDCx/FT,
+the LP supplies the full USDCx reserve while the owner buffer stays as
+`pool_lovelace`. The Team key must differ from the owner and funder; split
+offers also require different owner and LP keys. The LP and
+Team do not co-sign one transaction.
 
 ### 9.4 AMM rules
 

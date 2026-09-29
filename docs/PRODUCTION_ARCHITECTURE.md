@@ -77,7 +77,7 @@ The DEX is a constant-product AMM separate from the shared quote pool. A factory
 
 The factory administrator can consume factory state with `Advance`, mint the next pool NFT and initial LP supply, and create a tADA/FT pool. This remains the regular controlled pool-creation route.
 
-### Interim three-party FT bootstrap
+### Three-stage FT bootstrap
 
 The FT owner creates a `BootstrapOfferDatum` and locks:
 
@@ -86,17 +86,17 @@ The FT owner creates a `BootstrapOfferDatum` and locks:
 - required ADA buffer for the escrow/pool UTxO;
 - owner LP share in basis points.
 
-A different LP address prepares and signs the acceptance transaction, funding the quote side. The configured factory Team creator/admin must review and co-sign that exact completed transaction before submission. It consumes the offer and factory state using `AdvanceBootstrap`, creates the deterministic AMM UTxO, mints the pool NFT and complete LP supply, and pays the fixed LP allocations to the FT provider and LP. The FT provider can cancel an unaccepted offer with its stored payment-key signature. The script enforces distinct payment-key hashes, not distinct legal identities.
+The FT owner may set a 100% LP share and fund the quote side using the same address, or set a split share and let a different LP address fund it. The funding transaction consumes the open offer and creates a funded UTxO at the same escrow script with both reserves and the quote provider identity in its datum. The FT provider can cancel only before this funding transaction confirms. Neither provider can cancel or withdraw from the funded state; funds remain locked until the Team acts. The configured factory Team creator/admin then signs a separate transaction that consumes the funded escrow and factory state using `AdvanceBootstrap`, creates the deterministic AMM UTxO, mints the pool NFT and complete LP supply, and pays the fixed LP allocations. The Team key must differ from the funder and owner keys; split offers also require different owner and funder keys.
 
 For a tADA pair, the owner buffer forms part of the final ADA reserve and the LP supplies the difference. For a USDCx/FT pair, the owner supplies the fixed ADA buffer while the LP supplies the full USDCx reserve. Token/token pools preserve that fixed ADA buffer across swaps, liquidity changes, and closure.
 
-`AdvanceBootstrap` requires the factory-admin/Team signature and an input at the configured bootstrap-offer validator. That validator independently binds the asset pair, reserves, pool identity, LP split, LP signer, and Team signer.
+`AdvanceBootstrap` requires the factory-admin/Team signature and an input at the configured bootstrap-offer validator. That validator independently binds the funded escrow, asset pair, reserves, pool identity, LP split, LP funding signer, and Team finalization signer. The LP and Team sign different on-chain transactions, so there is no witness exchange.
 
 ## Deployment and migration
 
 Marketplace and DEX deployments have independent public manifests. A manifest contains public addresses, policy IDs, and transaction identifiers; it must never contain wallet seeds, Blockfrost secrets, or batcher private keys.
 
-Marketplace and DEX were freshly deployed on 2026-09-25; see the [deployment record](PREPROD_REDEPLOYMENT_2026-09-25.md). The manifests match the hardened validators and the DEX includes three-party bootstrap. A deployed script cannot be modified in place. Future incompatible blueprint changes must disable signing until an intentional replacement is confirmed; old positions do not migrate automatically. Verify the hosted commit separately from on-chain deployment.
+Marketplace and DEX were freshly deployed on 2026-09-25; see the [deployment record](PREPROD_REDEPLOYMENT_2026-09-25.md). That DEX deployment uses the earlier single-settlement bootstrap. The local three-stage blueprint has different script hashes and requires a reviewed replacement before signing; old positions do not migrate automatically. A deployed script cannot be modified in place. Verify the hosted commit separately from on-chain deployment.
 
 The current request-enabled registry was reused unchanged in the latest deployment. Older basic registries cannot gain `RegisterMany` in place; any replacement requires explicit approval and reviewed entries. Indexer cloud deployment is deferred, and the active AWS account/region/stack must be confirmed before resuming. Operator-limit S3 storage is a separate application requirement.
 

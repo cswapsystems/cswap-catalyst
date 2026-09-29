@@ -12,7 +12,7 @@ This design keeps the AMM address stable while the factory provides authenticate
 | --- | --- | --- |
 | `factory_bootstrap` | seed output reference, factory-state address, factory token name | One-time policy that mints the factory-state NFT only while consuming the selected seed UTxO. |
 | `factory_state` | Team admin verification-key hash, bootstrap-offer address | Holds `FactoryDatum`; authorizes normal advances and Team-approved three-party bootstrap advances. |
-| `bootstrap_offer` | none | Escrows an FT provider’s exact contribution and fixed pool terms until a distinct LP and Team creator approve, or the provider cancels. |
+| `bootstrap_offer` | none | Escrows an FT provider’s exact contribution and fixed pool terms, then permits owner self-funding for 100% LP or a distinct LP for split offers. Only the Team creates the pool after funding. |
 | `amm_pool` | factory-state NFT | Shared spending validator for every pool. |
 | `lp_policy` | factory-state NFT, shared AMM address | Mints/burns each pool’s LP supply only for valid AMM transitions. |
 | `pool_factory` | factory-state NFT, shared AMM address, LP policy ID | Mints/burns pool NFTs for valid create/close flows. |
@@ -122,7 +122,7 @@ A transaction builder must:
 - use inline datum encodings matching the blueprint;
 - include the factory state as a reference input for AMM/LP operations;
 - consume it, attach `factory_state`, and include the admin signer for a normal `Advance` pool creation;
-- for a three-party bootstrap, consume the matching offer and factory state with `AdvanceBootstrap`, attach both spending validators and both minting policies, ensure the distinct LP funds the fixed quote side, include the LP and Team signatures, and pay the exact initial LP split;
+- for bootstrap, first spend the open offer into a funded escrow with the quote provider signature; then the Team alone consumes the funded escrow and factory state with `AdvanceBootstrap`, attaches both spending validators and minting policies, and pays the exact LP allocation. Owner self-funding requires a 100% owner share; a split requires a distinct LP;
 - attach both minting policies for pool creation and closure;
 - update `pool_lovelace` with the ADA reserve for ADA pools, or calculate the complete output's required min-UTxO lovelace for token/token pools;
 - select fresh UTxOs after each confirmed factory advance.

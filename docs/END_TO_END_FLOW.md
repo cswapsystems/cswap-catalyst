@@ -208,33 +208,27 @@ The inventory receipt binds a pool-owned listing to its settlement path. A direc
 
 This route never uses the shared quote pool. ADA prices display as ADA while their on-chain datum keeps an integer lovelace amount. Native-token prices display in the asset's smallest units because a universal decimal scale is not safe to assume.
 
-## 8. Three-party FT DEX bootstrap (separate from the shared pool)
+## 8. Three-stage FT DEX bootstrap (separate from the shared pool)
 
 ~~~text
 [FT provider wallet]
-   |
-   | 1. DEX > Create bootstrap offer.
-   |    Lock FT quantity, fixed quote reserve, ADA buffer, and LP-share split.
+   | 1. Deposit FT and ADA buffer; fix pair, quote reserve, and LP split.
    v
-{bootstrap_offer}
-   |
-   | 2. A different liquidity-provider wallet reviews immutable terms,
-   |    funds the tADA or USDCx quote side, and signs the complete transaction.
+{OpenBootstrap UTxO} -- owner may cancel before funding
+   | 2. FT owner (100% LP share) or a separate LP deposits the quote side.
    v
-[LP wallet] -- prepares and signs quote-side settlement --> [Team creator/admin]
-                                                           |
-                                                           | 3. Reviews the same immutable transaction
-                                                           |    and adds the required Team witness.
-                                                           v
-                                                       fully signed transaction
-                                                           |
-                                                           +--> {factory_state} advances pool ID
-                                                           +--> <pool factory> mints pool NFT
-                                                           +--> <LP policy> mints LP supply
-                                                           +--> {AMM pool} receives both reserves
-                                                           +--> [FT provider receives provider LP share]
-                                                           └--> [LP receives provider LP share]
+{FundedBootstrap UTxO} -- both reserves locked; neither provider can cancel
+   | 3. Team creator signs a separate pool-creation transaction.
+   v
+{factory_state} advances pool ID + <pool factory> mints pool NFT
+   +--> {AMM pool} receives both reserves
+   +--> [FT provider receives owner LP share]
+   +--> [LP receives provider LP share]
 ~~~
+
+The quote provider and Team sign different confirmed transactions. The funded escrow has no
+timeout or recovery path: if the Team never acts, both contributions remain
+locked. No transaction CBOR or witness is passed between wallets.
 
 The DEX price follows its constant-product reserves. Shared-pool Instant Sell is an RFQ-style process whose price is set by the authorized batcher, so these systems are not interchangeable.
 
@@ -246,7 +240,7 @@ The DEX price follows its constant-product reserves. Shared-pool Instant Sell is
 | Asset holder | User wallet | Request support, list, Instant Sell, fractionalize owned original | Self-approve unless separately authorized |
 | Registry administrator | Registry admin wallet and asset_registry_request | Approve/reject requests and update registry | Use ticker instead of exact asset unit |
 | LP | LP wallet and LP policy | Add reserves, burn shares for cash, complete final exit | Treat inventory ask value as withdrawable cash |
-| DEX Team creator | Configured `factory_state` admin wallet | Review and co-sign an FT bootstrap acceptance | Substitute the FT provider or liquidity provider role |
+| DEX Team creator | Configured `factory_state` admin wallet | Review a funded FT escrow and sign the separate pool-creation transaction | Substitute the FT provider or liquidity provider role |
 | Batcher | Authorized batcher wallet | Post buy/sell ratios and acquire Instant Sell listings | Bypass posted prices or the reserve floor; review quantity and inventory exposure manually |
 | Buyer | Buyer wallet | Buy direct or pool-owned inventory | Sign a transaction built from stale UTxOs |
 

@@ -7,13 +7,13 @@ Target: <https://preprod.d1g3uigoyq3hsb.amplifyapp.com>. This document was writt
 ## Safety and test data
 
 - Use disposable test ADA and test assets only. Every wallet signature can incur fees or move assets. Never enter or share a seed phrase, private key, or wallet recovery words in the app, a ticket, or this results sheet.
-- Use separate browser profiles or devices for each participant in the three-party flow. Record public wallet addresses and transaction hashes only. Treat unsigned transaction CBOR and approval witnesses as sensitive handoff material; transfer them privately, and do not attach them to public issues.
+- Use separate browser profiles or devices for each participant in the three-stage flow. Record public wallet addresses and transaction hashes only. Each participant reads the next escrow state from chain; no CBOR or witness transfer is needed.
 - Check the wallet network and the full account address before **every** signature. Reject a wallet prompt if its inputs, outputs, amount, or recipient differ from the on-screen review. Never repeatedly submit after a timeout: first check the transaction hash in a Preprod explorer and refresh the app state.
 - Use synthetic metadata and documents. Mint uploads are published to IPFS and should be treated as permanent and public. Do not upload real identity or legal records.
 - Do not routinely test registry revocation, emergency recovery, pool destruction, final LP exit, or production-like asset removal. Those need their own approved, destructive-operation runbook.
 - The existing `tUSDC` and `tBTC` are **unpegged demo tokens**, not real or redeemable USDC/BTC. Amounts are integer base units unless the UI explicitly says otherwise. For ADA fields, confirm whether the form asks for ADA or lovelace (`1 ADA = 1,000,000 lovelace`).
 
-Prepare and label these wallets. A person may hold more than one role, but the FT provider, LP provider, and Team creator must use **distinct wallet addresses** for a three-party bootstrap.
+Prepare and label these wallets. For a split offer, FT provider, LP provider, and Team creator use distinct payment keys. For a 100% owner offer, the FT provider also funds the quote side from the same address; the Team key remains distinct.
 
 | Label | Required capability | Used for |
 | --- | --- | --- |
@@ -108,18 +108,20 @@ Use an existing reviewed pool, preferably the documented tADA/tUSDC or tADA/tBTC
 
 ## Phase 6 — three-wallet pool bootstrap
 
-This is a separate end-to-end test, not required to validate an existing pool. It creates a new pool and spends test assets. Obtain a fresh, unique FT/quote pair and an agreed budget. Never reuse an existing pair merely to make this test pass. The FT provider F, liquidity provider L, and Team creator T must be three distinct wallet addresses. Keep L's browser tab open throughout the approval handoff; the in-progress handoff is page-local and may be lost on reload.
+This is a separate end-to-end test, not required to validate an existing pool. It creates a new pool and spends test assets. Obtain a fresh, unique FT/quote pair and an agreed budget. Never reuse an existing pair merely to make this test pass. For the split-offer case below, FT provider F, liquidity provider L, and Team creator T use distinct payment keys. Each stage reads the confirmed escrow from chain.
 
 | ID | Browser actions | Expected result |
 | --- | --- | --- |
-| B01 | In F's profile open `/dex/launch`. Check FT unit, FT amount in base units, quote asset, final reserve, ADA buffer, LP share, participant addresses, and balance. Try F=L or F=T and invalid/underfunded values without signing. | Three-party roles and economics are explicit; same-address or invalid configurations are rejected. Do not confuse whole ADA shown in this form with lovelace on other forms. |
+| B01 | In F's profile open `/dex/launch`. Check FT unit, FT amount in base units, quote asset, final reserve, live starting price, ADA buffer, LP share, participant addresses, and balance. Try F=T and invalid/underfunded values without signing. | Split-offer roles and economics are explicit; the Team key and invalid configurations are rejected. Do not confuse whole ADA shown in this form with lovelace on other forms. |
 | B02 · write | F clicks **Create bootstrap offer**, checks the escrow transaction in Eternl, signs, and waits for confirmation. Record the offer reference and hash. | FT offer appears in the available offers with exact pair, quantity, owner, and terms. FT/ADA escrow and fees reconcile. |
-| B03 | Optional cancellation drill: create a *separate* disposable offer and have F use **Cancel offer** before L funds it. Do not cancel the offer used below. | Confirmed cancellation returns escrow subject to fees, and the offer cannot be funded. |
-| B04 | In L's separate profile select F's confirmed offer and review the quote-side funding and resulting LP allocation. Click **Fund & request Team approval**. | L receives an **Approval transaction CBOR** for this exact offer. The transaction has not yet been submitted; no pool should appear merely because CBOR was generated. |
-| B05 | Transfer that CBOR privately to T. In T's profile paste it into **LP approval transaction CBOR**, click **Review bootstrap request**, and compare full addresses, pair, reserves, LP split, inputs/outputs, fee, and Team input/collateral expectations with the agreed plan. | Review clearly identifies all three participants and rejects altered or wrong-pair CBOR. If anything differs, reject and stop; do not sign. |
-| B06 | T checks the review acknowledgement and clicks **Create Team approval witness**. Transfer **Generated Team approval witness** privately to L. | Only configured Team creator can produce a valid approval witness. This is an authorization artifact, not a submitted transaction. |
-| B07 · write | L pastes the Team witness, clicks **Submit Team-approved pool**, checks the final wallet prompt, and signs once. Wait for chain confirmation. | Pool appears for the exact FT/quote pair in `/dex/liquidity` and `/dex`; F/L LP ownership and reserves match the agreed split. Record transaction hash, balances, and pool address. |
+| B03 | Optional cancellation drill: create a *separate* disposable offer and have F use **Cancel open offer** before L funds it. Do not cancel the offer used below. | Confirmed cancellation returns escrow subject to fees, and the offer cannot be funded. |
+| B04 · write | In L's separate profile select F's confirmed open offer, review the quote deposit and LP allocation, and click **Deposit quote into escrow**. Confirm the wallet transaction. | A funded escrow appears on-chain with the exact FT and quote reserves and L's address. No pool exists yet. F's cancellation action is unavailable. |
+| B05 | In F's profile inspect the funded escrow and try to cancel only in a disposable negative test. | The UI shows no cancel action for funded escrows; the validator rejects a forged owner cancellation. |
+| B06 · write | In T's profile open `/dex/launch`, review the funded escrow's participants, assets, reserves and LP split, then click **Create pool** and sign. | Only the configured Team creator can spend the funded escrow and factory state. No LP witness or CBOR exchange is needed. |
+| B07 | Wait for confirmation, then inspect the pool in `/dex/liquidity` and `/dex`. | Pool appears for the exact FT/quote pair; F/L LP ownership and reserves match the agreed split. Record transaction hash, balances, and pool address. |
 | B08 | As an ordinary wallet, refresh both DEX pages and quote a tiny swap without signing. | Pool is publicly discoverable and quoteable. If explorer confirms pool creation but the UI does not show it, report an indexing/display failure rather than retrying pool creation. |
+
+For a second fresh FT/quote pair, repeat B01–B08 with **100% FT owner LP share**. F must see **Fund your offer** after offer confirmation and sign the quote deposit from the same address. L must be unable to fund it. After T creates the pool, F must hold the entire minted LP supply and L none.
 
 ## Phase 7 — failures, persistence, and account safety
 

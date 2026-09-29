@@ -444,10 +444,10 @@ Publishing listings in a format that existing storefronts index means platform a
 
 **Gated on D3.** The design below describes the proposed order-then-batch
 architecture, not the current interim implementation targeting Preprod. That path
-is a direct shared-address AMM with a three-party bootstrap offer: the FT provider
-locks the FT and terms, a distinct LP provides tADA or USDCx, and the configured
-factory Team creator co-signs before the transaction atomically creates the pool
-and splits initial LP tokens. It is documented in the
+is a direct shared-address AMM with a three-stage bootstrap: the FT provider
+locks the FT and terms, then the owner (for 100% LP tokens) or a distinct LP
+deposits tADA or USDCx into a successor escrow. The configured factory Team
+creator later signs pool creation and distributes initial LP tokens. It is documented in the
 [DEX architecture](../contracts/dex/docs/ARCHITECTURE.md).
 
 The order-then-batch design remains recommended for a production volume target.

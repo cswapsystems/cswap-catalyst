@@ -452,6 +452,10 @@ footer b, footer a:hover { color: var(--moss); }
 .dex-quote-choice legend { padding: 0 10px 0 0; color: var(--moss); font-family: var(--font-display); font-size: 12px; font-weight: 600; }
 .dex-quote-choice .segmented-control { width: fit-content; margin-top: 18px; }
 .dex-quote-choice .dex-form-grid { margin-top: 18px; }
+.dex-starting-price { margin-top: 18px; padding: 16px 18px; border: 1px solid var(--line); border-radius: 8px; background: var(--surface-deep); }
+.dex-starting-price span { display: block; color: var(--muted); font-size: 11px; font-weight: 700; text-transform: uppercase; letter-spacing: .4px; }
+.dex-starting-price strong { display: block; margin-top: 6px; color: var(--ink); font-size: clamp(18px, 2vw, 24px); overflow-wrap: anywhere; }
+.dex-starting-price p { margin: 7px 0 0; color: var(--muted); font-size: 12px; line-height: 1.5; }
 .dex-bootstrap-book { margin-top: 30px; padding-top: 26px; border-top: 1px solid var(--line); }
 .dex-bootstrap-offer { display: grid; grid-template-columns: minmax(210px, 1.35fr) minmax(240px, 1fr) auto; gap: 18px; align-items: center; margin-top: 14px; padding: 18px; border: 1px solid var(--line); border-radius: 9px; background: var(--surface-deep); }
 .dex-bootstrap-offer strong, .dex-bootstrap-offer code { display: block; }
@@ -460,19 +464,8 @@ footer b, footer a:hover { color: var(--moss); }
 .dex-bootstrap-offer dl { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 12px; margin: 0; }
 .dex-bootstrap-offer dt { color: var(--muted); font-size: 9px; font-weight: 700; letter-spacing: .4px; text-transform: uppercase; }
 .dex-bootstrap-offer dd { margin: 5px 0 0; color: var(--ink); font-size: 12px; font-weight: 700; overflow-wrap: anywhere; }
-.dex-bootstrap-offer-actions { display: flex; justify-content: end; }
+.dex-bootstrap-offer-actions { display: flex; justify-content: end; gap: 8px; flex-wrap: wrap; }
 .dex-bootstrap-offer-actions button { white-space: nowrap; }
-.dex-bootstrap-handoff { margin-top: 18px; padding: 20px; border: 1px solid #075415; border-radius: 10px; background: rgba(0, 71, 12, .1); }
-.dex-bootstrap-handoff h3 { margin-top: 5px; font-size: 19px; }
-.dex-bootstrap-handoff > p { max-width: 850px; margin: 10px 0 0; color: var(--muted); font-size: 12px; line-height: 1.55; }
-.dex-bootstrap-handoff label { display: grid; gap: 7px; margin-top: 17px; color: var(--moss); font-size: 11px; font-weight: 700; }
-.dex-bootstrap-handoff textarea { width: 100%; min-height: 112px; padding: 11px; color: var(--ink); border: 1px solid var(--line); border-radius: 7px; background: #0f0f0f; font: 11px/1.45 var(--font-mono); overflow-wrap: anywhere; resize: vertical; }
-.dex-bootstrap-handoff textarea:focus { outline: 1px solid var(--lime); border-color: var(--lime); }
-.dex-bootstrap-handoff-actions { display: flex; align-items: center; flex-wrap: wrap; gap: 12px; margin-top: 16px; }
-.dex-bootstrap-handoff-actions > span { color: var(--muted); font-size: 11px; overflow-wrap: anywhere; }
-.dex-bootstrap-handoff-actions code { color: var(--ink); }
-.dex-bootstrap-review { margin-top: 16px; padding: 14px; border: 1px solid var(--line); border-radius: 8px; background: var(--surface-deep); overflow-wrap: anywhere; }.dex-bootstrap-review.ready { border-color: #1f7740; }.dex-bootstrap-review.error { border-color: #8c3434; }.dex-bootstrap-review strong, .dex-bootstrap-review p { display: block; }.dex-bootstrap-review p { margin-top: 6px; color: var(--muted); font-size: 13px; }.dex-bootstrap-review label { display: flex; align-items: flex-start; gap: 9px; margin-top: 12px; color: var(--ink); font-size: 13px; line-height: 1.45; }.dex-bootstrap-review input { flex: 0 0 auto; margin-top: 3px; accent-color: var(--lime); }.dex-bootstrap-review ul { margin: 8px 0 0; padding-left: 18px; color: #f5b3b3; font-size: 13px; }
-.dex-bootstrap-review dt { margin-top: 10px; color: var(--muted); font-size: 12px; }.dex-bootstrap-review dd { margin: 4px 0 0; font-size: 13px; }
 
 /* Shared-pool team console ------------------------------------------------ */
 .team-console { display: grid; gap: 16px; margin-bottom: 48px; }

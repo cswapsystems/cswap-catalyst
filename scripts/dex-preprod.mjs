@@ -100,6 +100,26 @@ async function deploymentContext() {
   const factoryToken = asset(deployment.factoryToken.slice(0, 56), deployment.factoryToken.slice(56));
   return { ...base, deployment, factoryToken, derived: scripts(base.code, base.admin, factoryToken) };
 }
+async function verifyDeployment() {
+  const ctx = await deploymentContext();
+  const { deployment, derived, lucid, admin } = ctx;
+  if (deployment.network !== "preprod" || deployment.admin !== admin || deployment.bootstrapOfferAddress !== derived.bootstrapOfferAddress || deployment.factoryAddress !== derived.factoryAddress || deployment.ammAddress !== derived.ammAddress || deployment.lpPolicyId !== derived.lpPolicyId || deployment.poolPolicyId !== derived.poolPolicyId) throw new Error("Deployment manifest does not match the compiled validators and configured Team key.");
+  const state = await lucid.utxoByUnit(deployment.factoryToken);
+  if (state.address !== deployment.factoryAddress || state.assets[deployment.factoryToken] !== 1n || !state.datum) throw new Error("Factory NFT is missing or at the wrong address.");
+  const datum = Data.from(state.datum);
+  if (!(datum instanceof Constr) || datum.index !== 0 || datum.fields.length !== 5 || unit({ policyId: datum.fields[0].fields[0], assetName: datum.fields[0].fields[1] }) !== deployment.factoryToken || datum.fields[1] !== admin || datum.fields[2] !== deployment.poolPolicyId || !(datum.fields[4] instanceof Constr) || datum.fields[4].index !== 0) throw new Error("Factory datum does not match the deployment manifest or is paused.");
+  console.log(JSON.stringify({ verified: true, transaction: deployment.transaction, factoryOutput: `${state.txHash}#${state.outputIndex}`, factoryAddress: deployment.factoryAddress, bootstrapOfferAddress: deployment.bootstrapOfferAddress, ammAddress: deployment.ammAddress, nextPoolId: datum.fields[3].toString() }, null, 2));
+}
+async function inspectCurrentDeployment() {
+  const { lucid } = await context();
+  const deployment = JSON.parse(await readFile(DEPLOYMENT_FILE, "utf8"));
+  const [factory, offers, pools] = await Promise.all([
+    lucid.utxoByUnit(deployment.factoryToken),
+    lucid.utxosAt(deployment.bootstrapOfferAddress),
+    lucid.utxosAt(deployment.ammAddress),
+  ]);
+  console.log(JSON.stringify({ transaction: deployment.transaction, factoryOutput: `${factory.txHash}#${factory.outputIndex}`, offers: offers.map((utxo) => `${utxo.txHash}#${utxo.outputIndex}`), pools: pools.map((utxo) => `${utxo.txHash}#${utxo.outputIndex}`) }, null, 2));
+}
 async function awaitTransaction(hash) {
   if (!hash) throw new Error("A transaction hash is required.");
   const { lucid } = await context();
@@ -189,4 +209,4 @@ async function closePool(fractionUnit) {
   await submit(ctx, builder, "close-pool");
 }
 const command = process.argv[2] ?? "status";
-if (command === "deploy") await deploy(); else if (command === "redeploy") await deploy(true); else if (command === "confirm-deployment") await confirmDeployment(); else if (command === "await") await awaitTransaction(process.argv[3]); else if (command === "collateral") await createCollateral(); else if (command === "status") await status(); else if (command === "pool") await inspectPool(process.argv[3]); else if (command === "create") await createPool(process.argv[3], process.argv[4], process.argv[5]); else if (["add", "swap", "swap-b", "remove"].includes(command)) await transition(command, process.argv[3], process.argv[4]); else if (command === "close") await closePool(process.argv[3]); else throw new Error("Usage: npm run dex:preprod -- status|pool|deploy|redeploy|confirm-deployment|await|collateral|create|add|swap|swap-b|remove|close");
+if (command === "deploy") await deploy(); else if (command === "redeploy") await deploy(true); else if (command === "confirm-deployment") await confirmDeployment(); else if (command === "verify-deployment") await verifyDeployment(); else if (command === "inspect-current") await inspectCurrentDeployment(); else if (command === "await") await awaitTransaction(process.argv[3]); else if (command === "collateral") await createCollateral(); else if (command === "status") await status(); else if (command === "pool") await inspectPool(process.argv[3]); else if (command === "create") await createPool(process.argv[3], process.argv[4], process.argv[5]); else if (["add", "swap", "swap-b", "remove"].includes(command)) await transition(command, process.argv[3], process.argv[4]); else if (command === "close") await closePool(process.argv[3]); else throw new Error("Usage: npm run dex:preprod -- status|pool|deploy|redeploy|confirm-deployment|verify-deployment|inspect-current|await|collateral|create|add|swap|swap-b|remove|close");

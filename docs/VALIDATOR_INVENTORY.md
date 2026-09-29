@@ -23,7 +23,7 @@ The [2026-09-25 deployment record](PREPROD_REDEPLOYMENT_2026-09-25.md) records t
 | Marketplace | `contracts/marketplace/validators/marketplace_listing_escrow.ak` | Registry-free listing escrow for direct, Instant Sell, and pool-owned inventory modes | Used by Marketplace listing and settlement flows. |
 | FT DEX | `contracts/dex/validators/factory_bootstrap.ak` | One-shot factory-state NFT policy | Used once per DEX deployment. |
 | FT DEX | `contracts/dex/validators/factory_state.ak` | Factory sequence, pause state, Team admin, and pool-creation authority | Confirmed fresh Preprod deployment supports three-party bootstrap. |
-| FT DEX | `contracts/dex/validators/bootstrap_offer.ak` | FT-provider offer escrow and three-party acceptance checks | Current deployment includes hardened owner cancellation; older offers keep their old rules. |
+| FT DEX | `contracts/dex/validators/bootstrap_offer.ak` | FT-only offer, owner-funded or LP-funded escrow, and Team-only finalization | Current Preprod factory is `345f7feb…e395`; owner self-funding and split funding need real-wallet acceptance. |
 | FT DEX | `contracts/dex/validators/amm_pool.ak` | Shared constant-product AMM pool address | Active pools retain their existing deployment validation rules. |
 | FT DEX | `contracts/dex/validators/lp_policy.ak` | Per-pool LP token policy | Used by DEX pools. |
 | FT DEX | `contracts/dex/validators/pool_factory.ak` | Deterministic DEX pool-NFT policy | Used by DEX pool creation/closure. |

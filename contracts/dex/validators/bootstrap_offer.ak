@@ -8,41 +8,57 @@ use cardano/transaction.{
 }
 use ebecca/amm_helpers.{ada, has_one, total_paid}
 use ebecca/dex_types.{
-  AcceptBootstrap, AssetId, BootstrapOfferAction, BootstrapOfferDatum,
-  CancelBootstrap, FactoryDatum, PoolDatum,
+  AssetId, BootstrapEscrowDatum, BootstrapOfferAction, BootstrapOfferDatum,
+  CancelBootstrap, FactoryDatum, FinalizeBootstrap, FundBootstrap,
+  FundedBootstrap, OpenBootstrap, PoolDatum,
 }
 
-/// Escrows the FT side of a Team-approved, three-party pool bootstrap.
+/// Escrows an FT offer, then both pool reserves, before Team pool creation.
 ///
-/// The FT owner first locks the asset and terms. A distinct liquidity provider
-/// then funds and signs the quote side. The factory Team creator must also
-/// sign before the same transaction can create the pool. The factory,
-/// pool-NFT policy and LP policy authenticate pool creation; this validator
-/// additionally binds the escrowed FT, quoted reserve, and LP allocation.
+/// The LP funding transaction replaces the open offer with a funded UTxO.
+/// The owner can cancel only the open offer. The Team alone signs the later
+/// pool-creation transaction; the LP's on-chain deposit is its approval.
 validator bootstrap_offer {
   spend(
-    datum_opt: Option<BootstrapOfferDatum>,
+    datum_opt: Option<BootstrapEscrowDatum>,
     action: BootstrapOfferAction,
     own_ref: OutputReference,
     tx: Transaction,
   ) {
-    expect Some(offer) = datum_opt
+    expect Some(datum) = datum_opt
     expect Some(own_input) =
       list.find(
         tx.inputs,
         fn(input: Input) { input.output_reference == own_ref },
       )
 
-    when action is {
-      CancelBootstrap -> valid_cancel(offer, own_ref, own_input, tx)
-      AcceptBootstrap { liquidity_provider, liquidity_provider_key } ->
-        valid_accept(
-          offer,
-          own_input.output.value,
-          liquidity_provider,
-          liquidity_provider_key,
-          tx,
-        )
+    when datum is {
+      OpenBootstrap { offer } ->
+        when action is {
+          CancelBootstrap -> valid_cancel(offer, own_ref, own_input, tx)
+          FundBootstrap { liquidity_provider, liquidity_provider_key } ->
+            valid_fund(
+              offer,
+              own_input.output,
+              liquidity_provider,
+              liquidity_provider_key,
+              tx,
+            )
+          FinalizeBootstrap -> False
+        }
+      FundedBootstrap { offer, liquidity_provider, liquidity_provider_key } ->
+        when action is {
+          FinalizeBootstrap ->
+            valid_finalize(
+              offer,
+              own_input.output.address,
+              own_input.output.value,
+              liquidity_provider,
+              liquidity_provider_key,
+              tx,
+            )
+          _ -> False
+        }
     }
   }
 
@@ -97,11 +113,15 @@ fn owner_escrow_value(
       } else {
         when input.output.datum is {
           InlineDatum(raw) ->
-            if raw is other: BootstrapOfferDatum {
-              if other.owner == owner {
-                assets.merge(total, input.output.value)
-              } else {
-                total
+            if raw is other: BootstrapEscrowDatum {
+              when other is {
+                OpenBootstrap { offer } ->
+                  if offer.owner == owner {
+                    assets.merge(total, input.output.value)
+                  } else {
+                    total
+                  }
+                _ -> total
               }
             } else {
               total
@@ -150,6 +170,24 @@ fn expected_offer_value(offer: BootstrapOfferDatum) -> assets.Value {
       )
 }
 
+fn expected_funded_value(offer: BootstrapOfferDatum) -> assets.Value {
+  if offer.quote_asset == ada {
+    assets.from_lovelace(offer.quote_amount)
+      |> assets.add(
+          offer.fraction_asset.policy_id,
+          offer.fraction_asset.asset_name,
+          offer.fraction_amount,
+        )
+  } else {
+    expected_offer_value(offer)
+      |> assets.add(
+          offer.quote_asset.policy_id,
+          offer.quote_asset.asset_name,
+          offer.quote_amount,
+        )
+  }
+}
+
 fn valid_offer(offer: BootstrapOfferDatum, value: assets.Value) -> Bool {
   and {
     offer.owner_key != "",
@@ -161,7 +199,7 @@ fn valid_offer(offer: BootstrapOfferDatum, value: assets.Value) -> Bool {
     offer.quote_amount > 0,
     has_minimum_pool_buffer(offer.pool_lovelace),
     offer.owner_share_bps > 0,
-    offer.owner_share_bps < 10_000,
+    offer.owner_share_bps <= 10_000,
     if offer.quote_asset == ada {
       offer.pool_lovelace <= offer.quote_amount
     } else {
@@ -171,8 +209,49 @@ fn valid_offer(offer: BootstrapOfferDatum, value: assets.Value) -> Bool {
   }
 }
 
-fn valid_accept(
+fn valid_fund(
   offer: BootstrapOfferDatum,
+  own_output: Output,
+  liquidity_provider: address.Address,
+  liquidity_provider_key: VerificationKeyHash,
+  tx: Transaction,
+) -> Bool {
+  expect [factory_ref] =
+    list.filter(
+      tx.reference_inputs,
+      fn(input: Input) { has_one(input.output.value, offer.factory_token) },
+    )
+  expect InlineDatum(raw_factory) = factory_ref.output.datum
+  expect factory: FactoryDatum = raw_factory
+  expect [continuing] =
+    list.filter(
+      tx.outputs,
+      fn(output) { output.address == own_output.address },
+    )
+  expect InlineDatum(raw_funded) = continuing.datum
+  expect funded: BootstrapEscrowDatum = raw_funded
+  and {
+    valid_offer(offer, own_output.value),
+    list.length(list.filter(tx.inputs, fn(input) { input.output.address == own_output.address })) == 1,
+    !factory.paused,
+    factory.factory_token == offer.factory_token,
+    factory.admin != offer.owner_key,
+    factory.admin != liquidity_provider_key,
+    owner_matches_key(liquidity_provider, liquidity_provider_key),
+    valid_provider(offer, liquidity_provider, liquidity_provider_key),
+    list.has(tx.extra_signatories, liquidity_provider_key),
+    funded == FundedBootstrap {
+      offer,
+      liquidity_provider,
+      liquidity_provider_key,
+    },
+    continuing.value == expected_funded_value(offer),
+  }
+}
+
+fn valid_finalize(
+  offer: BootstrapOfferDatum,
+  escrow_address: address.Address,
   offer_value: assets.Value,
   liquidity_provider: address.Address,
   liquidity_provider_key: VerificationKeyHash,
@@ -198,14 +277,14 @@ fn valid_accept(
   let provider_lp = pool.total_liquidity - owner_lp
 
   and {
-    valid_offer(offer, offer_value),
-    liquidity_provider != offer.owner,
+    valid_offer(offer, expected_offer_value(offer)),
+    list.length(list.filter(tx.inputs, fn(input) { input.output.address == escrow_address })) == 1,
+    offer_value == expected_funded_value(offer),
     owner_matches_key(liquidity_provider, liquidity_provider_key),
-    liquidity_provider_key != offer.owner_key,
+    valid_provider(offer, liquidity_provider, liquidity_provider_key),
     factory.factory_token == offer.factory_token,
     factory.admin != offer.owner_key,
     factory.admin != liquidity_provider_key,
-    list.has(tx.extra_signatories, liquidity_provider_key),
     list.has(tx.extra_signatories, factory.admin),
     pool.pool_nft == pool_nft,
     pool.asset_a == offer.quote_asset,
@@ -218,7 +297,7 @@ fn valid_accept(
       pool.pool_lovelace == offer.pool_lovelace
     },
     owner_lp > 0,
-    provider_lp > 0,
+    if offer.owner_share_bps == 10_000 { provider_lp == 0 } else { provider_lp > 0 },
     total_paid(tx.outputs, offer.owner, pool.lp_token) >= owner_lp,
     total_paid(tx.outputs, liquidity_provider, pool.lp_token) >= provider_lp,
   }
@@ -320,7 +399,32 @@ fn escrow_output(offer: BootstrapOfferDatum, value: assets.Value) -> Output {
   Output {
     address: address.from_script(test_offer_script),
     value,
-    datum: InlineDatum(offer),
+    datum: InlineDatum(OpenBootstrap { offer }),
+    reference_script: None,
+  }
+}
+
+fn valid_provider(
+  offer: BootstrapOfferDatum,
+  liquidity_provider: address.Address,
+  liquidity_provider_key: VerificationKeyHash,
+) -> Bool {
+  if offer.owner_share_bps == 10_000 {
+    liquidity_provider == offer.owner && liquidity_provider_key == offer.owner_key
+  } else {
+    liquidity_provider != offer.owner && liquidity_provider_key != offer.owner_key
+  }
+}
+
+fn funded_output(offer: BootstrapOfferDatum, value: assets.Value) -> Output {
+  Output {
+    address: address.from_script(test_offer_script),
+    value,
+    datum: InlineDatum(FundedBootstrap {
+      offer,
+      liquidity_provider: test_provider(),
+      liquidity_provider_key: provider_vk,
+    }),
     reference_script: None,
   }
 }
@@ -362,7 +466,7 @@ fn run_cancel(
   signers: List<VerificationKeyHash>,
 ) -> Bool {
   bootstrap_offer.spend(
-    Some(offer),
+    Some(OpenBootstrap { offer }),
     CancelBootstrap,
     test_offer_ref,
     cancel_tx(escrow_output(offer, value), outputs, signers),
@@ -394,7 +498,7 @@ test cancel_with_extra_asset() {
 }
 
 test cancel_with_invalid_share_terms() {
-  let offer = BootstrapOfferDatum { ..test_offer(), owner_share_bps: 10_000 }
+  let offer = BootstrapOfferDatum { ..test_offer(), owner_share_bps: 10_001 }
   run_cancel(offer, r04_value(), refund_all(r04_value()), [owner_vk])
 }
 
@@ -519,13 +623,13 @@ test cancel_rejects_double_satisfaction_across_owner_escrows() {
     }
   and {
     !bootstrap_offer.spend(
-      Some(test_offer()),
+      Some(OpenBootstrap { offer: test_offer() }),
       CancelBootstrap,
       test_offer_ref,
       tx,
     ),
     bootstrap_offer.spend(
-      Some(test_offer()),
+      Some(OpenBootstrap { offer: test_offer() }),
       CancelBootstrap,
       test_offer_ref,
       both_refunded,
@@ -576,7 +680,7 @@ fn accept_tx(offer_value: assets.Value) -> Transaction {
     inputs: [
       Input {
         output_reference: test_offer_ref,
-        output: escrow_output(test_offer(), offer_value),
+        output: funded_output(test_offer(), offer_value),
       },
       Input {
         output_reference: OutputReference { ..test_offer_ref, output_index: 1 },
@@ -606,30 +710,167 @@ fn accept_tx(offer_value: assets.Value) -> Transaction {
       pay(test_owner(), lp(50_000)),
       pay(test_provider(), lp(50_000)),
     ],
-    extra_signatories: [provider_vk, admin_vk],
+    extra_signatories: [admin_vk],
   }
 }
 
 fn run_accept(offer_value: assets.Value) -> Bool {
   bootstrap_offer.spend(
-    Some(test_offer()),
-    AcceptBootstrap {
+    Some(FundedBootstrap {
+      offer: test_offer(),
       liquidity_provider: test_provider(),
       liquidity_provider_key: provider_vk,
-    },
+    }),
+    FinalizeBootstrap,
     test_offer_ref,
     accept_tx(offer_value),
   )
 }
 
 test accept_valid_offer_still_passes() {
-  run_accept(r04_value())
+  run_accept(expected_funded_value(test_offer()))
 }
 
 test accept_still_rejects_extra_ada() {
-  !run_accept(assets.from_lovelace(5_000_000) |> with_ft(1000))
+  !run_accept(assets.from_lovelace(11_000_000) |> with_ft(1000))
 }
 
 test accept_still_rejects_extra_asset() {
-  !run_accept(r04_value() |> with_extra)
+  !run_accept(expected_funded_value(test_offer()) |> with_extra)
+}
+
+fn funding_tx(continuing: Output, signers: List<VerificationKeyHash>) -> Transaction {
+  let factory =
+    FactoryDatum {
+      factory_token: test_factory_token,
+      admin: admin_vk,
+      pool_nft_policy: test_pool_nft_policy,
+      next_pool_id: 0,
+      paused: False,
+    }
+  Transaction {
+    ..transaction.placeholder,
+    inputs: [Input {
+      output_reference: test_offer_ref,
+      output: escrow_output(test_offer(), r04_value()),
+    }],
+    reference_inputs: [Input {
+      output_reference: OutputReference { ..test_offer_ref, output_index: 2 },
+      output: Output {
+        address: address.from_script(test_factory_script),
+        value: assets.from_lovelace(5_000_000)
+          |> assets.add(test_factory_token.policy_id, test_factory_token.asset_name, 1),
+        datum: InlineDatum(factory),
+        reference_script: None,
+      },
+    }],
+    outputs: [continuing],
+    extra_signatories: signers,
+  }
+}
+
+fn run_fund(continuing: Output, signers: List<VerificationKeyHash>) -> Bool {
+  bootstrap_offer.spend(
+    Some(OpenBootstrap { offer: test_offer() }),
+    FundBootstrap {
+      liquidity_provider: test_provider(),
+      liquidity_provider_key: provider_vk,
+    },
+    test_offer_ref,
+    funding_tx(continuing, signers),
+  )
+}
+
+test lp_funds_on_chain_without_team_signature() {
+  run_fund(
+    funded_output(test_offer(), expected_funded_value(test_offer())),
+    [provider_vk],
+  )
+}
+
+test funding_rejects_missing_quote_or_lp_signature() {
+  and {
+    !run_fund(funded_output(test_offer(), r04_value()), [provider_vk]),
+    !run_fund(
+      funded_output(test_offer(), expected_funded_value(test_offer())),
+      [],
+    ),
+  }
+}
+
+test funding_rejects_two_open_inputs_using_one_funded_output() {
+  let continuing = funded_output(test_offer(), expected_funded_value(test_offer()))
+  let single = funding_tx(continuing, [provider_vk])
+  expect [first] = single.inputs
+  let second = Input {
+    output_reference: OutputReference { ..test_offer_ref, output_index: 3 },
+    output: escrow_output(test_offer(), r04_value()),
+  }
+  let doubled = Transaction { ..single, inputs: [first, second] }
+  !bootstrap_offer.spend(
+    Some(OpenBootstrap { offer: test_offer() }),
+    FundBootstrap {
+      liquidity_provider: test_provider(),
+      liquidity_provider_key: provider_vk,
+    },
+    test_offer_ref,
+    doubled,
+  )
+}
+
+test owner_cannot_cancel_funded_escrow() {
+  let funded = expected_funded_value(test_offer())
+  let tx = cancel_tx(
+    funded_output(test_offer(), funded),
+    refund_all(funded),
+    [owner_vk],
+  )
+  !bootstrap_offer.spend(
+    Some(FundedBootstrap {
+      offer: test_offer(),
+      liquidity_provider: test_provider(),
+      liquidity_provider_key: provider_vk,
+    }),
+    CancelBootstrap,
+    test_offer_ref,
+    tx,
+  )
+}
+
+test team_only_finalizes_funded_escrow() {
+  let funded = expected_funded_value(test_offer())
+  let no_team = Transaction { ..accept_tx(funded), extra_signatories: [] }
+  and {
+    run_accept(funded),
+    !bootstrap_offer.spend(
+      Some(FundedBootstrap {
+        offer: test_offer(),
+        liquidity_provider: test_provider(),
+        liquidity_provider_key: provider_vk,
+      }),
+      FinalizeBootstrap,
+      test_offer_ref,
+      no_team,
+    ),
+  }
+}
+
+test finalization_rejects_two_funded_inputs_using_one_pool() {
+  let funded = expected_funded_value(test_offer())
+  let single = accept_tx(funded)
+  let second = Input {
+    output_reference: OutputReference { ..test_offer_ref, output_index: 3 },
+    output: funded_output(test_offer(), funded),
+  }
+  let doubled = Transaction { ..single, inputs: [second, ..single.inputs] }
+  !bootstrap_offer.spend(
+    Some(FundedBootstrap {
+      offer: test_offer(),
+      liquidity_provider: test_provider(),
+      liquidity_provider_key: provider_vk,
+    }),
+    FinalizeBootstrap,
+    test_offer_ref,
+    doubled,
+  )
 }

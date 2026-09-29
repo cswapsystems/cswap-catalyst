@@ -73,7 +73,7 @@ Inventory return requires the exiting LP, not the batcher. Public inventory sale
 
 `/portfolio/orders` independently scans historical request escrows using the archived exact validator from revision `aadedf5`. It offers owner cancellation only, even when new deployment checks fail. This does not migrate old pool inventory or discover every historical deployment.
 
-After confirmation verify pool identity, all three inventory counters, supply, seller/LP payments, receipt mint/burn and exact asset units. Rebuild if any referenced state changes. The Marketplace transaction hook saves submitted hashes in browser storage by Preprod wallet and restores a pending lock after reload; checking confirmation clears it. This is not a complete durable audit trail or an input-aware retry mechanism. Bootstrap handoffs and receipts remain page-local.
+After confirmation verify pool identity, all three inventory counters, supply, seller/LP payments, receipt mint/burn and exact asset units. Rebuild if any referenced state changes. The Marketplace transaction hook saves submitted hashes in browser storage by Preprod wallet and restores a pending lock after reload; checking confirmation clears it. This is not a complete durable audit trail or an input-aware retry mechanism. The local FT DEX bootstrap blueprint uses separate on-chain owner, LP, and Team transactions, so it has no CBOR or witness handoff once redeployed. Other receipts remain page-local.
 
 Run `npm run test:marketplace` for compiled-validator emulator checks. Real wallet-signed Preprod acceptance and independent review remain necessary before operational use.
 

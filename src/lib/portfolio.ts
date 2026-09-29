@@ -6,7 +6,7 @@ import { reviewedOrderbook, readSharedPool } from "./protocol/shared-pool-client
 import { scanOutputs } from "./safe-scan";
 import { formatAda } from "./ada";
 
-export type Position = { id: string; kind: "Vault" | "Listing" | "Instant Sell" | "Bootstrap" | "DEX liquidity" | "Shared reserves"; unit: string; quantity: bigint; detail: string; deposit?: bigint; href: string; action: string };
+export type Position = { id: string; kind: "Vault" | "Listing" | "Instant Sell" | "Bootstrap" | "Bootstrap funding" | "DEX liquidity" | "Shared reserves"; unit: string; quantity: bigint; detail: string; deposit?: bigint; href: string; action: string };
 export type PositionGroup = { name: string; positions: Position[]; error?: string; warning?: string };
 const reference = (utxo: UTxO) => `${utxo.txHash}#${utxo.outputIndex}`;
 const quoteText = (unit: string, amount: bigint) => unit === "lovelace" ? formatAda(amount) + " ADA" : amount.toString() + " base units of " + unit;
@@ -63,12 +63,25 @@ export async function loadPortfolio(lucid: LucidEvolution, owner: string): Promi
     { name: "Bootstrap commitments", read: async () => {
       const { deployment, canCreatePool } = await dexContext;
       if (!canCreatePool || !deployment.bootstrapOfferAddress) throw new Error("Bootstrap requires the reviewed factory migration; no completeness claim is made for legacy offers.");
-      return scan("Bootstrap commitments", await lucid.utxosAt(deployment.bootstrapOfferAddress), tools, (utxo, fields) => {
-        if (fields.length !== 9 || fields[1] !== key.hash || typeof fields[4] !== "bigint" || typeof fields[6] !== "bigint" || typeof fields[8] !== "bigint" || assetUnit(asAsset(fields[2], "factory")) !== deployment.factoryToken) return null;
+      const result = scanOutputs(await lucid.utxosAt(deployment.bootstrapOfferAddress), (utxo): Position | null => {
+        if (!utxo.datum) return null;
+        const escrow = asConstr(tools.Data.from(utxo.datum), "bootstrap escrow");
+        if (![0, 1].includes(escrow.index) || escrow.fields.length !== (escrow.index === 0 ? 1 : 3)) return null;
+        const fields = asConstr(escrow.fields[0], "bootstrap offer").fields;
+        if (fields.length !== 9 || typeof fields[4] !== "bigint" || typeof fields[6] !== "bigint" || typeof fields[7] !== "bigint" || typeof fields[8] !== "bigint" || assetUnit(asAsset(fields[2], "factory")) !== deployment.factoryToken) return null;
         const unit = assetUnit(asAsset(fields[3], "fraction"));
         if ((utxo.assets[unit] ?? BigInt(0)) < fields[4]) return null;
-        return { id: reference(utxo), kind: "Bootstrap", unit, quantity: fields[4], deposit: utxo.assets.lovelace ?? BigInt(0), detail: `Awaiting LP and Team signatures. Quote reserve: ${quoteText(assetUnit(asAsset(fields[5], "quote")), fields[6])}. Your initial LP share: ${Number(fields[8]) / 100}%. ADA is committed to the pool on acceptance, or refunded on cancellation.`, href: "/dex/launch", action: "Manage offer" };
+        const funded = escrow.index === 1;
+        const owner = fields[1] === key.hash;
+        const provider = funded && escrow.fields[2] === key.hash && !owner;
+        if (!owner && !provider) return null;
+        const quoteUnit = assetUnit(asAsset(fields[5], "quote"));
+        const providerAda = quoteUnit === "lovelace" ? fields[6] - fields[7] : BigInt(0);
+        if (providerAda < BigInt(0)) return null;
+        return { id: reference(utxo), kind: provider ? "Bootstrap funding" : "Bootstrap", unit, quantity: fields[4], deposit: owner ? funded && quoteUnit === "lovelace" ? fields[6] : fields[7] : providerAda, detail: provider ? `Your ${quoteText(quoteUnit, quoteUnit === "lovelace" ? providerAda : fields[6])} quote deposit is locked with these FT units until Team pool creation. Your LP allocation is ${100 - Number(fields[8]) / 100}%.` : `${funded ? "Funded escrow awaiting Team pool creation" : fields[8] === BigInt(10_000) ? "Open offer awaiting your quote deposit" : "Open offer awaiting an LP"}. Quote reserve: ${quoteText(quoteUnit, fields[6])}. Your initial LP share: ${Number(fields[8]) / 100}%. ${funded ? "You cannot cancel after funding." : "You can cancel before funding."}`, href: "/dex/launch", action: funded ? "View funded escrow" : "Manage offer" };
       });
+      if (result.skipped) warnings["Bootstrap commitments"] = `${result.skipped} unreadable outputs skipped.`;
+      return result.items;
     } },
     { name: "DEX liquidity", read: async () => {
       const { deployment } = await dexContext;

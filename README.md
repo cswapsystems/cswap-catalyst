@@ -8,7 +8,7 @@ Primary navigation is **Marketplace**, **Swap**, **Portfolio**, and **Create**, 
 
 - **Marketplace** (`/marketplace`) supports direct fixed-price listings and seller-only Instant Sell requests. Direct sellers set their own price. Instant Sell sellers set a minimum payout and wait for the shared-pool batcher to settle the request.
 - **Shared-pool operations** (`/team`) gives the team a live view of settlement cash, protected reserve, open inventory value, LP supply, instant-sell pricing, registry approvals, and liquidity controls.
-- **Fraction DEX** (`/dex`) runs a shared-address constant-product AMM. It supports normal admin-created tADA pools and a three-party bootstrap: an FT provider locks the FT side, a separate LP supplies tADA or USDCx, and the configured Team creator co-signs before the pool is created atomically and LP shares are split.
+- **Fraction DEX** (`/dex`) runs a shared-address constant-product AMM. It supports normal admin-created tADA pools and a three-stage bootstrap: an FT provider locks the FT side, the owner or a separate LP deposits tADA or USDCx into the successor escrow, and the configured Team creator later signs pool creation. A self-funded offer gives the FT owner all LP tokens.
 - **Asset registry** records separate exact-asset approvals. Owners create, view and cancel pending requests in Portfolio (`/portfolio/asset-requests`); the issuer reviews them at operator-gated `/registry`. Shared-pool acquisitions use on-chain price entries, not registry membership or an off-chain quantity/activity service.
 
 Marketplace and DEX were freshly redeployed on Preprod with the security fixes on 2026-09-25. The manifests record the hardened validators; Marketplace includes all four reference scripts and a burn-capable identity with its public minting-seed reference. Signing still fails closed if configured identities do not match the blueprint. See the [deployment record](docs/PREPROD_REDEPLOYMENT_2026-09-25.md) and [Shared-pool operations](docs/SHARED_POOL_OPERATIONS.md). Old deployments and their funds were not migrated or made safe by redeployment.
@@ -67,7 +67,7 @@ For a verification build alongside an active dev server, set `CSWAP_NEXT_DIST_DI
 
 ## Deployment boundary
 
-A DEX deployment record binds its factory address to the compiled validator parameters. The current Preprod factory already supports three-party bootstrap. Legacy factories cannot be upgraded in place. For a future intentional replacement, review the blueprint and deployment record and obtain approval to spend test ADA before running:
+A DEX deployment record binds its factory address to the compiled validator parameters. The current Preprod factory uses the earlier single-settlement bootstrap; the local three-stage blueprint requires a new deployment before its signing UI is available. Legacy factories cannot be upgraded in place. For an intentional replacement, review the blueprint and deployment record and obtain approval to spend test ADA before running:
 
 ```sh
 npm run dex:preprod -- redeploy
