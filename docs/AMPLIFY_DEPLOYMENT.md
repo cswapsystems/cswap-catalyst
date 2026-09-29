@@ -10,13 +10,21 @@ The repository pins Next.js 15.5.25. `next.config.ts` enables asynchronous WebAs
 
 ## Runtime configuration
 
-For Preprod, configure `NEXT_PUBLIC_CARDANO_NETWORK=preprod` and the appropriate server-side `BLOCKFROST_PROJECT_ID` / `BLOCKFROST_IPFS_PROJECT_ID` values.
+The canonical [environment-variable reference](ENVIRONMENT_VARIABLES.md) lists
+the hosted values, their visibility, and secret-handling rules. For Preprod,
+configure `NEXT_PUBLIC_CARDANO_NETWORK=preprod` and the appropriate server-side
+`BLOCKFROST_PROJECT_ID` / `BLOCKFROST_IPFS_PROJECT_ID` values.
 
 Marketplace Instant Sell prices are stored in the on-chain shared pool. The separate S3 operator price book has been removed; no `PRICE_BOOK_BUCKET` or `PRICE_BOOK_KEY` is needed.
 
-The buildspec copies only `BLOCKFROST_PROJECT_ID`, `BLOCKFROST_IPFS_PROJECT_ID`, `NEXT_PUBLIC_CARDANO_NETWORK` and `NEXT_PUBLIC_OFFCHAIN_API_URL` into `.env.production` for SSR. Never upload `CARDANO_WALLET_SEED`, signing keys or deployment journals. Browser wallets sign application transactions; deployment credentials stay local.
+The buildspec copies only the application variables listed in the canonical
+reference into `.env.production` for SSR. Never upload `CARDANO_WALLET_SEED`,
+signing keys or deployment journals. Browser wallets sign application
+transactions; deployment credentials stay local.
 
-Indexer deployment is explicitly deferred. Do not configure or replace `NEXT_PUBLIC_OFFCHAIN_API_URL` using historical API URLs; follow [the deferred indexer runbook](OFFCHAIN_DEPLOYMENT.md) when that work resumes.
+Indexer deployment is explicitly deferred. The frontend does not currently
+consume its API, so do not configure historical API URLs; follow
+[the deferred indexer runbook](OFFCHAIN_DEPLOYMENT.md) when that work resumes.
 
 ## Publication and test gate
 

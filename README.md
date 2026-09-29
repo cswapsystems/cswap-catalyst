@@ -17,6 +17,7 @@ Marketplace and DEX were freshly redeployed on Preprod with the security fixes o
 
 ## Documentation
 
+- [Environment variables](docs/ENVIRONMENT_VARIABLES.md) — canonical local, hosting, deployment-script, and test configuration reference.
 - [Production architecture](docs/PRODUCTION_ARCHITECTURE.md) — product boundaries, trust roles, and deployment records.
 - [Future multi-quote shared pools](docs/PRODUCTION_ARCHITECTURE.md#future-multiple-shared-pool-quote-assets) — deferred plan; the Preprod Marketplace reserve remains tADA-only.
 - [Contract guide](docs/CONTRACTS_GUIDE.md) — validator-level state transitions and transaction-reading checklist.
@@ -40,7 +41,7 @@ npm install
 npm run dev
 ```
 
-Open http://localhost:3000. Configure a supported Cardano network and Blockfrost access in `.env.local`; never put a wallet seed or batcher key in a `NEXT_PUBLIC_` variable.
+Open http://localhost:3000. Configure a supported Cardano network and Blockfrost access in `.env.local`; see the [environment-variable reference](docs/ENVIRONMENT_VARIABLES.md). Never put a wallet seed or batcher key in a `NEXT_PUBLIC_` variable.
 
 Portfolio (`/my-assets`) is the entry point for selling/listing wallet assets; `/portfolio/orders` manages owned listings and `/portfolio/asset-requests` manages asset support requests. Marketplace is for buying. `/protocol` exposes public statistics; `/team/inventory` manages on-chain Instant Sell prices and inventory. The Operator Console, `/registry`, and all `/team/...` routes require an eligible connected operator/Team wallet. See [UI modules](docs/UI_MODULES.md).
 

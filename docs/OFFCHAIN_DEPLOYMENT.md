@@ -29,7 +29,9 @@ After explicit approval to resume:
 3. Review the complete watched-address file against both manifests. Decide how superseded-address cache rows will be handled: changing addresses does not migrate or clear those rows automatically.
 4. Package/test the current code using [the infrastructure guide](../infra/offchain/README.md). Keep the indexer disabled until its credentials, addresses and rollout are approved.
 5. After the approved update, check `/health`, `/v1/status` and `/v1/registry/assets`. Require an authenticated, synced registry with the expected identity and assets; inspect logs and scheduled reconciliation.
-6. Configure `NEXT_PUBLIC_OFFCHAIN_API_URL` on the confirmed hosting branch only after validating that API. Verify the hosted app independently.
+6. After validating the API, implement and review the frontend integration
+   before introducing any hosted URL variable. Verify the hosted app
+   independently.
 
 ## Infrastructure and separate dependencies
 

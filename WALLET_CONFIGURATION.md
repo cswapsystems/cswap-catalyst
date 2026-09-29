@@ -6,10 +6,12 @@ The older four-wallet address directory has been retired from the UI. The fracti
 
 Start local development from `.env.example` and supply only the public identifiers and server-only project IDs needed for the workflows you use.
 
+See the canonical [environment-variable reference](docs/ENVIRONMENT_VARIABLES.md)
+for required values, optional overrides, visibility, and secret-handling rules.
+
 | Variable | Purpose |
 | --- | --- |
 | `NEXT_PUBLIC_TEAM_KEY_HASH` | Public Team payment-key hash for recovery/shared-pool controls; the manifest supplies the current Preprod value. |
-| `NEXT_PUBLIC_VAULT_ADDRESS` | Optional public vault script address for explorer links. |
 
 Set `NEXT_PUBLIC_CARDANO_NETWORK` to `preprod` or `mainnet`. The page forms a
 Cexplorer link appropriate to that network.

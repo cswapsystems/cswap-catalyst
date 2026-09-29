@@ -8,7 +8,7 @@ frontend:
       commands:
         # Amplify build variables are not automatically available to SSR.
         # Persist only the variables consumed by the Next server/client build.
-        - env | grep -E '^(BLOCKFROST_PROJECT_ID|BLOCKFROST_IPFS_PROJECT_ID|NEXT_PUBLIC_CARDANO_NETWORK|NEXT_PUBLIC_OFFCHAIN_API_URL)=' >> .env.production
+        - env | grep -E '^(BLOCKFROST_PROJECT_ID|BLOCKFROST_IPFS_PROJECT_ID|NEXT_PUBLIC_CARDANO_NETWORK|NEXT_PUBLIC_USDCX_UNIT)=' >> .env.production
         # Deployment gate (R10): any failing node unit test stops the build before publishing.
         # Playwright and aiken are not installed in the Amplify image, so they are not run here.
         - node --experimental-strip-types --test tests/*.test.mjs
