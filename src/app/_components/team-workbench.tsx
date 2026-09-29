@@ -4,16 +4,17 @@ import { useCallback, useEffect, useState } from "react";
 import { useWallet } from "./wallet-context";
 import { readSharedPool, assertFreshPool } from "@/lib/protocol/shared-pool-client";
 import { marketplaceOrderbookAddress } from "@/lib/protocol/marketplace-deployment";
-import { buildMarketAction, decodeMarketListing, marketUnit, postedQuote, type MarketListing } from "@/lib/marketplace";
+import { assessInstantSellAcquisition, buildMarketAction, decodeMarketListing, marketUnit, outputRef, type MarketListing } from "@/lib/marketplace";
 import { scanOutputs } from "@/lib/safe-scan";
 import { formatAda } from "@/lib/ada";
+import { walletAssetName } from "@/lib/wallet-assets";
 import { useMarketTransaction } from "./use-market-transaction";
 import MarketTransactionStatus from "./market-transaction-status";
 
 export default function TeamWorkbench({ onSettled }: { onSettled?: () => Promise<void> }) {
   const { lucid, address } = useWallet();
   const [pool, setPool] = useState<Awaited<ReturnType<typeof readSharedPool>> | null>(null);
-  const [requests, setRequests] = useState<MarketListing[]>([]);
+  const [requests, setRequests] = useState<{ listing: MarketListing; sellerKeyMatches: boolean }[]>([]);
   const [error, setError] = useState("");
   const [authorized, setAuthorized] = useState(false), [loading, setLoading] = useState(false);
   const [receipt, setReceipt] = useState<Record<string, string> | null>(null);
@@ -27,7 +28,10 @@ export default function TeamWorkbench({ onSettled }: { onSettled?: () => Promise
       const current = await readSharedPool(lucid, tools); setPool(current);
       setAuthorized(tools.getAddressDetails(address).paymentCredential?.hash === current.batcher);
       const found = scanOutputs(await lucid.utxosAt(marketplaceOrderbookAddress), (utxo) => utxo.datum ? decodeMarketListing(tools, utxo) : null);
-      setRequests(found.items.filter((listing) => listing.settlement.kind === "instant" && marketUnit(listing.settlement.poolToken) === marketUnit(current.poolToken)));
+      setRequests(found.items.filter((listing) => listing.settlement.kind === "instant" && marketUnit(listing.settlement.poolToken) === marketUnit(current.poolToken)).map((listing) => {
+        const payment = tools.getAddressDetails(listing.seller).paymentCredential;
+        return { listing, sellerKeyMatches: payment?.type === "Key" && payment.hash === listing.sellerKey };
+      }));
       if (found.skipped) setError(found.skipped + " unreadable orderbook outputs skipped.");
     } catch (cause) { setError(cause instanceof Error ? cause.message : "Queue unavailable."); }
     finally { setLoading(false); }
@@ -44,9 +48,12 @@ export default function TeamWorkbench({ onSettled }: { onSettled?: () => Promise
       const available = (await lucid.utxosByOutRef([listing.utxo]))[0];
       if (!available || available.datum !== listing.utxo.datum) throw new Error("Seller listing changed or was cancelled.");
       if (!references[listing.id]?.trim()) throw new Error("Enter an approval reference.");
-      const quote = postedQuote(current, marketUnit(listing.rwa), listing.quantity);
-      approval = { operator: address, approval: references[listing.id].trim(), listingRef: listing.id, poolRef: `${current.utxo.txHash}#${current.utxo.outputIndex}`, bid: quote.bid.toString(), ask: quote.ask.toString(), quoteUnit: marketUnit(current.quote), expectedCash: (current.cash - quote.bid).toString(), createdAt: new Date().toISOString() };
-      return buildMarketAction(lucid, tools, current.scripts, address, { kind: "acquire", listing: decodeMarketListing(tools, available) }, current);
+      const freshListing = decodeMarketListing(tools, available);
+      const sellerPayment = tools.getAddressDetails(freshListing.seller).paymentCredential;
+      const review = assessInstantSellAcquisition(current, freshListing, marketplaceOrderbookAddress, sellerPayment?.type === "Key" && sellerPayment.hash === freshListing.sellerKey);
+      if (review.issues.length || !review.quote) throw new Error(review.issues.join(" ") || "Current pool quote is unavailable.");
+      approval = { operator: address, approval: references[listing.id].trim(), listingRef: listing.id, poolRef: outputRef(current.utxo), seller: freshListing.seller, assetUnit: marketUnit(freshListing.rwa), quantity: freshListing.quantity.toString(), sellerMinimum: freshListing.price.toString(), escrowLovelace: freshListing.lockedLovelace.toString(), bid: review.quote.bid.toString(), ask: review.quote.ask.toString(), quoteUnit: marketUnit(current.quote), expectedCash: (current.cash - review.quote.bid).toString(), createdAt: new Date().toISOString() };
+      return buildMarketAction(lucid, tools, current.scripts, address, { kind: "acquire", listing: freshListing }, current);
     }, () => assertFreshPool(lucid, tools, pool), (hash) => setReceipt({ ...approval, transactionHash: hash }));
   }
   function downloadReceipt() {
@@ -54,18 +61,23 @@ export default function TeamWorkbench({ onSettled }: { onSettled?: () => Promise
     const link = document.createElement("a"); link.href = url; link.download = "instant-sell-approval.json"; link.click(); URL.revokeObjectURL(url);
   }
   return <section className="work-card form-card"><div className="section-heading"><h2>Approve Instant Sell listings</h2><button type="button" className="refresh-button" disabled={loading || transaction.busy} onClick={() => void refresh()}>Refresh queue</button></div>
-    <p>Acquisitions use the current on-chain buy and sell ratios. The batcher funds the new inventory listing’s ADA deposit separately; the pool pays only the posted bid. The protected quote reserve is enforced by the validator. Removing an on-chain price stops new acquisitions for that asset. There is no quantity cap; review the requested size and inventory exposure before signing.</p>
+    <p>Review each seller, exact asset, escrow and current pool bid before signing. The pool pays the posted bid; the operator funds the new inventory output’s ADA buffer separately. A pending request does not reserve pool cash.</p>
     <p><Link href="/team/inventory">Manage on-chain prices</Link></p>
     {!lucid && <p>Connect your wallet to read the queue.</p>}{error && <p role="alert">{error}</p>}
     {pool?.closing && <p role="status">Pool is closing. New acquisitions are disabled; the recorded LP recovers inventory from Shared reserves.</p>}
-    {requests.map((listing) => {
-      let quote: ReturnType<typeof postedQuote> | null = null, blocked = "";
-      try {
-        if (!pool) throw new Error("Pool unavailable.");
-        quote = postedQuote(pool, marketUnit(listing.rwa), listing.quantity);
-        if (quote.bid < listing.price) throw new Error("Posted bid is below the seller minimum.");
-      } catch (cause) { blocked = cause instanceof Error ? cause.message : "Acquisition unavailable."; }
-      return <article className="operator-request" key={listing.id}><code>{marketUnit(listing.rwa)}</code><p>{listing.quantity.toString()} base units · Seller minimum {display(listing.price)}</p>{quote && <p>Total bid {display(quote.bid)} · Initial inventory ask {display(quote.ask)} · Cash after acquisition {display(pool!.cash - quote.bid)}</p>}{blocked && <p role="status">{blocked}</p>}<label className="field"><span>Approval reference</span><input value={references[listing.id] || ""} onChange={(event) => setReferences({ ...references, [listing.id]: event.target.value })} /></label><button className="primary-button" type="button" disabled={!authorized || Boolean(blocked) || loading || transaction.busy || Boolean(transaction.hash) || !references[listing.id]?.trim()} onClick={() => void acquire(listing)}>Sign acquisition</button></article>;
+    {pool && <div className="operator-queue-status"><strong>{requests.length} matching Instant Sell escrow{requests.length === 1 ? "" : "s"} found</strong><span>Each shown UTxO passed inline-datum and exact locked-value decoding. Pool snapshot <code>{outputRef(pool.utxo)}</code>. Refresh after any chain change; the UTxO and pool are rechecked before signing.</span></div>}
+    {requests.map(({ listing, sellerKeyMatches }) => {
+      const review = pool ? assessInstantSellAcquisition(pool, listing, marketplaceOrderbookAddress, sellerKeyMatches) : { quote: null, issues: ["Pool unavailable."] };
+      const unit = marketUnit(listing.rwa);
+      return <article className="operator-request" key={listing.id}>
+        <div className="operator-request-head"><div><span className="section-kicker">Verified inline-datum escrow</span><h3>{walletAssetName(listing.rwa.assetName)}</h3></div><span className={review.issues.length ? "operator-request-state blocked" : "operator-request-state"}>{review.issues.length ? "Needs review" : "Ready to acquire"}</span></div>
+        <div className="operator-request-identities"><div><span>Exact asset ID</span><code>{unit}</code><Link href={"/assets?asset=" + encodeURIComponent(unit)}>Inspect asset ↗</Link></div><div><span>Seller payout address</span><code>{listing.seller}</code><a href={"https://preprod.cexplorer.io/address/" + listing.seller} target="_blank" rel="noreferrer">Inspect seller address ↗</a></div><div><span>Escrow UTxO · current orderbook</span><code>{listing.id}</code><a href={"https://preprod.cexplorer.io/tx/" + listing.utxo.txHash} target="_blank" rel="noreferrer">Inspect transaction ↗</a></div></div>
+        <dl className="operator-request-metrics"><div><dt>Quantity</dt><dd>{listing.quantity.toString()} asset base units</dd></div><div><dt>Seller minimum</dt><dd>{display(listing.price)}</dd></div><div><dt>Current pool bid</dt><dd>{review.quote ? display(review.quote.bid) : "Unavailable"}</dd></div><div><dt>Initial inventory ask</dt><dd>{review.quote ? display(review.quote.ask) : "Unavailable"}</dd></div><div><dt>Escrow ADA returned to seller</dt><dd>{formatAda(listing.lockedLovelace)} ADA</dd></div><div><dt>Cash after acquisition</dt><dd>{review.quote && pool ? display(pool.cash - review.quote.bid) : "Unavailable"}</dd></div></dl>
+        <p className="operator-request-check">Datum, token quantity and locked value match the orderbook UTxO. {sellerKeyMatches ? "Seller signing key matches the payout address." : "Seller signing key does not match the payout address."} Quote asset: <code>{pool ? marketUnit(pool.quote) : "Unavailable"}</code>. Protected reserve: {pool ? display(pool.minimum) : "Unavailable"}.</p>
+        {review.issues.length > 0 && <div className="operator-request-issues" role="status"><strong>Cannot acquire yet</strong><ul>{review.issues.map((issue) => <li key={issue}>{issue}</li>)}</ul></div>}
+        <label className="field"><span>Approval reference</span><input value={references[listing.id] || ""} onChange={(event) => setReferences({ ...references, [listing.id]: event.target.value })} placeholder="Internal review or ticket ID" /></label><p className="operator-request-note">This reference is included in the downloadable session receipt, not written on-chain. Confirm the asset and seller independently before signing.</p>
+        <button className="primary-button" type="button" disabled={!authorized || review.issues.length > 0 || loading || transaction.busy || Boolean(transaction.hash) || !references[listing.id]?.trim()} onClick={() => void acquire(listing)}>Sign acquisition</button>
+      </article>;
     })}
     {!loading && pool && !requests.length && <p>No pending Instant Sell listings for this pool.</p>}
     {receipt && <p><button type="button" onClick={downloadReceipt}>Download approval receipt</button> Archive this session-only record; it does not prove confirmation.</p>}

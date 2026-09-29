@@ -50,6 +50,10 @@
 .workflow-links h2 { font-family: var(--font-display); font-size: 16px; font-weight: 600; }
 .workflow-links p { margin-top: 7px; color: var(--muted); font-size: 13px; line-height: 1.6; }
 .workflow-links > a > span { color: var(--lime); }
+.portfolio-workflows { grid-template-columns: repeat(4, minmax(0, 1fr)); }
+.portfolio-workflows > a { min-width: 0; padding: 16px; }
+.portfolio-workflows > a > div { min-width: 0; }
+.portfolio-workflows > a > span { flex: 0 0 auto; }
 .page-main > .team-connect-callout { margin-bottom: 24px; }
 .page-main .marketplace-workbench { grid-template-columns: minmax(0, 1fr); }
 .page-main .marketplace-card, .page-main .marketplace-book, .page-main .marketplace-listings { min-width: 0; }
@@ -72,6 +76,10 @@
   .header-wallet-address { display: none; }
   .workflow-links { grid-template-columns: 1fr; gap: 8px; }
   .workflow-links > a { padding: 16px; }
+  .portfolio-workflows { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+  .portfolio-workflows > a { gap: 7px; min-height: 76px; padding: 12px; }
+  .portfolio-workflows h2 { font-size: 13px; line-height: 1.35; }
+  .portfolio-workflows p { display: none; }
   .platform-shell .hero { padding-block: 28px 24px; align-items: start; }
   .platform-shell .hero p { font-size: 15px; }
   .page-main .marketplace-card > .section-heading { flex-direction: column; gap: 12px; }

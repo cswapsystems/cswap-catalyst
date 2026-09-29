@@ -66,6 +66,27 @@ test("owner listing management is distinct from browsing the market", async ({ p
   await expect(page.getByRole("button", { name: "Refresh", exact: true })).toBeDisabled();
 });
 
+test("disconnected Marketplace and Swap provide readable next steps", async ({ page }) => {
+  const contrast = async (selector: string) => page.locator(selector).first().evaluate((element) => {
+    const style = getComputedStyle(element);
+    const rgb = (value: string) => (value.match(/[\d.]+/g) ?? []).slice(0, 3).map(Number);
+    const luminance = (value: string) => rgb(value).map((channel) => {
+      const normalized = channel / 255;
+      return normalized <= 0.04045 ? normalized / 12.92 : ((normalized + 0.055) / 1.055) ** 2.4;
+    }).reduce((sum, channel, index) => sum + channel * [0.2126, 0.7152, 0.0722][index], 0);
+    const foreground = luminance(style.color), background = luminance(style.backgroundColor);
+    return (Math.max(foreground, background) + 0.05) / (Math.min(foreground, background) + 0.05);
+  });
+  await page.goto("/marketplace");
+  await expect(page.locator(".marketplace-toolbar-actions").getByRole("button", { name: "Connect wallet" })).toBeVisible();
+  await expect(page.locator(".marketplace-refresh")).toBeDisabled();
+  expect(await contrast(".marketplace-refresh")).toBeGreaterThanOrEqual(4.5);
+  expect(await contrast(".marketplace-empty")).toBeGreaterThanOrEqual(4.5);
+  await page.goto("/dex");
+  await expect(page.locator(".swap-submit").getByRole("button", { name: "Connect wallet" })).toBeEnabled();
+  expect(await contrast(".dex-empty")).toBeGreaterThanOrEqual(4.5);
+});
+
 test("skip link moves keyboard focus past navigation", async ({ page }) => {
   await page.goto("/my-assets");
   await page.keyboard.press("Tab");
@@ -95,7 +116,7 @@ test("provider failures remain actionable in the header", async ({ page }) => {
   await expect(page.locator("header").getByRole("alert")).not.toContainText("BigInt");
 });
 
-async function mockWallet(page: Page, key = "ab".repeat(28)) {
+async function mockWallet(page: Page, key = "ab".repeat(28), utxos: string[] = []) {
   const addressHex = "60" + key;
   await page.route("**/api/blockfrost/epochs/latest/parameters", route => route.fulfill({ json: {
     protocol_major_ver: 10, protocol_minor_ver: 0, min_fee_a: 44, min_fee_b: 155381, max_tx_size: 16384, max_val_size: 5000,
@@ -103,16 +124,56 @@ async function mockWallet(page: Page, key = "ab".repeat(28)) {
     price_mem: 0.0577, price_step: 0.0000721, max_tx_ex_mem: "14000000", max_tx_ex_steps: "10000000000", coins_per_utxo_size: "4310",
     collateral_percent: 150, max_collateral_inputs: 3, min_fee_ref_script_cost_per_byte: 15, cost_models_raw: PROTOCOL_PARAMETERS_DEFAULT.costModels,
   } }));
-  await page.addInitScript(hex => {
-    const state = window as typeof window & { testWalletHex: string };
+  await page.addInitScript(({ hex, utxos }) => {
+    const state = window as typeof window & { testWalletHex: string; testWalletUtxos: string[] };
     state.testWalletHex = hex;
+    state.testWalletUtxos = utxos;
     Object.defineProperty(window, "cardano", { value: { eternl: {
       isEnabled: async () => false,
-      enable: async () => ({ getNetworkId: async () => 0, getUsedAddresses: async () => [state.testWalletHex], getUnusedAddresses: async () => [], getChangeAddress: async () => state.testWalletHex, getUtxos: async () => [], getCollateral: async () => [], getBalance: async () => "00", signTx: async () => { throw new Error("Signing is forbidden in this test"); } }),
+      enable: async () => ({ getNetworkId: async () => 0, getUsedAddresses: async () => [state.testWalletHex], getUnusedAddresses: async () => [], getChangeAddress: async () => state.testWalletHex, getUtxos: async () => state.testWalletUtxos, getCollateral: async () => [], getBalance: async () => "00", signTx: async () => { throw new Error("Signing is forbidden in this test"); } }),
     } } });
-  }, addressHex);
+  }, { hex: addressHex, utxos });
   return CML.Address.from_hex(addressHex).to_bech32();
 }
+
+test("Instant Sell dialog keeps long asset IDs and pool references inside its scroll area", async ({ page }) => {
+  const key = "ab".repeat(28);
+  const policy = "70b2cb1d67a1cd4eac3a92281524cd027a0685407d77e54132d1dd5c";
+  const assets = CML.MultiAsset.new();
+  assets.set(CML.ScriptHash.from_hex(policy), CML.AssetName.from_str("RWA-DEMO-VERY-LONG-NAME-00000001"), BigInt(1));
+  const input = CML.TransactionInput.new(CML.TransactionHash.from_hex("aa".repeat(32)), BigInt(0));
+  const output = CML.TransactionOutput.new(CML.Address.from_hex("60" + key), CML.Value.new(BigInt(5_000_000), assets));
+  const utxo = CML.TransactionUnspentOutput.new(input, output).to_cbor_hex();
+  await mockWallet(page, key, [utxo]);
+  for (const width of [320, 390, 768, 1440]) {
+    await page.setViewportSize({ width, height: 680 });
+    await page.goto("/my-assets");
+    await page.locator("header").getByRole("button", { name: "Connect Eternl" }).click();
+    await page.getByRole("button", { name: "Sell / List" }).first().click();
+    const dialog = page.getByRole("dialog", { name: /Sell RWA-DEMO-VERY-LONG-NAME/ });
+    await dialog.getByRole("button", { name: "Request Instant Sell" }).click();
+    await expect(dialog.getByRole("button", { name: "Request Instant Sell" })).toHaveAttribute("aria-pressed", "true");
+    await expect(dialog.getByText("Quote unavailable")).toBeVisible();
+    await dialog.locator(".execution-preview").evaluate((preview) => {
+      const line = document.createElement("p");
+      line.textContent = "Pool snapshot: ";
+      const code = document.createElement("code");
+      code.textContent = "ab".repeat(32) + "#0";
+      line.append(code);
+      preview.prepend(line);
+    });
+    const metrics = await dialog.evaluate((element) => {
+      const code = element.querySelector(".execution-preview code")!;
+      const dialogRect = element.getBoundingClientRect();
+      const codeRect = code.getBoundingClientRect();
+      return { scrollWidth: element.scrollWidth, clientWidth: element.clientWidth, left: codeRect.left, right: codeRect.right, dialogLeft: dialogRect.left, dialogRight: dialogRect.right };
+    });
+    expect(metrics.scrollWidth, `dialog overflow at ${width}px`).toBeLessThanOrEqual(metrics.clientWidth + 1);
+    expect(metrics.left).toBeGreaterThanOrEqual(metrics.dialogLeft);
+    expect(metrics.right).toBeLessThanOrEqual(metrics.dialogRight);
+    await dialog.getByRole("button", { name: "Close sale" }).click();
+  }
+});
 
 test("connected wallet menu does not disconnect on open and fits mobile", async ({ page }) => {
   const address = await mockWallet(page);

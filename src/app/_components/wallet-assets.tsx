@@ -218,7 +218,7 @@ export default function WalletAssets() {
 
   return <div className="platform-shell"><PlatformHeader /><main id="main-content" tabIndex={-1} className="page-main">
     <section className="hero"><div><span className="eyebrow">Portfolio</span><h1>Your holdings</h1><p>View your wallet assets. Select an asset to sell, list, split or combine its ownership.</p></div></section>
-    <WorkflowLinks label="Portfolio workflows" items={[
+    <WorkflowLinks label="Portfolio workflows" className="portfolio-workflows" items={[
       { href: "/portfolio/positions", title: "Open positions", description: "Find assets in escrow, vaults and liquidity pools." },
       { href: "/portfolio/orders", title: "Listings & requests", description: "Edit listings or cancel pending Instant Sell requests." },
       { href: "/portfolio/asset-requests", title: "Asset support", description: "Request Team review and manage your asset support requests." },

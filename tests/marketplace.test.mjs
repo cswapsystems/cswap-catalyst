@@ -2,7 +2,7 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import { readFile } from 'node:fs/promises';
 import * as t from '@lucid-evolution/lucid';
-import { buildMarketAction, decodeSharedPool, decodeMarketListing, decodeSettlement, listingDatum, nextPool, marketAddressData, marketAssetData, marketUnit, postedQuote, lpDeposit, lpWithdrawal } from '../src/lib/marketplace.ts';
+import { assessInstantSellAcquisition, buildMarketAction, decodeSharedPool, decodeMarketListing, decodeSettlement, listingDatum, nextPool, marketAddressData, marketAssetData, marketUnit, postedQuote, lpDeposit, lpWithdrawal } from '../src/lib/marketplace.ts';
 
 const blueprint = JSON.parse(await readFile(new URL('../contracts/marketplace/plutus.json', import.meta.url), 'utf8'));
 const script = (title, params = []) => { const code = blueprint.validators.find(v => v.title === title).compiledCode; return { type: 'PlutusV3', script: params.length ? t.applyParamsToScript(code, params) : code }; };
@@ -67,6 +67,19 @@ test('shared pool strict decoding and integer LP/price arithmetic', async () => 
   const bad = [...pool.raw.fields]; bad[13] = c([], 0);
   assert.throws(() => decodeSharedPool(t, { ...pool.utxo, datum: t.Data.to(c(bad)) }));
   assert.throws(() => postedQuote({ ...pool, paused: true }, ft, 1n), /paused/);
+});
+
+test('Instant Sell review requires a valid escrow datum, seller binding and executable pool quote', async () => {
+  const f = await fixture(), listing = await f.create(), pool = await f.readPool();
+  const review = assessInstantSellAcquisition(pool, listing, f.scripts.orderbookAddress, key(listing.seller) === listing.sellerKey);
+  assert.deepEqual(review.issues, []);
+  assert.equal(review.quote.bid, 1_000_000n);
+  assert.throws(() => decodeMarketListing(t, { ...listing.utxo, datum: t.Data.to(c([])) }), /Invalid/);
+  assert.throws(() => decodeMarketListing(t, { ...listing.utxo, assets: { ...listing.utxo.assets, [ft]: 2n } }), /escrow value/);
+  assert.match(assessInstantSellAcquisition(pool, listing, f.scripts.orderbookAddress, false).issues.join(' '), /Seller key/);
+  assert.match(assessInstantSellAcquisition(pool, { ...listing, utxo: { ...listing.utxo, address: f.operator.address } }, f.scripts.orderbookAddress, true).issues.join(' '), /orderbook/);
+  assert.match(assessInstantSellAcquisition(pool, { ...listing, price: 2_000_000n }, f.scripts.orderbookAddress, true).issues.join(' '), /seller minimum/);
+  assert.match(assessInstantSellAcquisition({ ...pool, paused: true }, listing, f.scripts.orderbookAddress, true).issues.join(' '), /paused/);
 });
 
 for (const quote of ['lovelace', tokenQuote]) test('compiled Marketplace lifecycle with ' + (quote === 'lovelace' ? 'ADA' : 'native quote'), async () => {

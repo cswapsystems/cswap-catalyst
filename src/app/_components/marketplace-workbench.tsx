@@ -74,7 +74,7 @@ async function loadFractionIndex(lucid: import("@lucid-evolution/lucid").LucidEv
   return index;
 }
 export default function MarketplaceWorkbench({ ownerOnly = false }: { ownerOnly?: boolean }) {
-  const { address, lucid, connect } = useWallet();
+  const { address, lucid, connect, status } = useWallet();
   const [listingLayout, setListingLayout] = useState<ListingLayout>("card");
   const [listings, setListings] = useState<Listing[]>([]);
   const [thumbnails, setThumbnails] = useState<Record<string, string>>({});
@@ -211,7 +211,7 @@ export default function MarketplaceWorkbench({ ownerOnly = false }: { ownerOnly?
       <p className="marketplace-intro">{ownerOnly ? "Update listing prices, cancel open listings and track requests awaiting operator settlement." : "Browse direct P2P listings and pool-owned inventory in one orderbook."}</p>
       <div className="marketplace-toolbar">
         <span className="wallet-assets-note">{ownerOnly ? "Only listings and requests owned by the connected wallet appear here." : "Buy listed assets here."}</span>
-        <div className="marketplace-toolbar-actions"><button className="marketplace-refresh" type="button" onClick={() => void refresh()} disabled={!lucid || loading}>{loading ? "Loading…" : "Refresh"}</button></div>
+        <div className="marketplace-toolbar-actions">{!lucid && <button className="primary-button" type="button" onClick={() => void connect()} disabled={status === "connecting"}>{status === "connecting" ? "Connecting…" : "Connect wallet"}</button>}<button className="marketplace-refresh" type="button" onClick={() => void refresh()} disabled={!lucid || loading} title={!lucid ? "Connect a wallet to refresh the orderbook" : undefined}>{loading ? "Loading…" : "Refresh"}</button></div>
       </div>
       {message && <p className={message.kind === "error" ? "marketplace-message marketplace-error" : "marketplace-message marketplace-success"} role={message.kind === "error" ? "alert" : "status"}>{message.text}</p>}
       <div className="marketplace-market-summary"><div><span>{ownerOnly ? "Your direct listings" : "Direct listings"}</span><strong>{lucid && loaded && !loading && message?.kind !== "error" ? p2pListings.length : "—"}</strong></div>{!ownerOnly && <div><span>Pool inventory</span><strong>{lucid && loaded && !loading && message?.kind !== "error" ? poolListings.length : "—"}</strong></div>}{ownerOnly && <div><span>Your Instant Sell requests</span><strong>{lucid && loaded && !loading && message?.kind !== "error" ? pendingListings.length : "—"}</strong></div>}</div>

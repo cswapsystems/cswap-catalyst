@@ -100,6 +100,19 @@ export function postedQuote(pool: SharedPool, unit: string, quantity: bigint) {
   if (pool.cash - bid < pool.minimum) throw new Error("Bid exceeds cash above the protected reserve.");
   return { bid, ask };
 }
+export function assessInstantSellAcquisition(pool: SharedPool, listing: MarketListing, orderbookAddress: string, sellerKeyMatches: boolean) {
+  const issues: string[] = [];
+  if (listing.utxo.address !== orderbookAddress || !listing.utxo.datum) issues.push("Escrow UTxO is not an inline-datum output at the reviewed orderbook.");
+  if (listing.settlement.kind !== "instant" || marketUnit(listing.settlement.poolToken) !== marketUnit(pool.poolToken)) issues.push("Listing is not bound to this shared pool.");
+  if (marketUnit(listing.priceAsset) !== marketUnit(pool.quote)) issues.push("Seller minimum uses a different quote asset.");
+  if (!sellerKeyMatches) issues.push("Seller key does not match the payout address.");
+  let quote: ReturnType<typeof postedQuote> | null = null;
+  try {
+    quote = postedQuote(pool, marketUnit(listing.rwa), listing.quantity);
+    if (quote.bid < listing.price) issues.push("Current pool bid is below the seller minimum.");
+  } catch (cause) { issues.push(cause instanceof Error ? cause.message : "Current pool quote is unavailable."); }
+  return { quote, issues };
+}
 export function lpDeposit(pool: SharedPool, amount: bigint) {
   if (pool.paused || pool.closing || amount <= BigInt(0)) throw new Error("Deposits require a live, non-closing pool and a positive amount.");
   const equity = pool.cash + pool.cost;
