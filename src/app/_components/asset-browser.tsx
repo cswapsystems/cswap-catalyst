@@ -4,6 +4,7 @@ import { FormEvent, useEffect, useMemo, useState } from "react";
 import Link from "next/link";
 import { formatAda } from "@/lib/ada";
 import { readRegistry, registryConfigured } from "@/lib/asset-registry";
+import { rememberAssetName } from "@/lib/asset-display-name";
 
 type JsonRecord = Record<string, unknown>;
 type AssetDetails = { asset: string; policy_id: string; asset_name: string; fingerprint?: string; quantity?: string; initial_mint_tx_hash?: string; mint_or_burn_count?: number; onchain_metadata?: unknown; onchain_metadata_standard?: string };
@@ -86,7 +87,9 @@ async function loadAsset(assetId: string): Promise<BrowserState> {
     try { registration = (await readRegistry()).entries.includes(assetId) ? "CSWAP registered" : "Not registered with CSWAP"; }
     catch { registration = "Registry verification unavailable"; }
   }
-  return { registration, details, metadata: findMetadata([transactionMetadata, metadataPayload, details.onchain_metadata], details.policy_id, details.asset_name), transaction };
+  const metadata = findMetadata([transactionMetadata, metadataPayload, details.onchain_metadata], details.policy_id, details.asset_name);
+  rememberAssetName(assetId, metadata);
+  return { registration, details, metadata, transaction };
 }
 
 export default function AssetBrowser({ initialAssetId }: { initialAssetId: string }) {

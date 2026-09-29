@@ -9,6 +9,7 @@ import { formatAda } from "@/lib/ada";
 import { decodeMarketListing, buildMarketAction, type MarketListing, type MarketScripts } from "@/lib/marketplace";
 import { assertFreshPool, reviewedOrderbook, readSharedPool } from "@/lib/protocol/shared-pool-client";
 import { useMarketTransaction } from "./use-market-transaction";
+import { assetDisplayName, cachedAssetName, loadAssetNames, rememberAssetName } from "@/lib/asset-display-name";
 import MarketTransactionStatus from "./market-transaction-status";
 import LegacyRequestRecovery from "./legacy-request-recovery";
 
@@ -79,6 +80,7 @@ export default function MarketplaceWorkbench({ ownerOnly = false }: { ownerOnly?
   const [listingLayout, setListingLayout] = useState<ListingLayout>("card");
   const [listings, setListings] = useState<Listing[]>([]);
   const [thumbnails, setThumbnails] = useState<Record<string, string>>({});
+  const [assetNames, setAssetNames] = useState<Record<string, string>>({});
   const [purchasedListingIds] = useState<Set<string>>(() => new Set());
   const [editing, setEditing] = useState<Listing | null>(null);
   const [editPrice, setEditPrice] = useState("");
@@ -125,16 +127,25 @@ export default function MarketplaceWorkbench({ ownerOnly = false }: { ownerOnly?
   useEffect(() => {
     let cancelled = false;
     const units = [...new Set(listings.map((listing) => unit(listing.rwa)))];
+    const originalUnits = [...new Set(listings.flatMap((listing) => listing.fraction ? [unit(listing.fraction.original)] : []))];
+    const quoteUnits = [...new Set(listings.flatMap((listing) => listing.priceAsset.policyId ? [unit(listing.priceAsset)] : []))];
     if (units.length === 0) { setThumbnails({}); return; }
+    setAssetNames((current) => ({ ...current, ...Object.fromEntries([...units, ...originalUnits, ...quoteUnits].map((assetUnit) => [assetUnit, cachedAssetName(assetUnit)]).filter(([, name]) => Boolean(name))) }));
+    void loadAssetNames([...originalUnits, ...quoteUnits]).then((names) => { if (!cancelled) setAssetNames((current) => ({ ...current, ...names })); });
     void Promise.all(units.map(async (assetUnit) => {
       try {
         const response = await fetch("/api/blockfrost/assets/" + encodeURIComponent(assetUnit), { cache: "force-cache" });
-        const asset = await response.json() as { onchain_metadata?: { image?: unknown } };
+        if (!response.ok) return null;
+        const asset = await response.json() as { onchain_metadata?: { image?: unknown; name?: unknown } };
+        const name = rememberAssetName(assetUnit, asset.onchain_metadata);
         const thumbnail = ipfsGatewayUrl(asset.onchain_metadata?.image);
-        return thumbnail ? [assetUnit, thumbnail] as const : null;
+        return [assetUnit, thumbnail, name] as const;
       } catch { return null; }
     })).then((results) => {
-      if (!cancelled) setThumbnails(Object.fromEntries(results.filter((result): result is readonly [string, string] => result !== null)));
+      if (!cancelled) {
+        setThumbnails(Object.fromEntries(results.flatMap((result) => result?.[1] ? [[result[0], result[1]] as const] : [])));
+        setAssetNames((current) => ({ ...current, ...Object.fromEntries(results.filter((result): result is readonly [string, string | null, string] => result !== null && Boolean(result[2])).map(([assetUnit, , name]) => [assetUnit, name])) }));
+      }
     });
     return () => { cancelled = true; };
   }, [listings]);
@@ -174,8 +185,8 @@ export default function MarketplaceWorkbench({ ownerOnly = false }: { ownerOnly?
   const renderListing = (listing: Listing) => {
     const owned = listing.managed;
     const purchaseSubmitted = purchasedListingIds.has(listing.id);
-    const tokenName = assetNameText(listing.rwa.assetName);
-    const originalName = listing.fraction ? assetNameText(listing.fraction.original.assetName) : "";
+    const tokenName = assetDisplayName(unit(listing.rwa), assetNameText(listing.rwa.assetName), assetNames, listing.fraction ? unit(listing.fraction.original) : undefined);
+    const originalName = listing.fraction ? assetDisplayName(unit(listing.fraction.original), assetNameText(listing.fraction.original.assetName), assetNames) : "";
     return <article className={"marketplace-listing " + (listingLayout === "card" ? "marketplace-trading-card" : "")} key={listing.id}>
       <div className="marketplace-asset">
         <>{thumbnails[unit(listing.rwa)] ? <Image className="marketplace-thumbnail" src={thumbnails[unit(listing.rwa)]} alt={tokenName + " thumbnail"} width={56} height={56} unoptimized /> : <span className={"marketplace-asset-mark " + (listing.fraction ? "fraction" : "")}>{listing.fraction ? "ƒ" : "RWA"}</span>}</>
@@ -189,7 +200,7 @@ export default function MarketplaceWorkbench({ ownerOnly = false }: { ownerOnly?
       </div>
       <div>
         <span className="marketplace-listing-label">Price</span>
-        <strong className="marketplace-listing-value">{listing.priceAsset.policyId ? listing.price.toString() : formatAda(listing.price)} <small>{listing.priceAsset.policyId ? assetNameText(listing.priceAsset.assetName) : "ADA"}</small></strong>
+        <strong className="marketplace-listing-value">{listing.priceAsset.policyId ? listing.price.toString() : formatAda(listing.price)} <small>{listing.priceAsset.policyId ? assetDisplayName(unit(listing.priceAsset), assetNameText(listing.priceAsset.assetName), assetNames) : "ADA"}</small></strong>
       </div>
       <div className="marketplace-actions">
         {purchaseSubmitted ? <button type="button" className="primary" disabled>Purchase submitted</button> : owned ? <><button type="button" className="primary" disabled title="This wallet created the listing">Your listing</button>{listing.settlement !== "pool" && <><button type="button" onClick={() => beginEdit(listing)} disabled={loading || transaction.busy || Boolean(transaction.hash)}>Edit</button><button type="button" onClick={() => void cancelListing(listing)} disabled={loading || transaction.busy || Boolean(transaction.hash)}>Cancel</button></>}</> : listing.settlement === "instant" ? <span className="marketplace-badge">Awaiting batcher · not publicly purchasable</span> : !lucid || !address ? <button type="button" className="primary" onClick={() => void connect()} disabled={loading || transaction.busy || Boolean(transaction.hash)}>Connect wallet to buy</button> : <button type="button" className="primary" onClick={() => void buyListing(listing)} disabled={loading || transaction.busy || Boolean(transaction.hash)}>Buy</button>}
@@ -219,7 +230,7 @@ export default function MarketplaceWorkbench({ ownerOnly = false }: { ownerOnly?
       <div className="marketplace-market-summary"><div><span>{ownerOnly ? "Your direct listings" : "Direct listings"}</span><strong>{lucid && loaded && !loading && message?.kind !== "error" ? p2pListings.length : "—"}</strong></div>{!ownerOnly && <div><span>Pool inventory</span><strong>{lucid && loaded && !loading && message?.kind !== "error" ? poolListings.length : "—"}</strong></div>}{ownerOnly && <div><span>Your Instant Sell requests</span><strong>{lucid && loaded && !loading && message?.kind !== "error" ? pendingListings.length : "—"}</strong></div>}</div>
     </section>
     {marketplaceToast && <div className="marketplace-toast" role="status"><strong>Marketplace updated</strong><span>{marketplaceToast}</span><button type="button" onClick={() => setMarketplaceToast(null)} aria-label="Dismiss Marketplace notification">×</button></div>}
-    {editing && <div className="marketplace-edit-backdrop" role="presentation" onMouseDown={() => !loading && setEditing(null)}><section className="marketplace-edit-dialog" role="dialog" aria-modal="true" aria-labelledby="marketplace-edit-title" onMouseDown={(event) => event.stopPropagation()}><div className="listing-dialog-heading"><div><span className="section-kicker">Marketplace listing</span><h2 id="marketplace-edit-title">Edit price</h2></div><button type="button" className="listing-dialog-close" onClick={() => setEditing(null)} disabled={loading || transaction.busy || Boolean(transaction.hash)} aria-label="Close edit dialog">×</button></div><p>Update the price for {assetNameText(editing.rwa.assetName)}. The listed quantity remains {editing.quantity.toString()}.</p><label className="field"><span className="field-label">Price in base units</span><input autoFocus inputMode="numeric" pattern="[0-9]+" min="1" value={editPrice} onChange={(event) => setEditPrice(event.target.value)} /></label><div className="marketplace-edit-dialog-actions"><button type="button" onClick={() => setEditing(null)} disabled={loading || transaction.busy || Boolean(transaction.hash)}>Cancel</button><button type="button" className="primary-button" onClick={() => void updateListing(editing)} disabled={loading || transaction.busy || Boolean(transaction.hash)}>{loading ? "Awaiting wallet…" : "Save price"}</button></div></section></div>}
+    {editing && <div className="marketplace-edit-backdrop" role="presentation" onMouseDown={() => !loading && setEditing(null)}><section className="marketplace-edit-dialog" role="dialog" aria-modal="true" aria-labelledby="marketplace-edit-title" onMouseDown={(event) => event.stopPropagation()}><div className="listing-dialog-heading"><div><span className="section-kicker">Marketplace listing</span><h2 id="marketplace-edit-title">Edit price</h2></div><button type="button" className="listing-dialog-close" onClick={() => setEditing(null)} disabled={loading || transaction.busy || Boolean(transaction.hash)} aria-label="Close edit dialog">×</button></div><p>Update the price for {assetDisplayName(unit(editing.rwa), assetNameText(editing.rwa.assetName), assetNames, editing.fraction ? unit(editing.fraction.original) : undefined)}. The listed quantity remains {editing.quantity.toString()}.</p><label className="field"><span className="field-label">Price in base units</span><input autoFocus inputMode="numeric" pattern="[0-9]+" min="1" value={editPrice} onChange={(event) => setEditPrice(event.target.value)} /></label><div className="marketplace-edit-dialog-actions"><button type="button" onClick={() => setEditing(null)} disabled={loading || transaction.busy || Boolean(transaction.hash)}>Cancel</button><button type="button" className="primary-button" onClick={() => void updateListing(editing)} disabled={loading || transaction.busy || Boolean(transaction.hash)}>{loading ? "Awaiting wallet…" : "Save price"}</button></div></section></div>}
     <MarketTransactionStatus {...transaction} />
     {ownerOnly && <LegacyRequestRecovery />}
     <section className="marketplace-listings">

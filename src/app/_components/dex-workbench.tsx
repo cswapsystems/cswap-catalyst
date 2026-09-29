@@ -7,14 +7,17 @@ import { FormEvent, useCallback, useEffect, useMemo, useState } from "react";
 import { useWallet } from "./wallet-context";
 import DexSwapFields from "./dex-swap-fields";
 import { formatAda } from "@/lib/ada";
+import { assetDisplayName, cachedAssetName, loadAssetNames } from "@/lib/asset-display-name";
 import { parseAdaToLovelace, quoteConstantProduct, quoteLiquidityDeposit, quoteLiquidityWithdrawal, priceImpactBps } from "@/lib/dex";
-import { type Deployment, type Scripts, type Pool, type Action, actions, assetData, assetUnit, parseUnit, parseIntegerAmount, addressData, poolName, integerSqrt, asConstr, decodePool, isAuthenticatedPool, nextDatum, poolValue, reservePayout, displayName, format, loadDex } from "@/lib/protocol/dex-client";
+import { type AssetClass, type Deployment, type Scripts, type Pool, type Action, actions, assetData, assetUnit, parseUnit, parseIntegerAmount, addressData, poolName, integerSqrt, asConstr, decodePool, isAuthenticatedPool, nextDatum, poolValue, reservePayout, displayName, format, loadDex } from "@/lib/protocol/dex-client";
 
 export default function DexWorkbench({ mode = "swap" }: { mode?: "swap" | "liquidity" | "admin" }) {
   const { lucid, address, connect, disconnect, status, error: walletError } = useWallet();
   const [deployment, setDeployment] = useState<Deployment | null>(null);
   const [scripts, setScripts] = useState<Scripts | null>(null);
   const [pools, setPools] = useState<Pool[]>([]);
+  const [assetNames, setAssetNames] = useState<Record<string, string>>({});
+  const [fractionOrigins, setFractionOrigins] = useState<Record<string, string>>({});
   const [selected, setSelected] = useState("");
   const [action, setAction] = useState<Action>(mode === "liquidity" ? "add" : mode === "admin" ? "create" : "swap-a");
   const [balances, setBalances] = useState<Record<string, bigint>>({});
@@ -30,6 +33,7 @@ export default function DexWorkbench({ mode = "swap" }: { mode?: "swap" | "liqui
   const [sessionError, setSessionError] = useState("");
   const [canCreatePool, setCanCreatePool] = useState(false);
   const pool = useMemo(() => pools.find((item) => item.id === selected) ?? pools[0], [pools, selected]);
+  const assetLabel = (item: AssetClass) => assetDisplayName(assetUnit(item), displayName(item), assetNames, fractionOrigins[assetUnit(item)]);
   const availableActions = actions.filter((item) => mode === "swap" ? item.id.startsWith("swap") : mode === "liquidity" ? ["add", "remove"].includes(item.id) : ["create", "destroy"].includes(item.id));
 
   const refresh = useCallback(async () => {
@@ -52,6 +56,42 @@ export default function DexWorkbench({ mode = "swap" }: { mode?: "swap" | "liqui
   }, [lucid]);
 
   useEffect(() => { const timer = window.setTimeout(() => void refresh(), 0); return () => window.clearTimeout(timer); }, [refresh]);
+
+  useEffect(() => {
+    const units = [...new Set(pools.flatMap((item) => [assetUnit(item.assetA), assetUnit(item.assetB)]).filter((unit) => unit !== "lovelace"))];
+    if (!units.length) return;
+    let cancelled = false;
+    setAssetNames((current) => ({ ...current, ...Object.fromEntries(units.map((unit) => [unit, cachedAssetName(unit)]).filter(([, name]) => Boolean(name))) }));
+    void (async () => {
+      const origins: Record<string, string> = {};
+      if (lucid) try {
+        const response = await fetch("/api/fractionalize-blueprint");
+        if (response.ok) {
+          const blueprint = await response.json() as { vaultCompiledCode?: string };
+          if (blueprint.vaultCompiledCode) {
+            const tools = await import("@lucid-evolution/lucid");
+            const vaultAddress = tools.validatorToAddress("Preprod", { type: "PlutusV3", script: blueprint.vaultCompiledCode });
+            for (const utxo of await lucid.utxosAt(vaultAddress)) {
+              if (!utxo.datum) continue;
+              try {
+                const datum = tools.Data.from(utxo.datum);
+                if (datum instanceof tools.Constr && datum.index === 0 && datum.fields.length === 8 && [2, 3, 4, 5].every((index) => typeof datum.fields[index] === "string")) {
+                  const fraction = String(datum.fields[4]) + String(datum.fields[5]);
+                  if (units.includes(fraction)) origins[fraction] = String(datum.fields[2]) + String(datum.fields[3]);
+                }
+              } catch { /* Ignore unrelated vault outputs. */ }
+            }
+          }
+        }
+      } catch { /* Keep token-name fallback if the vault is unavailable. */ }
+      const names = await loadAssetNames([...units, ...Object.values(origins)]);
+      if (!cancelled) {
+        setFractionOrigins(origins);
+        setAssetNames((current) => ({ ...current, ...names }));
+      }
+    })();
+    return () => { cancelled = true; };
+  }, [lucid, pools]);
 
   async function signSubmit(builder: ReturnType<NonNullable<typeof lucid>["newTx"]>) {
     if (!lucid) throw new Error("Connect Eternl before submitting a DEX transaction.");
@@ -133,7 +173,7 @@ export default function DexWorkbench({ mode = "swap" }: { mode?: "swap" | "liqui
 
   const preview = (() => {
     if (!pool || !lucid || action === "create" || action === "destroy") return null;
-    const show = (value: bigint, quote: boolean) => quote && !pool.assetA.policyId ? formatAda(value) + " tADA" : format(value) + " " + displayName(quote ? pool.assetA : pool.assetB) + " base units";
+    const show = (value: bigint, quote: boolean) => quote && !pool.assetA.policyId ? formatAda(value) + " tADA" : format(value) + " " + assetLabel(quote ? pool.assetA : pool.assetB) + " base units";
     try {
       const balanceA = balances[assetUnit(pool.assetA)] ?? BigInt(0), balanceB = balances[assetUnit(pool.assetB)] ?? BigInt(0), lp = balances[assetUnit(pool.lpToken)] ?? BigInt(0);
       if (action === "add" || action === "remove") {
@@ -156,15 +196,15 @@ export default function DexWorkbench({ mode = "swap" }: { mode?: "swap" | "liqui
   }
 
   return <section className={"dex-workbench" + (mode === "swap" ? " dex-workbench-swap" : "")}><div className="dex-card"><div className="section-heading"><div><span className="section-kicker">{mode === "swap" ? "Direct pool swap" : "Constant-product exchange"}</span><h2>{mode === "swap" ? "Swap" : "Fraction liquidity pools"}</h2></div><span className="network-badge"><i /> Preprod</span></div><p className="dex-intro">{mode === "swap" ? "Choose your tokens and enter an amount to swap." : "Trade fractionalized RWA tokens against tADA or a supported native quote asset, provide liquidity, or administer pool lifecycle operations. Every operation is signed by the connected wallet."}</p>{mode !== "swap" && !canCreatePool && <p className="dex-warning" role="status">Pool creation and the three-party bootstrap remain unavailable until the factory migration is redeployed. Existing active pools can still be swapped and have liquidity managed.</p>}{mode !== "swap" && <div className="dex-tabs">{availableActions.map((item) => <button key={item.id} type="button" className={action === item.id ? "selected" : ""} disabled={loading || Boolean(pendingHash)} onClick={() => setAction(item.id)}>{item.label}</button>)}</div>}<form onSubmit={submit}><fieldset className="module-fieldset" disabled={loading || Boolean(pendingHash)}>
-    {mode === "swap" && <DexSwapFields pools={pools} pool={pool} reverse={action === "swap-b"} amount={amount} estimate={estimate} balances={balances} connected={Boolean(lucid)} onAmount={setAmount} onPair={(id, direction) => { setSelected(id); setAction(direction); setAmount(""); setMessage(null); }} />}
-    {mode !== "swap" && action !== "create" && <label className="field dex-field"><span className="field-label">Pool</span><select value={pool?.id ?? ""} onChange={(event) => setSelected(event.target.value)} disabled={!pools.length}>{pools.length ? pools.map((item) => <option key={item.id} value={item.id}>{displayName(item.assetB)} · {item.assetB.policyId.slice(0, 8)}…</option>) : <option>No active pools</option>}</select></label>}
+    {mode === "swap" && <DexSwapFields pools={pools} pool={pool} reverse={action === "swap-b"} amount={amount} estimate={estimate} balances={balances} connected={Boolean(lucid)} assetLabel={assetLabel} onAmount={setAmount} onPair={(id, direction) => { setSelected(id); setAction(direction); setAmount(""); setMessage(null); }} />}
+    {mode !== "swap" && action !== "create" && <label className="field dex-field"><span className="field-label">Pool</span><select value={pool?.id ?? ""} onChange={(event) => setSelected(event.target.value)} disabled={!pools.length}>{pools.length ? pools.map((item) => <option key={item.id} value={item.id}>{assetLabel(item.assetB)} · {item.assetB.policyId.slice(0, 8)}…</option>) : <option>No active pools</option>}</select></label>}
     {action === "create" && <div className="dex-form-grid"><label className="field field-wide"><span className="field-label">Fraction asset unit</span><input value={asset} onChange={(event) => setAsset(event.target.value)} placeholder="policy ID + asset name hex" required /></label><label className="field"><span className="field-label">Initial tADA</span><input type="number" min="2" step="1" value={ada} onChange={(event) => setAda(event.target.value)} required /></label><label className="field"><span className="field-label">Initial fraction units</span><input type="number" min="1" step="1" value={fractionAmount} onChange={(event) => setFractionAmount(event.target.value)} required /></label></div>}
-    {action === "add" && <label className="field dex-field"><span className="field-label">{pool ? displayName(pool.assetA) + " to add" : "Quote asset to add"}</span><input type="text" inputMode="decimal" value={ada} onChange={(event) => setAda(event.target.value)} required /><span className="field-hint">The matching fraction amount is calculated from the current reserve ratio.</span></label>}
+    {action === "add" && <label className="field dex-field"><span className="field-label">{pool ? assetLabel(pool.assetA) + " to add" : "Quote asset to add"}</span><input type="text" inputMode="decimal" value={ada} onChange={(event) => setAda(event.target.value)} required /><span className="field-hint">The matching fraction amount is calculated from the current reserve ratio.</span></label>}
     {action === "remove" && <label className="field dex-field"><span className="field-label">LP units to burn</span><input type="number" inputMode="numeric" min="1" step="1" value={amount} onChange={(event) => setAmount(event.target.value)} required /></label>}
     {preview && mode !== "swap" && <div className="execution-preview" aria-live="polite"><h3>Transaction preview</h3>{preview.lines.map((line) => <p key={line}>{line}</p>)}<p>{preview.warning}</p><p>Keep ADA available for the network fee and required output deposits.</p>{preview.error && <p role="alert" className="form-message error-message">{preview.error}</p>}</div>}
     {mode === "swap" && <div className="swap-quote-note" aria-live="polite">{preview && amount.trim() && <>{preview.lines.slice(2).map((line) => <p key={line}>{line}</p>)}{preview.warning && <p>{preview.warning}</p>}{preview.error && <p role="alert" className="form-message error-message">{preview.error}</p>}</>}<p>{!lucid ? "Connect your wallet to load available pairs and balances." : !pool ? "No active swap pairs are available in this deployment." : "Network fees are separate. Keep ADA available for fees and output deposits."}</p></div>}
     {mode === "admin" && !isAdmin && <p className="dex-warning">Connect the configured factory administrator to use these controls.</p>}{action === "destroy" && <div className="dex-warning">Destroying requires the admin wallet to hold and burn the pool&apos;s entire LP supply. All reserves return to that wallet.</div>}
     {mode === "swap" ? <div className="swap-submit">{!lucid ? <button className="primary-button" type="button" disabled={loading || status === "connecting" || Boolean(pendingHash)} onClick={() => void connect()}>{status === "connecting" ? "Connecting…" : loading ? "Loading exchange…" : "Connect wallet"}</button> : <button className="primary-button" type="submit" disabled={loading || Boolean(pendingHash) || !pool || !amount.trim() || Boolean(preview?.error) || !estimate}>{loading ? "Working…" : pendingHash ? "Awaiting confirmation" : !pool ? "No available pairs" : !amount.trim() ? "Enter an amount" : "Swap"}</button>}{walletError && !lucid && <p className="form-message error-message" role="alert">{walletError}</p>}</div> : <div className="form-footer"><p><span className="status-dot" /> {pools.length} active pool{pools.length === 1 ? "" : "s"}</p><button className="primary-button" type="submit" disabled={loading || Boolean(pendingHash) || !lucid || Boolean(preview?.error) || (mode === "admin" && !isAdmin) || (action === "create" && !canCreatePool) || (!pool && action !== "create")}>{loading ? "Working…" : availableActions.find((item) => item.id === action)?.label} <span className="button-arrow">↗</span></button></div>}
   </fieldset></form>{pendingHash && <p className="form-message" role="status">Submitted; waiting for confirmation. <a href={`https://preprod.cardanoscan.io/transaction/${pendingHash}`} target="_blank" rel="noreferrer">View transaction</a> <button type="button" onClick={() => void checkPending().catch(() => setMessage({ kind: "error", text: "Unable to check confirmation. Try again." }))} disabled={loading}>Check confirmation</button></p>}{sessionError && <p className="form-message error-message" role="alert">{sessionError}</p>}{message && <p className={`form-message ${message.kind === "error" ? "error-message" : "success-message"}`}>{message.text}</p>}</div>
-  <div className="dex-pools"><div className="dex-pools-head"><div><span className="section-kicker">On-chain state</span><h3>Active pools</h3></div><button type="button" className="refresh-button" onClick={() => void refresh()} disabled={loading}>Refresh</button></div>{!lucid ? <p className="dex-empty">Connect Eternl to read and operate the deployed pools.</p> : pools.length === 0 ? <p className="dex-empty">No active pool is currently indexed.</p> : pools.map((item) => <article className="dex-pool" key={item.id}><div><strong>{displayName(item.assetB)} / {displayName(item.assetA)}</strong><code>{assetUnit(item.assetB)}</code></div><dl><div><dt>{displayName(item.assetA)} reserve</dt><dd>{item.assetA.policyId ? format(item.reserveA) : formatAda(item.reserveA)}</dd></div><div><dt>Fraction reserve</dt><dd>{format(item.reserveB)}</dd></div><div><dt>LP supply</dt><dd>{format(item.liquidity)}</dd></div><div><dt>Fee</dt><dd>{Number(item.feeD - item.feeN) / Number(item.feeD) * 100}%</dd></div></dl></article>)}{deployment && <a className="explorer-link" href={`https://preprod.cardanoscan.io/address/${deployment.ammAddress}`} target="_blank" rel="noreferrer">Inspect DEX on Cardanoscan <span className="button-arrow">↗</span></a>}</div></section>;
+  <div className="dex-pools"><div className="dex-pools-head"><div><span className="section-kicker">On-chain state</span><h3>Active pools</h3></div><button type="button" className="refresh-button" onClick={() => void refresh()} disabled={loading}>Refresh</button></div>{!lucid ? <p className="dex-empty">Connect Eternl to read and operate the deployed pools.</p> : pools.length === 0 ? <p className="dex-empty">No active pool is currently indexed.</p> : pools.map((item) => <article className="dex-pool" key={item.id}><div><strong>{assetLabel(item.assetB)} / {assetLabel(item.assetA)}</strong><code>{assetUnit(item.assetB)}</code></div><dl><div><dt>{assetLabel(item.assetA)} reserve</dt><dd>{item.assetA.policyId ? format(item.reserveA) : formatAda(item.reserveA)}</dd></div><div><dt>Fraction reserve</dt><dd>{format(item.reserveB)}</dd></div><div><dt>LP supply</dt><dd>{format(item.liquidity)}</dd></div><div><dt>Fee</dt><dd>{Number(item.feeD - item.feeN) / Number(item.feeD) * 100}%</dd></div></dl></article>)}{deployment && <a className="explorer-link" href={`https://preprod.cardanoscan.io/address/${deployment.ammAddress}`} target="_blank" rel="noreferrer">Inspect DEX on Cardanoscan <span className="button-arrow">↗</span></a>}</div></section>;
 }

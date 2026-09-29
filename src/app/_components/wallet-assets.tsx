@@ -5,6 +5,7 @@ import Link from "next/link";
 import { useEffect, useMemo, useState } from "react";
 import type { LucidEvolution } from "@lucid-evolution/lucid";
 import { formatWalletAda, summarizeWalletAssets, type WalletAsset, type WalletHoldings } from "@/lib/wallet-assets";
+import { assetDisplayName, cachedAssetName, loadAssetNames, rememberAssetName } from "@/lib/asset-display-name";
 import { marketplaceDeployment } from "@/lib/protocol/marketplace-deployment";
 import dexDeployment from "../../../dex-deployment.preprod.json";
 import PortfolioSale from "./portfolio-sale";
@@ -114,16 +115,21 @@ export default function WalletAssets() {
   const [listingAsset, setListingAsset] = useState<WalletAsset | null>(null);
   const [fractionalizeAction, setFractionalizeAction] = useState<FractionalizeAction | null>(null);
   const [assetPreviews, setAssetPreviews] = useState<Record<string, AssetPreview>>({});
+  const [assetNames, setAssetNames] = useState<Record<string, string>>({});
   const [fractionLinks, setFractionLinks] = useState<Map<string, FractionVaultLink>>(() => new Map());
   const [fractionLinkStatus, setFractionLinkStatus] = useState<"idle" | "loading" | "ready" | "error">("idle");
   const connected = status === "connected" && Boolean(address && lucid);
   const current = connected && result?.owner === address && result.wallet === lucid && result.revision === revision ? result : null;
   const loading = connected && !current;
   const holdings = current?.holdings;
+  const namedAssets = useMemo(() => holdings?.assets.map((asset) => ({
+    ...asset,
+    name: assetDisplayName(asset.unit, asset.name, assetNames, fractionLinks.get(asset.unit)?.originalUnit),
+  })) ?? [], [assetNames, fractionLinks, holdings]);
   const visibleAssets = useMemo(() => {
     const query = search.trim().toLowerCase();
-    return holdings?.assets.filter((asset) => !query || asset.name.toLowerCase().includes(query) || asset.unit.includes(query)) ?? [];
-  }, [holdings, search]);
+    return namedAssets.filter((asset) => !query || asset.name.toLowerCase().includes(query) || asset.unit.includes(query));
+  }, [namedAssets, search]);
   const groupedAssets = useMemo(() => {
     const originals: WalletAsset[] = [];
     const fractions: FractionAsset[] = [];
@@ -186,19 +192,31 @@ export default function WalletAssets() {
   useEffect(() => {
     let cancelled = false;
     const units = holdings?.assets.map((asset) => asset.unit) ?? [];
-    if (units.length === 0) { setAssetPreviews({}); return; }
+    if (units.length === 0) { setAssetPreviews({}); setAssetNames({}); return; }
+    setAssetNames((current) => ({ ...current, ...Object.fromEntries(units.map((unit) => [unit, cachedAssetName(unit)]).filter(([, name]) => Boolean(name))) }));
     void Promise.all(units.map(async (assetUnit) => {
       try {
         const response = await fetch("/api/blockfrost/assets/" + encodeURIComponent(assetUnit), { cache: "force-cache" });
         if (!response.ok) return null;
         const asset = await response.json() as { onchain_metadata?: unknown };
-        return [assetUnit, previewMetadata(asset.onchain_metadata)] as const;
+        return [assetUnit, previewMetadata(asset.onchain_metadata), rememberAssetName(assetUnit, asset.onchain_metadata)] as const;
       } catch { return null; }
     })).then((results) => {
-      if (!cancelled) setAssetPreviews(Object.fromEntries(results.filter((result): result is readonly [string, AssetPreview] => result !== null)));
+      if (!cancelled) {
+        setAssetPreviews(Object.fromEntries(results.filter((result): result is readonly [string, AssetPreview, string] => result !== null).map(([unit, preview]) => [unit, preview])));
+        setAssetNames((current) => ({ ...current, ...Object.fromEntries(results.filter((result): result is readonly [string, AssetPreview, string] => result !== null && Boolean(result[2])).map(([unit, , name]) => [unit, name])) }));
+      }
     });
     return () => { cancelled = true; };
   }, [holdings]);
+
+  useEffect(() => {
+    const originalUnits = [...new Set([...fractionLinks.values()].map((link) => link.originalUnit))];
+    if (!originalUnits.length) return;
+    let cancelled = false;
+    void loadAssetNames(originalUnits).then((names) => { if (!cancelled) setAssetNames((current) => ({ ...current, ...names })); });
+    return () => { cancelled = true; };
+  }, [fractionLinks]);
 
   function openListing(asset: WalletAsset) { setListingAsset(asset); }
 

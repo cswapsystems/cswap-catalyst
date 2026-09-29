@@ -83,6 +83,32 @@ test("asset links load the requested metadata and attestation", async ({ page })
   await expect(page.getByRole("link", { name: /Proof of authenticity/ })).toHaveAttribute("href", `/api/ipfs/gateway/${proofCid}`);
   await expect(page.getByRole("link", { name: /Asset image/ })).toHaveAttribute("href", `/api/ipfs/gateway/${imageCid}`);
   await expect(page.getByRole("img", { name: "Test RWA" })).toHaveAttribute("src", `/api/ipfs/gateway/${imageCid}`);
+  await expect.poll(() => page.evaluate((unit) => localStorage.getItem("cswap.asset-name.preprod.v1." + unit), asset)).toBe("Test RWA");
+});
+
+test("Portfolio uses the metadata name and retains it when the provider is unavailable", async ({ page }) => {
+  const key = "ab".repeat(28);
+  const policy = "70b2cb1d67a1cd4eac3a92281524cd027a0685407d77e54132d1dd5c";
+  const token = "DEMO-COL-01";
+  const tokenHex = Buffer.from(token).toString("hex");
+  const unit = policy + tokenHex;
+  const assets = CML.MultiAsset.new();
+  assets.set(CML.ScriptHash.from_hex(policy), CML.AssetName.from_str(token), BigInt(1));
+  const input = CML.TransactionInput.new(CML.TransactionHash.from_hex("ac".repeat(32)), BigInt(0));
+  const output = CML.TransactionOutput.new(CML.Address.from_hex("60" + key), CML.Value.new(BigInt(5_000_000), assets));
+  await mockWallet(page, key, [CML.TransactionUnspentOutput.new(input, output).to_cbor_hex()]);
+  let providerAvailable = true;
+  await page.route(`**/api/blockfrost/assets/${unit}`, route => providerAvailable
+    ? route.fulfill({ json: { onchain_metadata: { name: "Preprod Demo Spiral Canvas" } } })
+    : route.fulfill({ status: 503, json: { error: "Offline" } }));
+  await page.goto("/my-assets");
+  await page.locator("header").getByRole("button", { name: "Connect Eternl" }).click();
+  await expect(page.getByRole("heading", { name: "Preprod Demo Spiral Canvas" })).toBeVisible();
+  providerAvailable = false;
+  await page.reload();
+  const connectButton = page.locator("header").getByRole("button", { name: "Connect Eternl" });
+  if (await connectButton.isVisible()) await connectButton.click();
+  await expect(page.getByRole("heading", { name: "Preprod Demo Spiral Canvas" })).toBeVisible();
 });
 
 test("disconnected Marketplace and Swap provide readable next steps", async ({ page }) => {
