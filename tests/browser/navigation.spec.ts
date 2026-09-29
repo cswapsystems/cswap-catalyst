@@ -68,17 +68,21 @@ test("owner listing management is distinct from browsing the market", async ({ p
 
 test("asset links load the requested metadata and attestation", async ({ page }) => {
   const asset = "a".repeat(56) + "74657374";
+  const imageCid = "QmYwAPJzv5CZsnAzt8auVTL7rZ3pUqC4hY4oF5nYhYy2PP";
+  const proofCid = "QmYwAPJzv5CZsnAzt8auVTL7rZ3pUqC4hY4oF5nYhYy2PP";
   await page.route(`**/api/blockfrost/assets/${asset}*`, route => {
     if (route.request().url().endsWith("/metadata")) return route.fulfill({ json: {} });
     return route.fulfill({ json: {
       asset, policy_id: "a".repeat(56), asset_name: "74657374",
-      onchain_metadata: { name: "Test RWA", files: [{ name: "Proof of authenticity", mediaType: "application/pdf", src: "ipfs://QmYwAPJzv5CZsnAzt8auVTL7rZ3pUqC4hY4oF5nYhYy2PP" }] },
+      onchain_metadata: { name: "Test RWA", image: `ipfs://${imageCid}`, files: [{ name: "Proof of authenticity", mediaType: "application/pdf", src: `ipfs://${proofCid}` }] },
     } });
   });
   await page.goto(`/assets?asset=${asset}`);
   await expect(page.getByRole("textbox", { name: "Asset ID" })).toHaveValue(asset);
   await expect(page.getByRole("heading", { name: "Test RWA" })).toBeVisible();
-  await expect(page.getByRole("link", { name: /Proof of authenticity/ })).toBeVisible();
+  await expect(page.getByRole("link", { name: /Proof of authenticity/ })).toHaveAttribute("href", `/api/ipfs/gateway/${proofCid}`);
+  await expect(page.getByRole("link", { name: /Asset image/ })).toHaveAttribute("href", `/api/ipfs/gateway/${imageCid}`);
+  await expect(page.getByRole("img", { name: "Test RWA" })).toHaveAttribute("src", `/api/ipfs/gateway/${imageCid}`);
 });
 
 test("disconnected Marketplace and Swap provide readable next steps", async ({ page }) => {

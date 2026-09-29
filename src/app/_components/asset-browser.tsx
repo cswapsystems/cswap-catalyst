@@ -40,7 +40,10 @@ function findMetadata(sources: unknown[], policyId: string, tokenNameHex: string
 function validFileUri(value: string): boolean { return /^(?:https?:\/\/|ipfs:\/\/|ar:\/\/)/i.test(value); }
 function gatewayUrl(value: string): string | null {
   if (!validFileUri(value)) return null;
-  if (value.toLowerCase().startsWith("ipfs://")) return `https://ipfs.io/ipfs/${value.slice(7).replace(/^ipfs\//i, "")}`;
+  if (value.toLowerCase().startsWith("ipfs://")) {
+    const cid = value.slice(7).replace(/^ipfs\//i, "").split("/")[0];
+    return /^(?:Qm[1-9A-HJ-NP-Za-km-z]{44}|b[a-z2-7]{20,120})$/.test(cid) ? "/api/ipfs/gateway/" + cid : null;
+  }
   if (value.toLowerCase().startsWith("ar://")) return `https://arweave.net/${value.slice(5)}`;
   return value;
 }
