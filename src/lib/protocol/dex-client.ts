@@ -68,6 +68,18 @@ export function displayName(asset: AssetClass) {
 export function dexLpDisplayName(assetA: AssetClass, assetB: AssetClass, label: (asset: AssetClass) => string) {
   return `${label(assetB)} - ${assetA.policyId ? label(assetA) : "ADA"} LP`;
 }
+export function formatPoolSpotPrice(quoteReserve: bigint, tokenReserve: bigint, adaQuote: boolean, precision = 6) {
+  if (quoteReserve <= BigInt(0) || tokenReserve <= BigInt(0)) return "Unavailable";
+  const denominator = tokenReserve * (adaQuote ? BigInt(1_000_000) : BigInt(1));
+  const whole = quoteReserve / denominator;
+  const remainder = quoteReserve % denominator;
+  const grouped = whole.toString().replace(/\B(?=(\d{3})+(?!\d))/g, ",");
+  if (!remainder || precision <= 0) return grouped;
+  const scale = BigInt(10) ** BigInt(precision);
+  const fraction = (remainder * scale / denominator).toString().padStart(precision, "0").replace(/0+$/, "");
+  if (fraction) return `${grouped}.${fraction}`;
+  return whole === BigInt(0) ? `< 0.${"0".repeat(Math.max(precision - 1, 0))}1` : grouped;
+}
 export function format(value: bigint) { return new Intl.NumberFormat("en-US").format(value); }
 
 export async function loadDex(tools: Tools) {

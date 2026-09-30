@@ -19,6 +19,7 @@ export const navigationSections: Record<string, NavigationSection> = {
   ] },
   dex: { label: "Exchange", primary: "/dex", items: [
     { href: "/dex", label: "Swap" },
+    { href: "/dex/pools", label: "Pools" },
     { href: "/dex/liquidity", label: "Pool liquidity" },
     { href: "/dex/launch", label: "Launch a pool" },
   ] },

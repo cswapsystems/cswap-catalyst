@@ -2,7 +2,7 @@ import assert from "node:assert/strict";
 import test from "node:test";
 import { parseAdaToLovelace, quoteConstantProduct, quoteLiquidityDeposit, quoteLiquidityWithdrawal, priceImpactBps } from "../src/lib/dex.ts";
 import { findSwapMarket, swapTargets, swapTokens } from "../src/lib/dex-swap.ts";
-import { dexLpDisplayName } from "../src/lib/protocol/dex-client.ts";
+import { dexLpDisplayName, formatPoolSpotPrice } from "../src/lib/protocol/dex-client.ts";
 
 const ada = { policyId: "", assetName: "" };
 const tokenA = { policyId: "aa".repeat(28), assetName: "01" };
@@ -38,6 +38,13 @@ test("DEX LP labels identify the underlying pair instead of the binary pool ID",
   const label = asset => asset === tokenA ? "FRACTION A" : asset === nativeQuote ? "USDCx" : "Unknown";
   assert.equal(dexLpDisplayName(ada, tokenA, label), "FRACTION A - ADA LP");
   assert.equal(dexLpDisplayName(nativeQuote, tokenA, label), "FRACTION A - USDCx LP");
+});
+
+test("pool spot prices normalize lovelace and retain exact reserve ratios", () => {
+  assert.equal(formatPoolSpotPrice(25_000_000n, 100n, true), "0.25");
+  assert.equal(formatPoolSpotPrice(250_000n, 100n, false), "2,500");
+  assert.equal(formatPoolSpotPrice(1n, 10_000_000n, true), "< 0.000001");
+  assert.equal(formatPoolSpotPrice(0n, 100n, true), "Unavailable");
 });
 
 test("parses ADA amounts exactly into lovelace", () => {

@@ -11,7 +11,7 @@ Existing working URLs remain available. `/list` and the retired demo `/liquidate
 | Marketplace | `/marketplace` | Buy listings; owners can edit/cancel direct listings. Sale creation lives in Portfolio. |
 | Protocol (More) | `/protocol`, `/asset-registry`, `/vault` | Public statistics, admission and custody inspection. |
 | Portfolio | `/my-assets`, `/portfolio/positions`, `/portfolio/orders`, `/portfolio/asset-requests`, `/portfolio/reserves`, `/wallet`, `/history` | Wallet holdings, positions, owned listings, owner asset-support requests, shared reserve LP actions, wallet details and activity. |
-| DEX | `/dex`, `/dex/liquidity`, `/dex/launch` | Swaps, LP deposits/withdrawals, and three-party bootstrap. |
+| DEX | `/dex`, `/dex/pools`, `/dex/liquidity`, `/dex/launch` | Swaps, public pool prices/liquidity, LP deposits/withdrawals, and three-party bootstrap. |
 | Create | `/mint`, `/fractionalize` | Mint metadata-backed tokens or split/combine ownership. Minting does not imply registry admission or independent verification. |
 | Operations | `/team`, `/team/inventory`, `/registry`, `/team/controls`, `/team/dex`, `/team/recovery`, `/wallets` | Issuer request approval, on-chain prices and inventory, pool configuration, three-party DEX bootstrap review, factory administration, recovery, and the connected Team wallet. |
 
@@ -38,6 +38,13 @@ entered in human tADA, while native tokens are explicitly shown in base units.
 The single Swap action preserves balance checks, fee/impact disclosure, fresh
 pool-state validation, and confirmation guards. Liquidity and administrator
 workflows remain separate.
+
+The public Pools page lists every authenticated active pair without requiring a
+wallet connection. Its spot price is the current quote reserve divided by the
+token reserve; ADA quotes are converted from lovelace. ADA-pair liquidity is
+shown as twice the ADA reserve, valuing both sides at that spot price. Native
+quote pools retain base-unit labels because the protocol does not define token
+decimal metadata.
 
 Transaction previews show wallet balances, fee-inclusive spot-price impact, exact ratio-rounded deposits, expected LP mint/burn and both withdrawal assets. Pre-signing pool freshness checks reject a changed UTxO and require a new review. The direct AMM uses an exact state and quote; there is no configurable order-batcher slippage model.
 
