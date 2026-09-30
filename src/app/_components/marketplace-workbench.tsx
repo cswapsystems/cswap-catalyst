@@ -152,7 +152,11 @@ export default function MarketplaceWorkbench({ ownerOnly = false }: { ownerOnly?
   const p2pListings = useMemo(() => listings.filter((listing) => listing.settlement === "direct"), [listings]);
   const poolListings = useMemo(() => listings.filter((listing) => listing.settlement === "pool"), [listings]);
 
-  const transaction = useMarketTransaction(refresh, "marketplace listing or purchase");
+  const transaction = useMarketTransaction(refresh, "marketplace listing or purchase", (confirmed) => {
+    if (confirmed.operation !== "instant sell cancellation") return false;
+    setMarketplaceToast("Instant Sell order cancelled. Transaction " + confirmed.hash);
+    return true;
+  });
   const pendingListings = useMemo(() => listings.filter((listing) => listing.settlement === "instant"), [listings]);
   async function execute(listing: Listing, kind: "buy" | "cancel" | "update", price?: bigint) {
     if (!lucid || !address) return;
@@ -171,7 +175,7 @@ export default function MarketplaceWorkbench({ ownerOnly = false }: { ownerOnly?
     }, async () => {
       if (expectedPool) await assertFreshPool(lucid, await import("@lucid-evolution/lucid"), expectedPool);
       if (!(await lucid.utxosByOutRef([listing.utxo])).length) throw new Error("Listing was spent. Refresh before signing.");
-    });
+    }, undefined, kind === "cancel" && listing.settlement === "instant" ? "instant sell cancellation" : undefined);
     setEditing(null);
   }
   async function buyListing(listing: Listing) { await execute(listing, "buy"); }

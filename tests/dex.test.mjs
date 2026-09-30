@@ -2,6 +2,7 @@ import assert from "node:assert/strict";
 import test from "node:test";
 import { parseAdaToLovelace, quoteConstantProduct, quoteLiquidityDeposit, quoteLiquidityWithdrawal, priceImpactBps } from "../src/lib/dex.ts";
 import { findSwapMarket, swapTargets, swapTokens } from "../src/lib/dex-swap.ts";
+import { dexLpDisplayName } from "../src/lib/protocol/dex-client.ts";
 
 const ada = { policyId: "", assetName: "" };
 const tokenA = { policyId: "aa".repeat(28), assetName: "01" };
@@ -31,6 +32,12 @@ test("pair selection preserves a preferred pool and falls back to a supported ma
   const duplicate = { ...markets[0], id: "duplicate" };
   assert.deepEqual(findSwapMarket([...markets, duplicate], unit(ada), unit(tokenA), "duplicate"), { id: "duplicate", action: "swap-a" });
   assert.deepEqual(findSwapMarket(markets, unit(tokenB)), { id: "second", action: "swap-b" });
+});
+
+test("DEX LP labels identify the underlying pair instead of the binary pool ID", () => {
+  const label = asset => asset === tokenA ? "FRACTION A" : asset === nativeQuote ? "USDCx" : "Unknown";
+  assert.equal(dexLpDisplayName(ada, tokenA, label), "FRACTION A - ADA LP");
+  assert.equal(dexLpDisplayName(nativeQuote, tokenA, label), "FRACTION A - USDCx LP");
 });
 
 test("parses ADA amounts exactly into lovelace", () => {

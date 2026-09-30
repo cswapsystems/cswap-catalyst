@@ -4,9 +4,10 @@ import Image from "next/image";
 import Link from "next/link";
 import { useEffect, useMemo, useState } from "react";
 import type { LucidEvolution } from "@lucid-evolution/lucid";
-import { formatWalletAda, summarizeWalletAssets, type WalletAsset, type WalletHoldings } from "@/lib/wallet-assets";
+import { formatWalletAda, summarizeWalletAssets, walletAssetName, type WalletAsset, type WalletHoldings } from "@/lib/wallet-assets";
 import { assetDisplayName, cachedAssetName, loadAssetNames, rememberAssetName } from "@/lib/asset-display-name";
 import { marketplaceDeployment } from "@/lib/protocol/marketplace-deployment";
+import { assetUnit, decodePool, dexLpDisplayName, isAuthenticatedPool, type AssetClass, type Deployment } from "@/lib/protocol/dex-client";
 import dexDeployment from "../../../dex-deployment.preprod.json";
 import PortfolioSale from "./portfolio-sale";
 import WorkflowLinks from "./workflow-links";
@@ -21,6 +22,7 @@ type DataConstr = { index: number; fields: unknown[] };
 type FractionVaultLink = { originalUnit: string; totalFractions: bigint; vaultAddress: string };
 type FractionAsset = { asset: WalletAsset; link: FractionVaultLink };
 type FractionalizeAction = { mode: "split" | "combine"; originalUnit: string; assetName: string };
+type DexLpPair = { assetA: AssetClass; assetB: AssetClass };
 
 function metadataText(value: unknown): string {
   return Array.isArray(value) ? value.filter((part): part is string => typeof part === "string").join("") : typeof value === "string" ? value : "";
@@ -76,8 +78,9 @@ async function loadFractionVaultLinks(lucid: LucidEvolution): Promise<Map<string
 
 function formatTokenQuantity(quantity: bigint): string { return new Intl.NumberFormat("en-US").format(quantity); }
 
-function WalletAssetRow({ asset, preview, fractionLink, onList, onFractionalize, onCombine }: { asset: WalletAsset; preview?: AssetPreview; fractionLink?: FractionVaultLink; onList: (asset: WalletAsset) => void; onFractionalize?: (asset: WalletAsset) => void; onCombine: (asset: WalletAsset, link: FractionVaultLink) => void }) {
+function WalletAssetRow({ asset, preview, fractionLink, onList, onFractionalize, onCombine }: { asset: WalletAsset; preview?: AssetPreview; fractionLink?: FractionVaultLink; onList?: (asset: WalletAsset) => void; onFractionalize?: (asset: WalletAsset) => void; onCombine: (asset: WalletAsset, link: FractionVaultLink) => void }) {
   const canCombine = Boolean(fractionLink && asset.quantity === fractionLink.totalFractions);
+  const directHolding = !fractionLink;
   return <li className="wallet-asset-row">
     <div className="wallet-asset-thumbnail">{preview?.image ? <Image src={preview.image} alt="" width={72} height={72} unoptimized /> : <span aria-hidden="true">RWA</span>}</div>
     <div className="wallet-asset-info">
@@ -96,13 +99,14 @@ function WalletAssetRow({ asset, preview, fractionLink, onList, onFractionalize,
       {preview?.attachments.length ? <div className="wallet-asset-attachments"><span>Attachments</span>{preview.attachments.map((attachment) => <a key={attachment.href} href={attachment.href} target="_blank" rel="noreferrer">{attachment.label} ↗</a>)}</div> : null}
     </div>
     <div className="wallet-asset-quantity"><span>Quantity · base units</span><strong>{formatTokenQuantity(asset.quantity)}</strong></div>
-    <div className="wallet-asset-actions">
-      <Link className="wallet-asset-inspect" href={"/assets?asset=" + asset.unit} aria-label={"Inspect " + asset.name}>Inspect asset ↗</Link>
+    <div className={"wallet-asset-actions" + (directHolding ? " wallet-asset-actions-direct" : "")}>
+      {directHolding && <span className="wallet-asset-actions-label">Actions</span>}
+      <Link className={directHolding ? "wallet-asset-action" : "wallet-asset-inspect"} href={"/assets?asset=" + asset.unit} aria-label={"Inspect " + asset.name}>Inspect asset <span aria-hidden="true">↗</span></Link>
       {fractionLink ? <>
         <button className="text-button" type="button" disabled={!canCombine} onClick={() => onCombine(asset, fractionLink)}>Combine</button>
         <span className={"wallet-combine-threshold" + (canCombine ? " ready" : "")}>{canCombine ? "Vault threshold met — ready to combine" : formatTokenQuantity(asset.quantity) + " of " + formatTokenQuantity(fractionLink.totalFractions) + " fractions required"}</span>
-      </> : onFractionalize ? <button className="text-button" type="button" onClick={() => onFractionalize(asset)}>Fractionalize</button> : null}
-      <button className="text-button" type="button" onClick={() => onList(asset)}>Sell / List</button>
+      </> : onFractionalize ? <button className="wallet-asset-action" type="button" onClick={() => onFractionalize(asset)}>Fractionalize</button> : null}
+      {onList && <button className="wallet-asset-action wallet-asset-action-primary" type="button" onClick={() => onList(asset)}>Sell / List</button>}
     </div>
   </li>;
 }
@@ -118,14 +122,22 @@ export default function WalletAssets() {
   const [assetNames, setAssetNames] = useState<Record<string, string>>({});
   const [fractionLinks, setFractionLinks] = useState<Map<string, FractionVaultLink>>(() => new Map());
   const [fractionLinkStatus, setFractionLinkStatus] = useState<"idle" | "loading" | "ready" | "error">("idle");
+  const [dexLpPairs, setDexLpPairs] = useState<Record<string, DexLpPair>>({});
   const connected = status === "connected" && Boolean(address && lucid);
   const current = connected && result?.owner === address && result.wallet === lucid && result.revision === revision ? result : null;
   const loading = connected && !current;
   const holdings = current?.holdings;
-  const namedAssets = useMemo(() => holdings?.assets.map((asset) => ({
-    ...asset,
-    name: assetDisplayName(asset.unit, asset.name, assetNames, fractionLinks.get(asset.unit)?.originalUnit),
-  })) ?? [], [assetNames, fractionLinks, holdings]);
+  const namedAssets = useMemo(() => holdings?.assets.map((asset) => {
+    const pair = dexLpPairs[asset.unit];
+    const label = (item: AssetClass) => {
+      const unit = assetUnit(item);
+      return assetDisplayName(unit, walletAssetName(item.assetName), assetNames, fractionLinks.get(unit)?.originalUnit);
+    };
+    return {
+      ...asset,
+      name: pair ? dexLpDisplayName(pair.assetA, pair.assetB, label) : assetDisplayName(asset.unit, asset.name, assetNames, fractionLinks.get(asset.unit)?.originalUnit),
+    };
+  }) ?? [], [assetNames, dexLpPairs, fractionLinks, holdings]);
   const visibleAssets = useMemo(() => {
     const query = search.trim().toLowerCase();
     return namedAssets.filter((asset) => !query || asset.name.toLowerCase().includes(query) || asset.unit.includes(query));
@@ -168,6 +180,30 @@ export default function WalletAssets() {
         setFractionLinkStatus("error");
       }
     });
+    return () => { cancelled = true; };
+  }, [address, lucid, revision, status]);
+
+  useEffect(() => {
+    if (!lucid || !address || status !== "connected") {
+      setDexLpPairs({});
+      return;
+    }
+    let cancelled = false;
+    void (async () => {
+      try {
+        const tools = await import("@lucid-evolution/lucid");
+        const pairs: Record<string, DexLpPair> = {};
+        for (const utxo of await lucid.utxosAt(dexDeployment.ammAddress)) {
+          try {
+            const pool = decodePool(tools, utxo);
+            if (isAuthenticatedPool(pool, dexDeployment as Deployment)) pairs[assetUnit(pool.lpToken)] = { assetA: pool.assetA, assetB: pool.assetB };
+          } catch { /* Ignore unrelated or malformed outputs at the DEX address. */ }
+        }
+        if (!cancelled) setDexLpPairs(pairs);
+      } catch {
+        if (!cancelled) setDexLpPairs({});
+      }
+    })();
     return () => { cancelled = true; };
   }, [address, lucid, revision, status]);
 
@@ -217,6 +253,15 @@ export default function WalletAssets() {
     void loadAssetNames(originalUnits).then((names) => { if (!cancelled) setAssetNames((current) => ({ ...current, ...names })); });
     return () => { cancelled = true; };
   }, [fractionLinks]);
+
+  useEffect(() => {
+    const units = [...new Set(Object.values(dexLpPairs).flatMap((pair) => [assetUnit(pair.assetA), assetUnit(pair.assetB)]).filter((unit) => unit !== "lovelace"))];
+    if (!units.length) return;
+    let cancelled = false;
+    setAssetNames((current) => ({ ...current, ...Object.fromEntries(units.map((unit) => [unit, cachedAssetName(unit)]).filter(([, name]) => Boolean(name))) }));
+    void loadAssetNames(units).then((names) => { if (!cancelled) setAssetNames((current) => ({ ...current, ...names })); });
+    return () => { cancelled = true; };
+  }, [dexLpPairs]);
 
   function openListing(asset: WalletAsset) { setListingAsset(asset); }
 
@@ -270,7 +315,7 @@ export default function WalletAssets() {
             </section>
             <section className="wallet-assets-group" aria-labelledby="fraction-assets-title">
               <div className="wallet-assets-group-heading"><div><span className="section-kicker">Vault-linked holdings</span><h3 id="fraction-assets-title">Fractions</h3><p>Fraction tokens held in this wallet, with their original asset preserved through the vault.</p></div><span>{groupedAssets.fractions.length.toLocaleString("en-US")}</span></div>
-              {groupedAssets.fractions.length ? <ul className="wallet-assets-list">{groupedAssets.fractions.map(({ asset, link }) => <WalletAssetRow key={asset.unit} asset={asset} preview={assetPreviews[asset.unit]} fractionLink={link} onList={openListing} onCombine={openCombine} />)}</ul> : <p className="wallet-assets-empty wallet-assets-list-empty">{fractionLinkStatus === "ready" ? "No fractional positions match your search." : "Fraction classification is not yet verified."}</p>}
+              {groupedAssets.fractions.length ? <ul className="wallet-assets-list">{groupedAssets.fractions.map(({ asset, link }) => <WalletAssetRow key={asset.unit} asset={asset} preview={assetPreviews[asset.unit]} fractionLink={link} onCombine={openCombine} />)}</ul> : <p className="wallet-assets-empty wallet-assets-list-empty">{fractionLinkStatus === "ready" ? "No fractional positions match your search." : "Fraction classification is not yet verified."}</p>}
             </section>
           </div>
         </>}

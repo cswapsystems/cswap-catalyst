@@ -65,6 +65,9 @@ export function displayName(asset: AssetClass) {
   try { const pairs = asset.assetName.match(/.{2}/g) ?? []; return new TextDecoder("utf-8", { fatal: true }).decode(Uint8Array.from(pairs, (byte) => Number.parseInt(byte, 16))) || "Fraction token"; }
   catch { return "Fraction token"; }
 }
+export function dexLpDisplayName(assetA: AssetClass, assetB: AssetClass, label: (asset: AssetClass) => string) {
+  return `${label(assetB)} - ${assetA.policyId ? label(assetA) : "ADA"} LP`;
+}
 export function format(value: bigint) { return new Intl.NumberFormat("en-US").format(value); }
 
 export async function loadDex(tools: Tools) {

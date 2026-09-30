@@ -13,7 +13,7 @@ function stored(wallet: string): Recovery["state"] {
   catch { return unavailable; }
 }
 
-export function useMarketTransaction(onConfirmed: () => Promise<void>, operation: string) {
+export function useMarketTransaction(onConfirmed: () => Promise<void>, operation: string, onSuccess?: (transaction: PendingMarketTransaction) => boolean) {
   const { lucid, address } = useWallet();
   const [busy, setBusy] = useState(false), [recovery, setRecovery] = useState<Recovery | null>(null);
   const [message, setMessage] = useState(""), [recoveryWarning, setRecoveryWarning] = useState("");
@@ -34,7 +34,7 @@ export function useMarketTransaction(onConfirmed: () => Promise<void>, operation
   const recoveryError = state?.kind === "unavailable" ? state.message : "";
   const ready = Boolean(address && state);
   const broadcast = () => window.dispatchEvent(new Event(PENDING_MARKET_EVENT));
-  async function run(prepare: () => Promise<TxBuilder>, revalidate?: () => Promise<unknown>, onSubmitted?: (hash: string) => void) {
+  async function run(prepare: () => Promise<TxBuilder>, revalidate?: () => Promise<unknown>, onSubmitted?: (hash: string) => void, operationName = operation) {
     if (!lucid || !address || busy || !ready || pending || recoveryError) return;
     const owner = address;
     setBusy(true); setMessage("");
@@ -48,21 +48,21 @@ export function useMarketTransaction(onConfirmed: () => Promise<void>, operation
       const latest = stored(owner);
       if (latest.kind !== "empty") { setRecovery({ wallet: owner, state: latest }); throw new Error(latest.kind === "pending" ? "A Marketplace transaction is awaiting confirmation. Check it before signing again." : latest.message); }
       const submitted = await (await completed.sign.withWallet().complete()).submit();
-      const record: PendingMarketTransaction = { version: 1, network: "preprod", wallet: owner, operation, hash: submitted, submittedAt: Date.now() };
+      const record: PendingMarketTransaction = { version: 1, network: "preprod", wallet: owner, operation: operationName, hash: submitted, submittedAt: Date.now() };
       setRecovery({ wallet: owner, state: { kind: "pending", transaction: record } });
       try { savePendingMarket(window.localStorage, record); broadcast(); }
       catch { setRecoveryWarning("This submitted hash could not be saved in browser storage. Keep this page open and copy the transaction hash before navigating away."); }
       onSubmitted?.(submitted); setMessage("Submitted: " + submitted + ". Awaiting confirmation.");
       if (!await confirmTransaction(lucid, submitted)) throw new Error("Confirmation not yet verified. Check the submitted transaction before retrying.");
       clearPendingMarket(window.localStorage, owner, submitted); broadcast(); setRecoveryWarning("");
-      if (addressRef.current === owner) { setRecovery({ wallet: owner, state: { kind: "empty" } }); await onConfirmed(); setMessage("Confirmed: " + submitted); }
+      if (addressRef.current === owner) { setRecovery({ wallet: owner, state: { kind: "empty" } }); await onConfirmed(); setMessage(onSuccess?.(record) ? "" : "Confirmed: " + submitted); }
     } catch (error) { setMessage(error instanceof Error ? error.message : "Transaction could not be completed."); }
     finally { setBusy(false); }
   }
   async function check() {
     if (!pending || busy || !address) return; setBusy(true);
     const owner = address, submitted = pending.hash;
-    try { const response = await fetch("/api/blockfrost/txs/" + submitted, { cache: "no-store" }); if (!response.ok) throw new Error("Transaction is not confirmed yet. Do not retry until its fate is known."); clearPendingMarket(window.localStorage, owner, submitted); broadcast(); setRecoveryWarning(""); if (addressRef.current === owner) { setRecovery({ wallet: owner, state: { kind: "empty" } }); await onConfirmed(); setMessage("Transaction confirmed."); } }
+    try { const response = await fetch("/api/blockfrost/txs/" + submitted, { cache: "no-store" }); if (!response.ok) throw new Error("Transaction is not confirmed yet. Do not retry until its fate is known."); clearPendingMarket(window.localStorage, owner, submitted); broadcast(); setRecoveryWarning(""); if (addressRef.current === owner) { setRecovery({ wallet: owner, state: { kind: "empty" } }); await onConfirmed(); setMessage(onSuccess?.(pending) ? "" : "Transaction confirmed."); } }
     catch (error) { setMessage(error instanceof Error ? error.message : "Confirmation unavailable."); }
     finally { setBusy(false); }
   }
