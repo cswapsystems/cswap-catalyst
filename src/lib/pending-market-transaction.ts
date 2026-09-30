@@ -3,6 +3,7 @@ export type PendingMarketTransaction = {
   network: "preprod";
   wallet: string;
   operation: string;
+  listingId?: string;
   hash: string;
   submittedAt: number;
 };
@@ -30,7 +31,7 @@ export function readPendingMarket(storage: StorageReader, wallet: string): Pendi
   if (raw === null) return { kind: "empty" };
   try {
     const value = JSON.parse(raw) as PendingMarketTransaction;
-    if (value?.version !== 1 || value.network !== "preprod" || value.wallet !== wallet || typeof value.operation !== "string" || !/^[a-zA-Z][a-zA-Z -]{0,79}$/.test(value.operation) || typeof value.hash !== "string" || !/^[0-9a-f]{64}$/.test(value.hash) || !Number.isSafeInteger(value.submittedAt) || value.submittedAt <= 0) throw new Error("invalid");
+    if (value?.version !== 1 || value.network !== "preprod" || value.wallet !== wallet || typeof value.operation !== "string" || !/^[a-zA-Z][a-zA-Z -]{0,79}$/.test(value.operation) || (value.listingId !== undefined && (typeof value.listingId !== "string" || !/^[0-9a-f]{64}#[0-9]+$/.test(value.listingId))) || typeof value.hash !== "string" || !/^[0-9a-f]{64}$/.test(value.hash) || !Number.isSafeInteger(value.submittedAt) || value.submittedAt <= 0) throw new Error("invalid");
     return { kind: "pending", transaction: value };
   } catch {
     return { kind: "unavailable", message: "A saved transaction record is invalid. Signing is blocked so a submitted transaction is not accidentally repeated. Preserve browser storage and contact support." };

@@ -30,6 +30,15 @@ test("submitted Marketplace hash survives a reload and is wallet scoped", () => 
   assert.deepEqual(readPendingMarket(storage, wallet), { kind: "empty" });
 });
 
+test("purchase recovery keeps the listing identity for its pending indicator", () => {
+  const storage = memoryStorage();
+  const purchase = { ...transaction, operation: "marketplace purchase", listingId: `${"cd".repeat(32)}#1` };
+  savePendingMarket(storage, purchase);
+  assert.deepEqual(readPendingMarket(storage, wallet), { kind: "pending", transaction: purchase });
+  storage.setItem(pendingMarketKey(wallet), JSON.stringify({ ...purchase, listingId: "another listing" }));
+  assert.equal(readPendingMarket(storage, wallet).kind, "unavailable");
+});
+
 test("corrupt, cross-network and cross-wallet records block signing", () => {
   const storage = memoryStorage();
   for (const invalid of ["{", JSON.stringify({ ...transaction, network: "mainnet" }), JSON.stringify({ ...transaction, wallet: other }), JSON.stringify({ ...transaction, hash: "invalid" })]) {

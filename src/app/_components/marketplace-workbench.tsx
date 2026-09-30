@@ -81,13 +81,15 @@ export default function MarketplaceWorkbench({ ownerOnly = false }: { ownerOnly?
   const [listings, setListings] = useState<Listing[]>([]);
   const [thumbnails, setThumbnails] = useState<Record<string, string>>({});
   const [assetNames, setAssetNames] = useState<Record<string, string>>({});
-  const [purchasedListingIds] = useState<Set<string>>(() => new Set());
+  const [purchasedListingIds, setPurchasedListingIds] = useState<Set<string>>(() => new Set());
+  const [confirmedListingIds, setConfirmedListingIds] = useState<Set<string>>(() => new Set());
+  const [buyingListingId, setBuyingListingId] = useState<string | null>(null);
   const [editing, setEditing] = useState<Listing | null>(null);
   const [editPrice, setEditPrice] = useState("");
   const [loading, setLoading] = useState(false);
   const [loaded, setLoaded] = useState(false);
   const [message, setMessage] = useState<{ kind: "error" | "success"; text: string } | null>(null);
-  const [marketplaceToast, setMarketplaceToast] = useState<string | null>(null);
+  const [marketplaceToast, setMarketplaceToast] = useState<{ title: string; text: string } | null>(null);
   const orderbookAddress = marketplaceOrderbookAddress;
 
   useEffect(() => {
@@ -95,6 +97,7 @@ export default function MarketplaceWorkbench({ ownerOnly = false }: { ownerOnly?
     const timer = window.setTimeout(() => setMarketplaceToast(null), 8_000);
     return () => window.clearTimeout(timer);
   }, [marketplaceToast]);
+  useEffect(() => { setPurchasedListingIds(new Set()); setConfirmedListingIds(new Set()); setBuyingListingId(null); }, [address]);
 
 
   const refresh = useCallback(async () => {
@@ -117,7 +120,10 @@ export default function MarketplaceWorkbench({ ownerOnly = false }: { ownerOnly?
           found.push({ ...listing, managed, fraction: fractions.get(unit(listing.rwa)) });
         } catch { /* skip unrelated script UTxOs */ }
       }
-      setListings(ownerOnly ? found.filter((listing) => listing.managed && listing.settlement !== "pool") : found); setLoaded(true);
+      setListings(ownerOnly ? found.filter((listing) => listing.managed && listing.settlement !== "pool") : found);
+      setPurchasedListingIds((current) => new Set([...current].filter((id) => found.some((listing) => listing.id === id))));
+      setConfirmedListingIds((current) => new Set([...current].filter((id) => found.some((listing) => listing.id === id))));
+      setLoaded(true);
     } catch (cause) {
       setMessage({ kind: "error", text: cause instanceof Error ? cause.message : "Unable to read orderbook listings." });
     } finally { setLoading(false); }
@@ -153,9 +159,17 @@ export default function MarketplaceWorkbench({ ownerOnly = false }: { ownerOnly?
   const poolListings = useMemo(() => listings.filter((listing) => listing.settlement === "pool"), [listings]);
 
   const transaction = useMarketTransaction(refresh, "marketplace listing or purchase", (confirmed) => {
-    if (confirmed.operation !== "instant sell cancellation") return false;
-    setMarketplaceToast("Instant Sell order cancelled. Transaction " + confirmed.hash);
-    return true;
+    if (confirmed.operation === "instant sell cancellation") {
+      setMarketplaceToast({ title: "Order cancelled", text: "Instant Sell order cancelled. Transaction " + confirmed.hash });
+      return true;
+    }
+    if (confirmed.operation === "marketplace purchase") {
+      const listingId = confirmed.listingId;
+      if (listingId) setConfirmedListingIds((current) => new Set(current).add(listingId));
+      setMarketplaceToast({ title: "Purchase successful", text: "Your Marketplace purchase is confirmed. Transaction " + confirmed.hash });
+      return true;
+    }
+    return false;
   });
   const pendingListings = useMemo(() => listings.filter((listing) => listing.settlement === "instant"), [listings]);
   async function execute(listing: Listing, kind: "buy" | "cancel" | "update", price?: bigint) {
@@ -175,10 +189,16 @@ export default function MarketplaceWorkbench({ ownerOnly = false }: { ownerOnly?
     }, async () => {
       if (expectedPool) await assertFreshPool(lucid, await import("@lucid-evolution/lucid"), expectedPool);
       if (!(await lucid.utxosByOutRef([listing.utxo])).length) throw new Error("Listing was spent. Refresh before signing.");
-    }, undefined, kind === "cancel" && listing.settlement === "instant" ? "instant sell cancellation" : undefined);
+    }, kind === "buy" ? () => setPurchasedListingIds((current) => new Set(current).add(listing.id)) : undefined,
+      kind === "buy" ? "marketplace purchase" : kind === "cancel" && listing.settlement === "instant" ? "instant sell cancellation" : undefined,
+      kind === "buy" ? listing.id : undefined);
     setEditing(null);
   }
-  async function buyListing(listing: Listing) { await execute(listing, "buy"); }
+  async function buyListing(listing: Listing) {
+    setBuyingListingId(listing.id);
+    try { await execute(listing, "buy"); }
+    finally { setBuyingListingId(null); }
+  }
   async function cancelListing(listing: Listing) { await execute(listing, "cancel"); }
   function beginEdit(listing: Listing) { setEditing(listing); setEditPrice(listing.price.toString()); }
   async function updateListing(listing: Listing) {
@@ -188,10 +208,12 @@ export default function MarketplaceWorkbench({ ownerOnly = false }: { ownerOnly?
 
   const renderListing = (listing: Listing) => {
     const owned = listing.managed;
-    const purchaseSubmitted = purchasedListingIds.has(listing.id);
+    const purchaseConfirmed = confirmedListingIds.has(listing.id);
+    const purchaseSubmitted = !purchaseConfirmed && (purchasedListingIds.has(listing.id) || (transaction.pendingOperation === "marketplace purchase" && transaction.pendingListingId === listing.id));
+    const buying = buyingListingId === listing.id && !purchaseSubmitted && !purchaseConfirmed;
     const tokenName = assetDisplayName(unit(listing.rwa), assetNameText(listing.rwa.assetName), assetNames, listing.fraction ? unit(listing.fraction.original) : undefined);
     const originalName = listing.fraction ? assetDisplayName(unit(listing.fraction.original), assetNameText(listing.fraction.original.assetName), assetNames) : "";
-    return <article className={"marketplace-listing " + (listingLayout === "card" ? "marketplace-trading-card" : "")} key={listing.id}>
+    return <article className={"marketplace-listing " + (listingLayout === "card" ? "marketplace-trading-card " : "") + (purchaseConfirmed ? "marketplace-purchased" : buying || purchaseSubmitted ? "marketplace-buying" : "")} key={listing.id} aria-busy={buying || purchaseSubmitted}>
       <div className="marketplace-asset">
         <>{thumbnails[unit(listing.rwa)] ? <Image className="marketplace-thumbnail" src={thumbnails[unit(listing.rwa)]} alt={tokenName + " thumbnail"} width={56} height={56} unoptimized /> : <span className={"marketplace-asset-mark " + (listing.fraction ? "fraction" : "")}>{listing.fraction ? "ƒ" : "RWA"}</span>}</>
         <div>
@@ -200,6 +222,7 @@ export default function MarketplaceWorkbench({ ownerOnly = false }: { ownerOnly?
           {listing.fraction && <span className="marketplace-fraction-detail">Fraction of {originalName} · total supply {listing.fraction.totalFractions.toString()}</span>}
           {listing.settlement === "direct" && <Link className="marketplace-asset-details-link" href={"/assets?asset=" + unit(listing.fraction?.original ?? listing.rwa)}>View metadata &amp; attestation ↗</Link>}
           <span className={listing.settlement === "pool" ? "marketplace-badge pool" : "marketplace-badge"}>{listing.settlement === "pool" ? "Pool owned" : listing.settlement === "instant" ? "Instant Sell · pending" : "P2P seller"}</span>
+          {(buying || purchaseSubmitted || purchaseConfirmed) && <span className={"marketplace-badge " + (purchaseConfirmed ? "purchased" : "buying")}>{purchaseConfirmed ? "Purchased · updating orderbook" : purchaseSubmitted ? "Purchase submitted · awaiting confirmation" : "Buying · awaiting wallet"}</span>}
         </div>
       </div>
       <div>
@@ -207,7 +230,7 @@ export default function MarketplaceWorkbench({ ownerOnly = false }: { ownerOnly?
         <strong className="marketplace-listing-value">{listing.priceAsset.policyId ? listing.price.toString() : formatAda(listing.price)} <small>{listing.priceAsset.policyId ? assetDisplayName(unit(listing.priceAsset), assetNameText(listing.priceAsset.assetName), assetNames) : "ADA"}</small></strong>
       </div>
       <div className="marketplace-actions">
-        {purchaseSubmitted ? <button type="button" className="primary" disabled>Purchase submitted</button> : owned ? <><button type="button" className="primary" disabled title="This wallet created the listing">Your listing</button>{listing.settlement !== "pool" && <><button type="button" onClick={() => beginEdit(listing)} disabled={loading || transaction.busy || Boolean(transaction.hash)}>Edit</button><button type="button" onClick={() => void cancelListing(listing)} disabled={loading || transaction.busy || Boolean(transaction.hash)}>Cancel</button></>}</> : listing.settlement === "instant" ? <span className="marketplace-badge">Awaiting batcher · not publicly purchasable</span> : !lucid || !address ? <button type="button" className="primary" onClick={() => void connect()} disabled={loading || transaction.busy || Boolean(transaction.hash)}>Connect wallet to buy</button> : <button type="button" className="primary" onClick={() => void buyListing(listing)} disabled={loading || transaction.busy || Boolean(transaction.hash)}>Buy</button>}
+        {purchaseConfirmed || purchaseSubmitted || buying ? <button type="button" className="primary" disabled>{purchaseConfirmed ? "Purchased" : purchaseSubmitted ? "Purchase submitted" : "Buying…"}</button> : owned ? <><button type="button" className="primary" disabled title="This wallet created the listing">Your listing</button>{listing.settlement !== "pool" && <><button type="button" onClick={() => beginEdit(listing)} disabled={loading || transaction.busy || Boolean(transaction.hash)}>Edit</button><button type="button" onClick={() => void cancelListing(listing)} disabled={loading || transaction.busy || Boolean(transaction.hash)}>Cancel</button></>}</> : listing.settlement === "instant" ? <span className="marketplace-badge">Awaiting batcher · not publicly purchasable</span> : !lucid || !address ? <button type="button" className="primary" onClick={() => void connect()} disabled={loading || transaction.busy || Boolean(transaction.hash)}>Connect wallet to buy</button> : <button type="button" className="primary" onClick={() => void buyListing(listing)} disabled={loading || transaction.busy || Boolean(transaction.hash)}>Buy</button>}
       </div>
     </article>;
   };
@@ -233,7 +256,7 @@ export default function MarketplaceWorkbench({ ownerOnly = false }: { ownerOnly?
       {message && <p className={message.kind === "error" ? "marketplace-message marketplace-error" : "marketplace-message marketplace-success"} role={message.kind === "error" ? "alert" : "status"}>{message.text}</p>}
       <div className="marketplace-market-summary"><div><span>{ownerOnly ? "Your direct listings" : "Direct listings"}</span><strong>{lucid && loaded && !loading && message?.kind !== "error" ? p2pListings.length : "—"}</strong></div>{!ownerOnly && <div><span>Pool inventory</span><strong>{lucid && loaded && !loading && message?.kind !== "error" ? poolListings.length : "—"}</strong></div>}{ownerOnly && <div><span>Your Instant Sell requests</span><strong>{lucid && loaded && !loading && message?.kind !== "error" ? pendingListings.length : "—"}</strong></div>}</div>
     </section>
-    {marketplaceToast && <div className="marketplace-toast" role="status"><strong>Marketplace updated</strong><span>{marketplaceToast}</span><button type="button" onClick={() => setMarketplaceToast(null)} aria-label="Dismiss Marketplace notification">×</button></div>}
+    {marketplaceToast && <div className="marketplace-toast" role="status"><strong>{marketplaceToast.title}</strong><span>{marketplaceToast.text}</span><button type="button" onClick={() => setMarketplaceToast(null)} aria-label="Dismiss Marketplace notification">×</button></div>}
     {editing && <div className="marketplace-edit-backdrop" role="presentation" onMouseDown={() => !loading && setEditing(null)}><section className="marketplace-edit-dialog" role="dialog" aria-modal="true" aria-labelledby="marketplace-edit-title" onMouseDown={(event) => event.stopPropagation()}><div className="listing-dialog-heading"><div><span className="section-kicker">Marketplace listing</span><h2 id="marketplace-edit-title">Edit price</h2></div><button type="button" className="listing-dialog-close" onClick={() => setEditing(null)} disabled={loading || transaction.busy || Boolean(transaction.hash)} aria-label="Close edit dialog">×</button></div><p>Update the price for {assetDisplayName(unit(editing.rwa), assetNameText(editing.rwa.assetName), assetNames, editing.fraction ? unit(editing.fraction.original) : undefined)}. The listed quantity remains {editing.quantity.toString()}.</p><label className="field"><span className="field-label">Price in base units</span><input autoFocus inputMode="numeric" pattern="[0-9]+" min="1" value={editPrice} onChange={(event) => setEditPrice(event.target.value)} /></label><div className="marketplace-edit-dialog-actions"><button type="button" onClick={() => setEditing(null)} disabled={loading || transaction.busy || Boolean(transaction.hash)}>Cancel</button><button type="button" className="primary-button" onClick={() => void updateListing(editing)} disabled={loading || transaction.busy || Boolean(transaction.hash)}>{loading ? "Awaiting wallet…" : "Save price"}</button></div></section></div>}
     <MarketTransactionStatus {...transaction} />
     {ownerOnly && <LegacyRequestRecovery />}

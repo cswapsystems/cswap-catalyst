@@ -34,7 +34,7 @@ export function useMarketTransaction(onConfirmed: () => Promise<void>, operation
   const recoveryError = state?.kind === "unavailable" ? state.message : "";
   const ready = Boolean(address && state);
   const broadcast = () => window.dispatchEvent(new Event(PENDING_MARKET_EVENT));
-  async function run(prepare: () => Promise<TxBuilder>, revalidate?: () => Promise<unknown>, onSubmitted?: (hash: string) => void, operationName = operation) {
+  async function run(prepare: () => Promise<TxBuilder>, revalidate?: () => Promise<unknown>, onSubmitted?: (hash: string) => void, operationName = operation, listingId?: string) {
     if (!lucid || !address || busy || !ready || pending || recoveryError) return;
     const owner = address;
     setBusy(true); setMessage("");
@@ -48,7 +48,7 @@ export function useMarketTransaction(onConfirmed: () => Promise<void>, operation
       const latest = stored(owner);
       if (latest.kind !== "empty") { setRecovery({ wallet: owner, state: latest }); throw new Error(latest.kind === "pending" ? "A Marketplace transaction is awaiting confirmation. Check it before signing again." : latest.message); }
       const submitted = await (await completed.sign.withWallet().complete()).submit();
-      const record: PendingMarketTransaction = { version: 1, network: "preprod", wallet: owner, operation: operationName, hash: submitted, submittedAt: Date.now() };
+      const record: PendingMarketTransaction = { version: 1, network: "preprod", wallet: owner, operation: operationName, ...(listingId ? { listingId } : {}), hash: submitted, submittedAt: Date.now() };
       setRecovery({ wallet: owner, state: { kind: "pending", transaction: record } });
       try { savePendingMarket(window.localStorage, record); broadcast(); }
       catch { setRecoveryWarning("This submitted hash could not be saved in browser storage. Keep this page open and copy the transaction hash before navigating away."); }
@@ -66,5 +66,5 @@ export function useMarketTransaction(onConfirmed: () => Promise<void>, operation
     catch (error) { setMessage(error instanceof Error ? error.message : "Confirmation unavailable."); }
     finally { setBusy(false); }
   }
-  return { busy: busy || !ready || Boolean(recoveryError), hash, message, setMessage, run, check, pendingOperation: pending?.operation ?? "", recoveryError, recoveryWarning, ready };
+  return { busy: busy || !ready || Boolean(recoveryError), hash, message, setMessage, run, check, pendingOperation: pending?.operation ?? "", pendingListingId: pending?.listingId ?? "", recoveryError, recoveryWarning, ready };
 }
